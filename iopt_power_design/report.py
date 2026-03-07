@@ -382,6 +382,76 @@ def _build_power_curve_figure(
 
 
 # ---------------------------------------------------------------------------
+# C1/C2 — Context assembly helper
+# ---------------------------------------------------------------------------
+
+
+def _build_context(
+    result: dict,
+    formula: str,
+    factors: dict,
+    power_cfg: Any,
+    title: str,
+    include_power_curve: bool,
+    design_rows_shown: int,
+) -> dict:
+    """Assemble the full Jinja2 template context from all B-epic helpers."""
+    from . import __version__
+
+    report = result.get("report", {})
+    design_df = result.get("design_df")
+    buckets_df = result.get("buckets_df")
+
+    # Header
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # B1 — config
+    config_ctx = _build_config_ctx(formula, factors, power_cfg)
+
+    # B2 — metrics
+    metrics_ctx = _build_metrics_ctx(report)
+
+    # B3 — design table
+    if design_df is not None and len(design_df) > 0:
+        design_html, design_truncated, design_total = _df_to_html(design_df, design_rows_shown)
+    else:
+        design_html, design_truncated, design_total = None, False, 0
+
+    # B3 — buckets table (always show all rows)
+    if buckets_df is not None and len(buckets_df) > 0:
+        buckets_html, _, _ = _df_to_html(buckets_df, max_rows=len(buckets_df))
+    else:
+        buckets_html = None
+
+    # B4 — diagnostics
+    diagnostics_ctx = _build_diagnostics_ctx(report)
+
+    # B5 — power curve figure
+    power_curve_b64 = None
+    include_power_curve_note = False
+    if include_power_curve:
+        power_curve_b64 = _build_power_curve_figure(result, formula, factors, power_cfg)
+        if power_curve_b64 is None:
+            include_power_curve_note = True
+
+    return {
+        "title": title,
+        "generated_at": generated_at,
+        "version": __version__,
+        "config": config_ctx,
+        "metrics": metrics_ctx,
+        "design_html": design_html,
+        "design_truncated": design_truncated,
+        "design_rows_shown": design_rows_shown,
+        "design_total_rows": design_total,
+        "buckets_html": buckets_html,
+        "diagnostics": diagnostics_ctx,
+        "power_curve_b64": power_curve_b64,
+        "include_power_curve_note": include_power_curve_note,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -426,7 +496,44 @@ def generate_report(
     Path
         Resolved path of the file that was written.
     """
-    raise NotImplementedError(
-        "generate_report() is a stub pending ticket C1. "
-        "Context helpers (B1–B5) are implemented and ready."
+    # --- Resolve output path ---
+    out = Path(output_path)
+    if out.is_dir():
+        out = out / "iopt_report.html"
+    elif out.suffix not in (".html", ".pdf"):
+        out = out.with_suffix(".html")
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    # --- Build template context (shared for both HTML and PDF) ---
+    ctx = _build_context(
+        result=result,
+        formula=formula,
+        factors=factors,
+        power_cfg=power_cfg,
+        title=title,
+        include_power_curve=include_power_curve,
+        design_rows_shown=design_rows_shown,
     )
+
+    # --- Render template ---
+    env = _get_jinja_env()
+    template = env.get_template("report_template.html")
+    html_str = template.render(**ctx)
+
+    # --- C1: HTML output ---
+    if out.suffix == ".html":
+        out.write_text(html_str, encoding="utf-8")
+        return out.resolve()
+
+    # --- C2: PDF output (requires weasyprint) ---
+    try:
+        from weasyprint import HTML as WeasyprintHTML
+    except ImportError as exc:
+        raise ImportError(
+            "PDF export requires weasyprint. "
+            'Install it with: pip install "iopt-power-design[report-pdf]"'
+        ) from exc
+
+    WeasyprintHTML(string=html_str).write_pdf(str(out))
+    return out.resolve()

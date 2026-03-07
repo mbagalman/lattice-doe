@@ -21,15 +21,15 @@ Tracks all work for **Enhancement #14** (PDF / HTML shareable report).
 | [B3](#b3-design--buckets-tables-section) | Design & buckets tables section | Report Content | Done | Claude |
 | [B4](#b4-diagnostics-section) | Diagnostics section | Report Content | Done | Claude |
 | [B5](#b5-embedded-power-curve-figure) | Embedded power curve figure | Report Content | Done | Claude |
-| [C1](#c1-standalone-html-output) | Standalone HTML output | Export Backends | Open | |
-| [C2](#c2-optional-pdf-export) | Optional PDF export (weasyprint) | Export Backends | Open | |
+| [C1](#c1-standalone-html-output) | Standalone HTML output | Export Backends | Done | Claude |
+| [C2](#c2-optional-pdf-export) | Optional PDF export (weasyprint) | Export Backends | Done | Claude |
 | [D1](#d1-api-integration) | API integration (`export_report_to=`) | Integration | Open | |
 | [D2](#d2-cli-integration) | CLI `--html-report` flag | Integration | Open | |
 | [D3](#d3-streamlit-download-button) | Streamlit "Download report" button | Integration | Open | |
 | [E1](#e1-unit-tests) | Unit tests | Tests & Docs | Open | |
 | [E2](#e2-documentation-updates) | Documentation updates | Tests & Docs | Open | |
 
-**Progress:** 7 / 14 tickets done.
+**Progress:** 9 / 14 tickets done.
 
 ---
 
@@ -337,11 +337,11 @@ In the template, render as `<img src="data:image/png;base64,{{ power_curve_b64 }
 
 ### C1 Standalone HTML output
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** A1, A2, B1–B5
-**Progress note:**
+**Progress note:** Complete. `_build_context()` private helper assembles the full Jinja2 context by calling all B helpers (B1–B5). `generate_report()` resolves the output path (directory → `iopt_report.html`; missing/unknown suffix → `.html`), creates parent dirs, renders the template, and writes UTF-8 HTML. All edge cases handled.
 
 **What to do:**
 Implement the HTML export path in `generate_report()`:
@@ -366,11 +366,11 @@ Edge cases:
 
 ### C2 Optional PDF export
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** C1
-**Progress note:**
+**Progress note:** Complete. PDF branch in `generate_report()`: when `output_path.suffix == ".pdf"`, imports `weasyprint.HTML` and calls `.write_pdf()` on the already-rendered HTML string. Clear `ImportError` with `[report-pdf]` install hint when weasyprint is absent. Template already contains `@media print` styles (page margins, page-break-inside, figure max-height).
 
 **What to do:**
 Add PDF support as a conditional backend inside `generate_report()`:
