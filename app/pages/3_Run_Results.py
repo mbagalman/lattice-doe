@@ -202,7 +202,8 @@ with st.expander("Current configuration", expanded=not bool(ss.get("result"))):
                     st.caption(f"`{f['name']}` \u2014 categorical: {lvls}")
         else:
             st.caption("None defined \u2014 go to Page 1.")
-        st.markdown(f"**Formula:** `{formula or '\u2014'}`")
+        _formula_display = formula or "\u2014"
+        st.markdown(f"**Formula:** `{_formula_display}`")
     with c2:
         mode_label = "Contrast-based" if power_mode == "contrast" else "Global R\u00b2"
         st.markdown(f"**Power mode:** {mode_label}")
@@ -210,8 +211,10 @@ with st.expander("Current configuration", expanded=not bool(ss.get("result"))):
             input_mode = ss.get("contrast_input_mode", "matrix")
             st.caption(f"Input: {'L matrix' if input_mode == 'matrix' else 'Scenario builder'}")
             if input_mode == "matrix":
-                st.caption(f"L text: `{(ss.get('L_text','').strip() or '\u2014')[:40]}`")
-                st.caption(f"\u03b4 text: `{(ss.get('delta_text','').strip() or '\u2014')[:40]}`")
+                _l_preview = (ss.get("L_text", "").strip() or "\u2014")[:40]
+                _d_preview = (ss.get("delta_text", "").strip() or "\u2014")[:40]
+                st.caption(f"L text: `{_l_preview}`")
+                st.caption(f"\u03b4 text: `{_d_preview}`")
             else:
                 st.caption(f"SESOI = {ss.get('sesoi', 1.0)}")
         else:
@@ -292,7 +295,7 @@ if ss.get("run_error"):
         st.markdown(
             """
 - **L columns \u2260 p**: check Page 1 \u2192 'Model matrix columns' for the correct p.
-- **max\_n too small**: raise it on Page 2 \u2192 'Max sample size'.
+- **max_n too small**: raise it on Page 2 \u2192 'Max sample size'.
 - **Power never reached**: increase starts, lower target power, or widen factor ranges.
 - **Constraint too strict**: relax or remove the constraint expression on Page 2.
 - **Empty L row**: every row of L must contain at least one non-zero value.
