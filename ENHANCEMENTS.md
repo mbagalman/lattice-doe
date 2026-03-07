@@ -62,6 +62,18 @@ Move an item to **In Progress** or **Completed** when work starts/finishes.
 
 ---
 
+## Technical Debt / Refactoring
+
+Internal improvements with no user-visible behavior change. Worthwhile for maintainability and testability.
+
+| # | Item | Description | Est. LOE | Key files |
+|---|---|---|---|---|
+| TD-1 | **Split `design.py`** | 770+ lines mixing candidate sizing, Patsy encoding, and search. Split into: `candidate.py` (sizing + build), `model_matrix.py` (Patsy helpers), `iopt_search.py` (criterion functions + multi-start worker + exchange loop). Isolates concerns; makes swapping search algorithms easier; tightens unit tests per module. | 2–3 days | `design.py` → `candidate.py`, `model_matrix.py`, `iopt_search.py` |
+| TD-2 | **Split `diagnostics.py`** | 660+ lines mixing numeric metrics, matplotlib plotting, and file export. Split into: `diag_metrics.py` (leverages, VIFs, efficiencies — pure NumPy), `diag_plots.py` (matplotlib figures), `diag_export.py` (HTML/CSV/PNG writers). Makes plotting an optional import; core metrics stay lightweight. | 1–2 days | `diagnostics.py` → `diag_metrics.py`, `diag_plots.py`, `diag_export.py` |
+| TD-3 | **De-duplicate power-curve functions in `api.py`** | `api.py` contains local copies of `power_curve_by_n`/`power_curve_by_effect` that also live in `power_curves.py`. Remove the duplicates from `api.py`, import from `power_curves.py`, and re-export via `__init__.py` for a stable public surface. Prevents silent drift between the two copies. | 0.5 days | `api.py`, `power_curves.py`, `__init__.py` |
+
+---
+
 ## Ideas / Future Consideration
 
 Add rough ideas here before they are fleshed out enough to promote to the backlog.
