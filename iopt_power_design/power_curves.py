@@ -52,6 +52,7 @@ def power_curve_by_n(
     design_opts: Optional[DesignOptions] = None,
     plot: bool = False,
     figsize: Tuple[float, float] = (8, 5),
+    plot_backend: Literal["matplotlib", "plotly"] = "matplotlib",
 ) -> Dict[str, Union[pd.DataFrame, Optional["Figure"]]]:
     """Generate power curve as a function of sample size n.
     
@@ -205,54 +206,58 @@ def power_curve_by_n(
     
     # Optional plotting
     fig = None
-    if plot and _HAS_MATPLOTLIB:
-        fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
-        
-        # Power curve
-        ax1 = axes[0]
-        ax1.plot(df['n'], df['power'], 'b-', linewidth=2, label='Power')
-        ax1.axhline(y=power_cfg.power, color='r', linestyle='--', 
-                   label=f'Target ({power_cfg.power:.2f})')
-        ax1.axhline(y=0.80, color='gray', linestyle=':', alpha=0.5)
-        if target_n:
-            ax1.axvline(x=target_n, color='g', linestyle='--', alpha=0.5,
-                       label=f'n={target_n}')
-        ax1.set_ylabel('Statistical Power')
-        ax1.set_ylim([0, 1.05])
-        ax1.grid(True, alpha=0.3)
-        ax1.legend()
-        
-        # Design quality metrics
-        ax2 = axes[1]
-        ax2_twin = ax2.twinx()
-        
-        line1 = ax2.plot(df['n'], df['i_criterion'], 'g-', 
-                        label='I-criterion (left)')
-        line2 = ax2_twin.plot(df['n'], df['d_efficiency'], 'orange', 
-                             label='D-efficiency (right)')
-        
-        ax2.set_xlabel('Sample Size (n)')
-        ax2.set_ylabel('I-criterion (lower is better)', color='g')
-        ax2_twin.set_ylabel('D-efficiency (higher is better)', color='orange')
-        ax2.tick_params(axis='y', labelcolor='g')
-        ax2_twin.tick_params(axis='y', labelcolor='orange')
-        ax2.grid(True, alpha=0.3)
-        
-        # Combined legend
-        lines = line1 + line2
-        labels = [l.get_label() for l in lines]
-        ax2.legend(lines, labels, loc='best')
-        
-        # --- Reviewer Feedback: Titles ---
-        if isinstance(power_cfg, PowerContrastConfig):
-            effect_desc = f"Effect Norm={np.linalg.norm(power_cfg.delta):.2f}, $\\sigma$={power_cfg.sigma}"
-            title = f"Power vs. Sample Size (n) for Contrast Test\n({effect_desc}, $\\alpha$={power_cfg.alpha})"
-        else:
-            effect_desc = f"Target R²={power_cfg.r2_target}"
-            title = f"Power vs. Sample Size (n) for Global F-Test\n({effect_desc}, $\\alpha$={power_cfg.alpha})"
-        
-        plt.suptitle(title)
-        plt.tight_layout()
+    if plot:
+        if plot_backend == "plotly":
+            from .plot_backends import plotly_curve_by_n as _plotly_curve_by_n
+            fig = _plotly_curve_by_n(df, power_cfg, target_n)
+        elif _HAS_MATPLOTLIB:
+            fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
+
+            # Power curve
+            ax1 = axes[0]
+            ax1.plot(df['n'], df['power'], 'b-', linewidth=2, label='Power')
+            ax1.axhline(y=power_cfg.power, color='r', linestyle='--',
+                        label=f'Target ({power_cfg.power:.2f})')
+            ax1.axhline(y=0.80, color='gray', linestyle=':', alpha=0.5)
+            if target_n:
+                ax1.axvline(x=target_n, color='g', linestyle='--', alpha=0.5,
+                            label=f'n={target_n}')
+            ax1.set_ylabel('Statistical Power')
+            ax1.set_ylim([0, 1.05])
+            ax1.grid(True, alpha=0.3)
+            ax1.legend()
+
+            # Design quality metrics
+            ax2 = axes[1]
+            ax2_twin = ax2.twinx()
+
+            line1 = ax2.plot(df['n'], df['i_criterion'], 'g-',
+                             label='I-criterion (left)')
+            line2 = ax2_twin.plot(df['n'], df['d_efficiency'], 'orange',
+                                  label='D-efficiency (right)')
+
+            ax2.set_xlabel('Sample Size (n)')
+            ax2.set_ylabel('I-criterion (lower is better)', color='g')
+            ax2_twin.set_ylabel('D-efficiency (higher is better)', color='orange')
+            ax2.tick_params(axis='y', labelcolor='g')
+            ax2_twin.tick_params(axis='y', labelcolor='orange')
+            ax2.grid(True, alpha=0.3)
+
+            # Combined legend
+            lines = line1 + line2
+            labels = [l.get_label() for l in lines]
+            ax2.legend(lines, labels, loc='best')
+
+            # --- Reviewer Feedback: Titles ---
+            if isinstance(power_cfg, PowerContrastConfig):
+                effect_desc = f"Effect Norm={np.linalg.norm(power_cfg.delta):.2f}, $\\sigma$={power_cfg.sigma}"
+                title = f"Power vs. Sample Size (n) for Contrast Test\n({effect_desc}, $\\alpha$={power_cfg.alpha})"
+            else:
+                effect_desc = f"Target R²={power_cfg.r2_target}"
+                title = f"Power vs. Sample Size (n) for Global F-Test\n({effect_desc}, $\\alpha$={power_cfg.alpha})"
+
+            plt.suptitle(title)
+            plt.tight_layout()
     
     return {
         'data': df,
@@ -271,6 +276,7 @@ def power_curve_by_effect(
     design_opts: Optional[DesignOptions] = None,
     plot: bool = False,
     figsize: Tuple[float, float] = (8, 5),
+    plot_backend: Literal["matplotlib", "plotly"] = "matplotlib",
 ) -> Dict[str, Union[pd.DataFrame, Optional["Figure"]]]:
     """Generate power curve as a function of effect size.
     
@@ -412,33 +418,37 @@ def power_curve_by_effect(
     
     # Optional plotting
     fig = None
-    if plot and _HAS_MATPLOTLIB:
-        fig, ax = plt.subplots(figsize=figsize)
-        
-        ax.plot(df['effect_size'], df['power'], 'b-', linewidth=2)
-        ax.axhline(y=0.80, color='r', linestyle='--', label='80% Power')
-        ax.axhline(y=power_cfg.power, color='g', linestyle='--', 
-                  label=f'Target ({power_cfg.power:.2f})')
-        
-        if min_detectable:
-            ax.axvline(x=min_detectable, color='orange', linestyle=':', 
-                      label=f'MDE={min_detectable:.3f}')
-        
-        # --- Reviewer Feedback: Titles & Labels ---
-        if isinstance(power_cfg, PowerContrastConfig):
-            ax.set_xlabel('Effect Size Multiplier (on base norm)')
-            title = f'Power vs. Effect Size at n={n}\n(Contrast Test, $\\sigma$={power_cfg.sigma}, $\\alpha$={power_cfg.alpha})'
-            ax.set_title(title)
-        else:
-            ax.set_xlabel('R² Effect Size')
-            title = f'Power vs. Effect Size at n={n}\n(Global F-Test, $\\alpha$={power_cfg.alpha})'
-            ax.set_title(title)
-        
-        ax.set_ylabel('Statistical Power')
-        ax.set_ylim([0, 1.05])
-        ax.grid(True, alpha=0.3)
-        ax.legend()
-        plt.tight_layout()
+    if plot:
+        if plot_backend == "plotly":
+            from .plot_backends import plotly_curve_by_effect as _plotly_curve_by_effect
+            fig = _plotly_curve_by_effect(df, power_cfg, min_detectable, n)
+        elif _HAS_MATPLOTLIB:
+            fig, ax = plt.subplots(figsize=figsize)
+
+            ax.plot(df['effect_size'], df['power'], 'b-', linewidth=2)
+            ax.axhline(y=0.80, color='r', linestyle='--', label='80% Power')
+            ax.axhline(y=power_cfg.power, color='g', linestyle='--',
+                      label=f'Target ({power_cfg.power:.2f})')
+
+            if min_detectable:
+                ax.axvline(x=min_detectable, color='orange', linestyle=':',
+                          label=f'MDE={min_detectable:.3f}')
+
+            # --- Reviewer Feedback: Titles & Labels ---
+            if isinstance(power_cfg, PowerContrastConfig):
+                ax.set_xlabel('Effect Size Multiplier (on base norm)')
+                title = f'Power vs. Effect Size at n={n}\n(Contrast Test, $\\sigma$={power_cfg.sigma}, $\\alpha$={power_cfg.alpha})'
+                ax.set_title(title)
+            else:
+                ax.set_xlabel('R² Effect Size')
+                title = f'Power vs. Effect Size at n={n}\n(Global F-Test, $\\alpha$={power_cfg.alpha})'
+                ax.set_title(title)
+
+            ax.set_ylabel('Statistical Power')
+            ax.set_ylim([0, 1.05])
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+            plt.tight_layout()
     
     return {
         'data': df,
@@ -459,6 +469,7 @@ def power_surface_2d(
     design_opts: Optional[DesignOptions] = None,
     plot: bool = False,
     figsize: Tuple[float, float] = (10, 8),
+    plot_backend: Literal["matplotlib", "plotly"] = "matplotlib",
 ) -> Dict[str, Union[pd.DataFrame, Optional["Figure"]]]:
     """Generate 2D power surface varying two parameters simultaneously.
     
@@ -628,27 +639,31 @@ def power_surface_2d(
 
     # Optional contour plot
     fig = None
-    if plot and _HAS_MATPLOTLIB:
-        fig, ax = plt.subplots(figsize=figsize)
-        G2, G1 = np.meshgrid(axis2, axis1)
-        levels = np.linspace(0.0, 1.0, 21)
-        cs = ax.contourf(G2, G1, power_grid, levels=levels, cmap="viridis")
-        plt.colorbar(cs, ax=ax, label="Power")
-        # Mark the target-power contour in white
-        try:
-            ax.contour(G2, G1, power_grid, levels=[power_cfg.power],
-                       colors="white", linewidths=2, linestyles="--")
-        except Exception:
-            pass
-        param1_label = "n" if param1 == "n" else param1
-        param2_label = "n" if param2 == "n" else param2
-        ax.set_xlabel(param2_label)
-        ax.set_ylabel(param1_label)
-        ax.set_title(
-            f"Power Surface: {param1_label} × {param2_label}"
-            f"  (target = {power_cfg.power:.2f}, white contour)"
-        )
-        plt.tight_layout()
+    if plot:
+        if plot_backend == "plotly":
+            from .plot_backends import plotly_surface_2d as _plotly_surface_2d
+            fig = _plotly_surface_2d(power_grid, axis1, axis2, power_cfg, param1, param2)
+        elif _HAS_MATPLOTLIB:
+            fig, ax = plt.subplots(figsize=figsize)
+            G2, G1 = np.meshgrid(axis2, axis1)
+            levels = np.linspace(0.0, 1.0, 21)
+            cs = ax.contourf(G2, G1, power_grid, levels=levels, cmap="viridis")
+            plt.colorbar(cs, ax=ax, label="Power")
+            # Mark the target-power contour in white
+            try:
+                ax.contour(G2, G1, power_grid, levels=[power_cfg.power],
+                           colors="white", linewidths=2, linestyles="--")
+            except Exception:
+                pass
+            param1_label = "n" if param1 == "n" else param1
+            param2_label = "n" if param2 == "n" else param2
+            ax.set_xlabel(param2_label)
+            ax.set_ylabel(param1_label)
+            ax.set_title(
+                f"Power Surface: {param1_label} × {param2_label}"
+                f"  (target = {power_cfg.power:.2f}, white contour)"
+            )
+            plt.tight_layout()
 
     return {
         "data": df,

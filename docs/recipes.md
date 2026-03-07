@@ -187,3 +187,68 @@ For PDF output, change the extension to `.pdf` (requires `pip install -e ".[repo
 ```python
 generate_report(..., output_path="./reports/my_design_report.pdf")
 ```
+
+## 8) Interactive Plotly power charts
+
+Requires `pip install -e ".[viz]"` (includes `plotly>=5.0`).
+
+### Power vs. sample size — two-panel interactive figure
+
+```python
+from iopt_power_design.power_curves import power_curve_by_n
+from iopt_power_design import PowerContrastConfig, DesignOptions
+
+power_cfg = PowerContrastConfig(L=[[0,0,1,0]], delta=[0.5], sigma=1.0, power=0.80)
+opts = DesignOptions(auto_candidate=True, starts=5, random_state=42)
+
+result = power_curve_by_n(
+    formula="~ 1 + A + B + A:B",
+    factors={"A": ["low","high"], "B": (0.0, 10.0)},
+    power_cfg=power_cfg,
+    design_opts=opts,
+    plot=True,
+    plot_backend="plotly",
+)
+
+fig = result["figure"]   # plotly.graph_objects.Figure
+fig.show()               # opens interactive chart in browser / Jupyter
+```
+
+The two-panel figure shows power vs. n (top) and I-criterion + D-efficiency (bottom). Hover over any point for exact values; zoom and pan with the toolbar; export a PNG with the camera icon.
+
+### Sensitivity analysis — interactive sweep
+
+```python
+from iopt_power_design import power_sensitivity, i_optimal_powered_design
+
+result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+
+sens = power_sensitivity(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_df=result["design_df"],
+    sigma_range=(0.5, 2.0),
+    sigma_points=30,
+    plot=True,
+    plot_backend="plotly",
+)
+
+fig = sens["figure"]   # single-panel: power vs. σ with reference lines
+fig.show()
+```
+
+### Note on top-level wrappers
+
+`iopt_power_design.power_curve_by_n` and `iopt_power_design.power_curve_by_effect` are backward-compat wrappers that return a DataFrame only and discard the figure.  To access the Plotly figure, call the implementation modules directly:
+
+```python
+from iopt_power_design.power_curves import power_curve_by_n, power_curve_by_effect, power_surface_2d
+```
+
+For Streamlit, pass the figure directly to `st.plotly_chart`:
+
+```python
+import streamlit as st
+st.plotly_chart(result["figure"], use_container_width=True)
+```

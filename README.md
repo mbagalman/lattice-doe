@@ -46,7 +46,7 @@ pip install -e .
 # With CLI support (YAML configs)
 pip install -e ".[cli]"
 
-# With visualization (power curve plots)
+# With visualization (power curve plots — matplotlib + plotly)
 pip install -e ".[viz]"
 
 # With Streamlit web UI (interactive frontend)
@@ -474,6 +474,43 @@ print(result["power_grid"])    # 2D numpy array of power values
 | `"alpha"` | Significance level | Significance level |
 
 When neither axis is `"n"`, the function builds one I-optimal design at a representative n and sweeps analytically (fast). When `"n"` is an axis, one I-optimal design is built per unique n value (expensive but cached).
+
+### Interactive charts (Plotly)
+
+All four power-analysis functions accept an opt-in `plot_backend="plotly"` parameter that returns a `plotly.graph_objects.Figure` instead of a matplotlib Figure.  The default (`"matplotlib"`) is unchanged — no existing code breaks.
+
+```bash
+pip install -e ".[viz]"   # includes plotly>=5.0
+```
+
+```python
+from iopt_power_design.power_curves import power_curve_by_n
+
+result = power_curve_by_n(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=opts,
+    plot=True,
+    plot_backend="plotly",
+)
+fig = result["figure"]   # plotly.graph_objects.Figure
+fig.show()               # interactive in Jupyter / browser
+```
+
+Plotly charts support hover tooltips, zoom/pan, and one-click PNG export (camera icon in the toolbar).  They also work directly in Streamlit:
+
+```python
+import streamlit as st
+st.plotly_chart(result["figure"])
+```
+
+The same `plot_backend` parameter is available on `power_curve_by_effect`, `power_surface_2d`, and `power_sensitivity`.  To access the figure from those functions call the implementation modules directly (the `iopt_power_design` top-level wrappers discard the figure for backward compatibility):
+
+```python
+from iopt_power_design.power_curves import power_curve_by_effect, power_surface_2d
+from iopt_power_design import power_sensitivity
+```
 
 ### Sensitivity analysis
 

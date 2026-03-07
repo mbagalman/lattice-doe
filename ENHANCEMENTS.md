@@ -25,6 +25,7 @@ Update this file as work is completed or new ideas are added.
 | 12 | **Declarative constraints in config** — `constraint_expr` string alternative to `constraint_func` callable | `config.py`, `cli.py`, `README.md`, `tests/test_config.py` | `_compile_constraint_expr()` pre-compiles with `compile()` + restricted `__builtins__={}`; safe globals: `abs, min, max, round, sqrt, log, log2, log10, exp, floor, ceil, pi`; `DesignOptions.constraint_expr` auto-overwrites `constraint_func`; `dataclasses.replace`-safe; YAML templates updated; 17 new tests in `TestCompileConstraintExpr` |
 | 14 | **PDF / HTML shareable report** | `iopt_power_design/report.py`, `templates/report_template.html`, `api.py`, `cli.py`, `app/pages/3_Run_Results.py`, `pyproject.toml`, docs | Self-contained HTML (Jinja2 + inline CSS + base64 figures); optional PDF via weasyprint; `export_report_to=` API param; `--html-report` CLI flag; Streamlit download button with session-state caching; 12 unit tests |
 | 15 | **Streamlit front-end** | `app/app.py`, `app/pages/`, `app/components/`, `app/state.py`, `pyproject.toml`, docs | Delivered multi-page app (factors, power config, run/results, analysis/export) with recent hardening fixes for syntax, YAML export validity, n-sweep scaling semantics, and MDE display |
+| 13 | **Plotly interactive power charts** | `power_curves.py`, `api.py`, `plot_backends.py` (new), `__init__.py`, `pyproject.toml`, `tests/test_plot_backends.py` (new) | Opt-in `plot_backend="plotly"` on `power_curve_by_n`, `power_curve_by_effect`, `power_surface_2d`, and `power_sensitivity`. All four Plotly builders in `plot_backends.py` with soft plotly dependency (try/except guard). `power_surface_2d` exported from `__init__.py`. 19 new tests; `plot_backends.py` coverage 95%. `plotly>=5.0` added to `[viz]` extras. |
 
 ---
 
@@ -37,8 +38,6 @@ Move an item to **In Progress** or **Completed** when work starts/finishes.
 
 | # | Enhancement | Description | Est. LOE | Value | Key files |
 |---|---|---|---|---|---|
-| 13 | **Plotly interactive power charts** | Opt-in `plot_backend="plotly"` in `power_curve_by_n`, `power_curve_by_effect`, `power_surface_2d`, and `power_sensitivity`. Enables hover tooltips, zoom, and one-click PNG export in Jupyter and Streamlit — no change to existing matplotlib default. | 2–3 days | High | `power_curves.py`, `api.py`, `pyproject.toml` (new dep: `plotly`) |
-
 ### Medium effort · High value
 
 | # | Enhancement | Description | Est. LOE | Value | Key files |

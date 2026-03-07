@@ -561,11 +561,16 @@ def power_curve_by_n(
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     design_opts: Optional[DesignOptions] = None,
     plot: bool = False,
+    plot_backend: str = "matplotlib",
 ) -> pd.DataFrame:
     """Sweep n to visualize power as design size grows.
 
     This function is a compatibility wrapper around the canonical implementation
     in ``power_curves.py`` and returns only the curve DataFrame.
+
+    Note: This wrapper discards the figure. To access the figure (including
+    Plotly figures), call ``iopt_power_design.power_curves.power_curve_by_n()``
+    directly.
     """
     out = _power_curve_by_n_impl(
         formula=formula,
@@ -573,6 +578,7 @@ def power_curve_by_n(
         power_cfg=power_cfg,
         design_opts=design_opts,
         plot=plot,
+        plot_backend=plot_backend,
     )
     return out["data"]
 
@@ -584,11 +590,16 @@ def power_curve_by_effect(
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     design_opts: Optional[DesignOptions] = None,
     plot: bool = False,
+    plot_backend: str = "matplotlib",
 ) -> pd.DataFrame:
     """Sweep effect size (δ for contrast, R² for global) at fixed n.
 
     This function is a compatibility wrapper around the canonical implementation
     in ``power_curves.py`` and returns only the curve DataFrame.
+
+    Note: This wrapper discards the figure. To access the figure (including
+    Plotly figures), call ``iopt_power_design.power_curves.power_curve_by_effect()``
+    directly.
     """
     out = _power_curve_by_effect_impl(
         formula=formula,
@@ -597,6 +608,7 @@ def power_curve_by_effect(
         power_cfg=power_cfg,
         design_opts=design_opts,
         plot=plot,
+        plot_backend=plot_backend,
     )
     df = out["data"].copy()
     if "effect_size" in df.columns:
@@ -615,6 +627,7 @@ def generate_power_curves(
     n_for_effect: Optional[int] = None,
     design_opts: Optional[DesignOptions] = None,
     plot: bool = False,
+    plot_backend: str = "matplotlib",
 ) -> Dict[str, Any]:
     """Generate power curves for sensitivity analysis."""
     if design_opts is None:
@@ -624,7 +637,8 @@ def generate_power_curves(
 
     if curve_type in ("by_n", "both"):
         results["by_n"] = power_curve_by_n(
-            formula, factors, power_cfg, design_opts=design_opts, plot=plot
+            formula, factors, power_cfg, design_opts=design_opts, plot=plot,
+            plot_backend=plot_backend,
         )
 
     if curve_type in ("by_effect", "both"):
@@ -635,7 +649,8 @@ def generate_power_curves(
             n_for_effect = int(design_result["report"]["n"])
 
         results["by_effect"] = power_curve_by_effect(
-            formula, factors, n_for_effect, power_cfg, design_opts=design_opts, plot=plot
+            formula, factors, n_for_effect, power_cfg, design_opts=design_opts, plot=plot,
+            plot_backend=plot_backend,
         )
 
     return results
@@ -653,6 +668,7 @@ def power_sensitivity(
     design_opts: Optional[DesignOptions] = None,
     plot: bool = False,
     figsize: Tuple[float, float] = (8, 5),
+    plot_backend: str = "matplotlib",
 ) -> Dict[str, Any]:
     """Assess how achieved power changes when a key assumption varies.
 
@@ -760,31 +776,35 @@ def power_sensitivity(
 
         fig = None
         if plot:
-            try:
-                import matplotlib.pyplot as plt
-                fig, ax = plt.subplots(figsize=figsize)
-                ax.plot(df["r2_target"], df["power"], "b-", linewidth=2, label="Power")
-                ax.axvline(
-                    x=power_cfg.r2_target, color="gray", linestyle="--",
-                    label=f"Nominal R² = {power_cfg.r2_target}",
-                )
-                ax.axhline(
-                    y=power_cfg.power, color="r", linestyle="--",
-                    label=f"Target power = {power_cfg.power:.2f}",
-                )
-                ax.axhline(
-                    y=float(nominal_pwr), color="steelblue", linestyle=":",
-                    label=f"Power @ nominal R²: {float(nominal_pwr):.3f}",
-                )
-                ax.set_xlabel("R² (population effect size)")
-                ax.set_ylabel("Statistical Power")
-                ax.set_ylim([0, 1.05])
-                ax.set_title(f"Power Sensitivity to R²  (n = {n})")
-                ax.legend()
-                ax.grid(True, alpha=0.3)
-                plt.tight_layout()
-            except ImportError:
-                pass  # matplotlib unavailable — return fig=None
+            if plot_backend == "plotly":
+                from .plot_backends import plotly_sensitivity as _plotly_sensitivity
+                fig = _plotly_sensitivity(df, power_cfg, float(nominal_pwr), n)
+            else:
+                try:
+                    import matplotlib.pyplot as plt
+                    fig, ax = plt.subplots(figsize=figsize)
+                    ax.plot(df["r2_target"], df["power"], "b-", linewidth=2, label="Power")
+                    ax.axvline(
+                        x=power_cfg.r2_target, color="gray", linestyle="--",
+                        label=f"Nominal R² = {power_cfg.r2_target}",
+                    )
+                    ax.axhline(
+                        y=power_cfg.power, color="r", linestyle="--",
+                        label=f"Target power = {power_cfg.power:.2f}",
+                    )
+                    ax.axhline(
+                        y=float(nominal_pwr), color="steelblue", linestyle=":",
+                        label=f"Power @ nominal R²: {float(nominal_pwr):.3f}",
+                    )
+                    ax.set_xlabel("R² (population effect size)")
+                    ax.set_ylabel("Statistical Power")
+                    ax.set_ylim([0, 1.05])
+                    ax.set_title(f"Power Sensitivity to R²  (n = {n})")
+                    ax.legend()
+                    ax.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                except ImportError:
+                    pass  # matplotlib unavailable — return fig=None
 
         return {
             "data": df,
@@ -834,31 +854,35 @@ def power_sensitivity(
 
     fig = None
     if plot:
-        try:
-            import matplotlib.pyplot as plt
-            fig, ax = plt.subplots(figsize=figsize)
-            ax.plot(df["sigma"], df["power"], "b-", linewidth=2, label="Power")
-            ax.axvline(
-                x=power_cfg.sigma, color="gray", linestyle="--",
-                label=f"Nominal σ = {power_cfg.sigma}",
-            )
-            ax.axhline(
-                y=power_cfg.power, color="r", linestyle="--",
-                label=f"Target power = {power_cfg.power:.2f}",
-            )
-            ax.axhline(
-                y=float(nominal_pwr), color="steelblue", linestyle=":",
-                label=f"Power @ nominal σ: {float(nominal_pwr):.3f}",
-            )
-            ax.set_xlabel("σ  (residual standard deviation)")
-            ax.set_ylabel("Statistical Power")
-            ax.set_ylim([0, 1.05])
-            ax.set_title(f"Power Sensitivity to σ  (n = {n})")
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-        except ImportError:
-            pass  # matplotlib unavailable — return fig=None
+        if plot_backend == "plotly":
+            from .plot_backends import plotly_sensitivity as _plotly_sensitivity
+            fig = _plotly_sensitivity(df, power_cfg, float(nominal_pwr), n)
+        else:
+            try:
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=figsize)
+                ax.plot(df["sigma"], df["power"], "b-", linewidth=2, label="Power")
+                ax.axvline(
+                    x=power_cfg.sigma, color="gray", linestyle="--",
+                    label=f"Nominal σ = {power_cfg.sigma}",
+                )
+                ax.axhline(
+                    y=power_cfg.power, color="r", linestyle="--",
+                    label=f"Target power = {power_cfg.power:.2f}",
+                )
+                ax.axhline(
+                    y=float(nominal_pwr), color="steelblue", linestyle=":",
+                    label=f"Power @ nominal σ: {float(nominal_pwr):.3f}",
+                )
+                ax.set_xlabel("σ  (residual standard deviation)")
+                ax.set_ylabel("Statistical Power")
+                ax.set_ylim([0, 1.05])
+                ax.set_title(f"Power Sensitivity to σ  (n = {n})")
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+            except ImportError:
+                pass  # matplotlib unavailable — return fig=None
 
     return {
         "data": df,
