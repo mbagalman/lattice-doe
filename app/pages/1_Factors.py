@@ -1,19 +1,130 @@
 """
-Page 1 — Factors & Formula builder.
+Page 1 — Factors & Formula builder (Epic B, tickets B1–B4).
 
-Tickets: B1 (continuous rows), B2 (categorical rows),
-         B3 (formula + Patsy validation), B4 (persistence).
+Manual persistence test checklist (B4):
+  [ ] Add 2 continuous factors and 1 categorical factor.
+  [ ] Navigate to Page 2 via the sidebar.
+  [ ] Navigate back to Page 1 — all three factors should still be present
+      with the same names, types, and values.
+  [ ] Edit the formula and navigate away; return to confirm formula persists.
+  [ ] Click "Clear all factors" — factors and formula reset to defaults;
+      power config (alpha, power, sigma, etc.) and any result are unchanged.
 """
 
-import streamlit as st
-from state import init_state, render_sidebar
-from components.factor_table import render_factor_table
+from __future__ import annotations
 
+import pandas as pd
+import streamlit as st
+
+from state import init_state, render_sidebar
+from components.factor_table import clear_all_factors, render_factor_table
+
+# set_page_config must be the first Streamlit call.
 st.set_page_config(page_title="Factors — I-Opt Power Design", layout="wide")
 init_state()
 render_sidebar()
 
+# iopt_power_design is installed via `pip install -e ".[app]"` so importable directly.
+try:
+    from iopt_power_design.design import build_model_matrix
+
+    _HAS_IOPT = True
+except ImportError:
+    _HAS_IOPT = False
+
+# ---------------------------------------------------------------------------
+# Page header
+# ---------------------------------------------------------------------------
 st.title("Step 1 · Factors & Formula")
-st.markdown("Define the factors in your experiment and the model formula. *(Epic B — coming soon)*")
+
+# ---------------------------------------------------------------------------
+# Factor table (B1 + B2)
+# ---------------------------------------------------------------------------
+st.subheader("Factors")
+st.markdown(
+    "Add the independent variables in your experiment. "
+    "**Continuous** factors need a numeric range; "
+    "**Categorical** factors need a comma-separated list of levels."
+)
 
 render_factor_table()
+
+# Clear-all button — placed before the formula input so that when it triggers
+# st.rerun(), the formula text_input re-renders with the reset value.
+if st.session_state.get("factor_ids"):
+    st.markdown("")
+    if st.button("Clear all factors", type="secondary"):
+        clear_all_factors()
+        # Reset formula to default before rerun so the text_input picks it up.
+        st.session_state["formula"] = "~ 1 + A + B"
+        st.rerun()
+
+st.markdown("---")
+
+# ---------------------------------------------------------------------------
+# Formula input + Patsy validation (B3)
+# ---------------------------------------------------------------------------
+st.subheader("Model Formula")
+st.markdown(
+    "Specify which effects to estimate using "
+    "[Patsy](https://patsy.readthedocs.io/) notation. "
+    "The formula determines the model matrix columns and the number of "
+    "parameters **p** — you will need p when specifying the contrast matrix L on Page 2."
+)
+
+# key="formula" links directly to st.session_state["formula"] (set by init_state).
+st.text_input(
+    "Formula",
+    key="formula",
+    placeholder="~ 1 + A + B + A:B",
+    help=(
+        "Examples:\n"
+        "  ~ 1 + A + B           main effects only\n"
+        "  ~ 1 + A + B + A:B     main effects + two-way interaction\n"
+        "  ~ 1 + A + B + C + A:B + A:C   multiple interactions\n\n"
+        "Factor names must match exactly what you typed above."
+    ),
+)
+
+# --- Live validation ---
+factors = st.session_state.get("factors", [])
+formula = st.session_state.get("formula", "")
+
+if not factors:
+    st.info("Add at least one factor above to validate the formula.")
+elif not formula.strip():
+    st.warning("Enter a formula above.")
+elif not _HAS_IOPT:
+    st.warning(
+        "Could not import `iopt_power_design` — run `pip install -e '.[app]'` "
+        "from the project root to enable formula validation."
+    )
+else:
+    try:
+        # Build a minimal 1-row candidate DataFrame: midpoint for continuous,
+        # first level for categorical.
+        row: dict = {}
+        for f in factors:
+            if not f["name"].strip():
+                raise ValueError("One or more factors have an empty name.")
+            if f["type"] == "Continuous":
+                row[f["name"]] = [(f["low"] + f["high"]) / 2.0]
+            else:
+                if not f["levels"]:
+                    raise ValueError(
+                        f"Factor '{f['name']}' has no levels — "
+                        "enter at least one level (e.g. 'low, high')."
+                    )
+                row[f["name"]] = [f["levels"][0]]
+
+        candidate_df = pd.DataFrame(row)
+        X, col_names = build_model_matrix(formula, candidate_df)
+        p = X.shape[1]
+
+        st.success(f"Valid formula — **p = {p}** model parameter{'s' if p != 1 else ''}.")
+        with st.expander(f"Model matrix columns ({p} total)"):
+            for i, name in enumerate(col_names):
+                st.text(f"  [{i}]  {name}")
+
+    except Exception as exc:
+        st.error(f"Formula error: {exc}")

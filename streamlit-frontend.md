@@ -17,10 +17,10 @@ Tracks all work for **Enhancement #15** (Streamlit front-end).
 | [A1](#a1-project-scaffold) | Project scaffold | Setup | Done | Claude |
 | [A2](#a2-session-state-schema) | Session state schema | Setup | Done | Claude |
 | [A3](#a3-navigation--sidebar) | Navigation & sidebar | Setup | Done | Claude |
-| [B1](#b1-continuous-factor-rows) | Continuous factor rows | Factors | Open | |
-| [B2](#b2-categorical-factor-rows) | Categorical factor rows | Factors | Open | |
-| [B3](#b3-formula-input--patsy-validation) | Formula input & Patsy validation | Factors | Open | |
-| [B4](#b4-factor--formula-persistence) | Factor & formula persistence | Factors | Open | |
+| [B1](#b1-continuous-factor-rows) | Continuous factor rows | Factors | Done | Claude |
+| [B2](#b2-categorical-factor-rows) | Categorical factor rows | Factors | Done | Claude |
+| [B3](#b3-formula-input--patsy-validation) | Formula input & Patsy validation | Factors | Done | Claude |
+| [B4](#b4-factor--formula-persistence) | Factor & formula persistence | Factors | Done | Claude |
 | [C1](#c1-power-mode-toggle) | Power mode toggle | Power Config | Open | |
 | [C2](#c2-contrast-mode--l-matrix--delta) | Contrast mode — L matrix & delta | Power Config | Open | |
 | [C3](#c3-contrast-mode--scenario-builder) | Contrast mode — scenario builder | Power Config | Open | |
@@ -44,7 +44,7 @@ Tracks all work for **Enhancement #15** (Streamlit front-end).
 | [H2](#h2-streamlit-config) | Streamlit config | Deploy | Open | |
 | [H3](#h3-deployment-guide) | Deployment guide | Deploy | Open | |
 
-**Progress:** 3 / 29 tickets done.
+**Progress:** 7 / 29 tickets done.
 
 ---
 
@@ -184,11 +184,11 @@ Keys to define (with defaults):
 
 ### B1 Continuous factor rows
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 2–3 hours
 **Depends on:** A1, A2
-**Progress note:**
+**Progress note:** Complete. UUID-keyed rows in `factor_table.py`; name text_input, type selectbox, Low/High number_inputs, delete button, "+ Continuous" button.
 
 **What to do:**
 In `app/components/factor_table.py`, build a `render_factor_table()` function that renders the current `st.session_state["factors"]` list as an editable table of rows. Each row shows:
@@ -202,19 +202,19 @@ Below the table, an "Add continuous factor" button appends a new default row.
 In `app/pages/1_Factors.py`, call `render_factor_table()`.
 
 **Acceptance criteria:**
-- [ ] Can add multiple continuous factors.
-- [ ] Deleting a row removes it immediately.
-- [ ] Values persist when navigating away and back.
+- [x] Can add multiple continuous factors.
+- [x] Deleting a row removes it immediately.
+- [x] Values persist when navigating away and back.
 
 ---
 
 ### B2 Categorical factor rows
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 2 hours
 **Depends on:** B1
-**Progress note:**
+**Progress note:** Complete. Levels text_input (comma-separated) in same `render_factor_table()`; `_sync_factors()` strips whitespace and drops empties; "+ Categorical" button added.
 
 **What to do:**
 Extend `render_factor_table()` to handle categorical rows. When type = `Categorical`:
@@ -224,18 +224,18 @@ Extend `render_factor_table()` to handle categorical rows. When type = `Categori
 Add an "Add categorical factor" button alongside the continuous one.
 
 **Acceptance criteria:**
-- [ ] Can mix continuous and categorical factors in the same table.
-- [ ] Levels are parsed correctly (stripped whitespace, no empty strings).
+- [x] Can mix continuous and categorical factors in the same table.
+- [x] Levels are parsed correctly (stripped whitespace, no empty strings).
 
 ---
 
 ### B3 Formula input & Patsy validation
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 2–3 hours
 **Depends on:** B1, B2
-**Progress note:**
+**Progress note:** Complete. `1_Factors.py` builds a 1-row candidate from current factors, calls `build_model_matrix()`, shows p + column names on success or `st.error()` on failure.
 
 **What to do:**
 In `app/pages/1_Factors.py`, below the factor table:
@@ -247,19 +247,19 @@ In `app/pages/1_Factors.py`, below the factor table:
 3. Store formula in `st.session_state["formula"]`.
 
 **Acceptance criteria:**
-- [ ] Valid formula shows `p` and column names.
-- [ ] Invalid formula shows a clear red error (does not crash the page).
-- [ ] Formula updates are reflected immediately.
+- [x] Valid formula shows `p` and column names.
+- [x] Invalid formula shows a clear red error (does not crash the page).
+- [x] Formula updates are reflected immediately.
 
 ---
 
 ### B4 Factor & formula persistence
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** B1, B2, B3
-**Progress note:**
+**Progress note:** Complete. Session state via UUID widget keys persists across navigation automatically. "Clear all factors" button added; resets only factors/formula, leaves power config and results intact. Manual checklist in `1_Factors.py` docstring.
 
 **What to do:**
 Verify that all factor and formula state survives page navigation. Write a manual test checklist in a comment at the top of `1_Factors.py`.
@@ -267,8 +267,8 @@ Verify that all factor and formula state survives page navigation. Write a manua
 Also add a "Clear factors" button that resets only the factors/formula keys in session state.
 
 **Acceptance criteria:**
-- [ ] Navigating to Page 2 and back preserves all factor entries.
-- [ ] "Clear factors" resets only factors, not power config or results.
+- [x] Navigating to Page 2 and back preserves all factor entries.
+- [x] "Clear factors" resets only factors, not power config or results.
 
 ---
 
