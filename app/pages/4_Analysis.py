@@ -144,6 +144,26 @@ def _build_yaml(ss: dict) -> str:
     import yaml  # type: ignore
 
     factors = ss.get("factors", [])
+
+    def _default_scenarios() -> tuple[dict, dict]:
+        """Build valid fallback scenarios from factor definitions."""
+        scenario_a: dict = {}
+        scenario_b: dict = {}
+        for f in factors:
+            name = f.get("name", "")
+            if not name:
+                continue
+            if f.get("type") == "Continuous":
+                low = float(f.get("low", 0.0))
+                high = float(f.get("high", low))
+                scenario_a[name] = low
+                scenario_b[name] = high
+            else:
+                levels = list(f.get("levels", []))
+                if levels:
+                    scenario_a[name] = levels[0]
+                    scenario_b[name] = levels[-1]
+        return scenario_a, scenario_b
     factor_block: dict = {}
     for f in factors:
         if f["type"] == "Continuous":
@@ -177,18 +197,28 @@ def _build_yaml(ss: dict) -> str:
         else:
             L_text = ss.get("L_text", "").strip()
             delta_text = ss.get("delta_text", "").strip()
+            used_matrix = False
             if L_text and delta_text:
                 try:
                     L = _parse_matrix(L_text)
                     delta = _parse_vector(delta_text)
-                    cfg["contrast"] = {
-                        "L": L.tolist(),
-                        "delta": delta.tolist(),
-                    }
+                    # Export explicit contrast only when dimensions are valid.
+                    if L.ndim == 2 and L.shape[0] > 0 and delta.ndim == 1 and len(delta) == L.shape[0]:
+                        cfg["contrast"] = {
+                            "L": L.tolist(),
+                            "delta": delta.tolist(),
+                        }
+                        used_matrix = True
                 except Exception:
-                    cfg["contrast"] = {"L": L_text, "delta": delta_text}
-            else:
-                cfg["contrast"] = {}
+                    pass
+            if not used_matrix:
+                # Keep export CLI-compatible even when matrix input is empty/invalid.
+                scenario_a, scenario_b = _default_scenarios()
+                cfg["contrast"] = {
+                    "scenario_a": scenario_a,
+                    "scenario_b": scenario_b,
+                    "sesoi": float(ss.get("sesoi", 1.0)),
+                }
     else:
         cfg["r2_target"] = float(ss.get("r2_target", 0.15))
 
