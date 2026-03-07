@@ -515,7 +515,9 @@ def i_optimal_powered_design(
                 formats=["html", "csv"],
                 include_data=True,
             )
-            best["report"]["diagnostic_exports"] = export_paths
+            best["report"]["diagnostic_exports"] = {
+                k: str(v) for k, v in export_paths.items()
+            }
         except Exception as e:
             # Don’t fail main computation due to export issues
             best["report"]["diagnostic_exports_error"] = str(e)

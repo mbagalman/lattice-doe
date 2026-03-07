@@ -695,3 +695,46 @@ class TestCompareCriteria:
             power_cfg=_contrast_cfg(), design_opts=opts,
         )
         assert opts.criterion == "I"  # must not have been mutated
+
+
+# ---------------------------------------------------------------------------
+# Regression: report JSON serialization with Path values (issue #2)
+# ---------------------------------------------------------------------------
+
+class TestReportJsonSerialization:
+    """Regression tests: report dict must always be JSON-serializable."""
+
+    def test_report_is_json_serializable_contrast(self):
+        """report dict from contrast mode must not contain non-JSON types."""
+        import json
+        result = i_optimal_powered_design(
+            formula=FORMULA, factors=FACTORS,
+            power_cfg=_contrast_cfg(), design_opts=FAST_OPTS,
+        )
+        # Must not raise; Path objects would cause TypeError here
+        json.dumps(result["report"])
+
+    def test_report_is_json_serializable_r2(self):
+        """report dict from R² mode must not contain non-JSON types."""
+        import json
+        result = i_optimal_powered_design(
+            formula=FORMULA, factors=FACTORS,
+            power_cfg=_r2_cfg(), design_opts=FAST_OPTS,
+        )
+        json.dumps(result["report"])
+
+    def test_diagnostic_exports_stored_as_strings(self, tmp_path):
+        """When export_diagnostics_to is set, paths in report are strings, not Path objects."""
+        import json
+        result = i_optimal_powered_design(
+            formula=FORMULA, factors=FACTORS,
+            power_cfg=_contrast_cfg(), design_opts=FAST_OPTS,
+            export_diagnostics_to=str(tmp_path),
+        )
+        exports = result["report"].get("diagnostic_exports", {})
+        for key, val in exports.items():
+            assert isinstance(val, str), (
+                f"diagnostic_exports[{key!r}] is {type(val).__name__}, expected str"
+            )
+        # Full report must still be JSON-serializable
+        json.dumps(result["report"])

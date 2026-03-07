@@ -455,7 +455,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         design_df.to_csv(design_csv, index=False)
         buckets_df.to_csv(buckets_csv, index=False)
-        pd.Series(report).to_json(report_json)
+        def _json_default(obj: Any) -> Any:
+            if isinstance(obj, Path):
+                return str(obj)
+            raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+        with open(report_json, "w", encoding="utf-8") as _fh:
+            json.dump(report, _fh, indent=2, default=_json_default)
 
         logger.info(f"Wrote: {design_csv}")
         logger.info(f"Wrote: {buckets_csv}")
