@@ -18,6 +18,7 @@ Looking for task-oriented examples? See [Recipes](docs/recipes.md).
 - [Recipes](docs/recipes.md)
 - [Quick Start — Python API](#quick-start--python-api)
 - [Quick Start — CLI](#quick-start--cli)
+- [Streamlit Web UI](#streamlit-web-ui)
 - [Power Modes](#power-modes)
 - [Configuration Reference](#configuration-reference)
 - [Output Structure](#output-structure)
@@ -46,6 +47,9 @@ pip install -e ".[cli]"
 
 # With visualization (power curve plots)
 pip install -e ".[viz]"
+
+# With Streamlit web UI (interactive frontend)
+pip install -e ".[app]"
 
 # With progress bars and Excel export
 pip install -e ".[extras]"
@@ -229,6 +233,39 @@ design:
 ```
 
 The CLI always writes `<basename>_design.csv`, `<basename>_buckets.csv`, and `<basename>_report.json`. Pass `--excel` (or set `output.excel: true`) to also produce an `.xlsx` workbook.
+
+---
+
+## Streamlit Web UI
+
+An interactive browser-based frontend lets you configure and run designs, explore sensitivity, compare criteria, and download results — no coding required.
+
+### Local run
+
+```bash
+# Install the package with Streamlit and Plotly
+pip install -e ".[app]"
+
+# Launch (opens at http://localhost:8501)
+streamlit run app/app.py
+```
+
+### Docker
+
+```bash
+docker build -t iopt-doe .
+docker run -p 8501:8501 iopt-doe
+# Open http://localhost:8501
+```
+
+### Streamlit Community Cloud (free hosting)
+
+1. Push this repository to GitHub.
+2. Go to [share.streamlit.io](https://share.streamlit.io) and click **New app**.
+3. Select your repository and set **Main file path** to `app/app.py`.
+4. Click **Deploy** — no secrets or environment variables required.
+
+For a full walkthrough see [Quick Start Guide § 5](docs/quickstart.md#5-streamlit-web-ui).
 
 ---
 
