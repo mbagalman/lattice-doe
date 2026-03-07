@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Base                                                                  */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                   "Helvetica Neue", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.55;
+      color: #262730;
+      background: #ffffff;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 24px 64px;
+    }
+
+    h1 { font-size: 1.7rem; font-weight: 700; color: #1a1a2e; margin-bottom: 4px; }
+    h2 { font-size: 1.15rem; font-weight: 600; color: #1f77b4; margin: 0 0 12px; }
+    h3 { font-size: 0.95rem; font-weight: 600; color: #444; margin: 12px 0 6px; }
+    p  { margin-bottom: 8px; }
+    a  { color: #1f77b4; }
+
+    /* ------------------------------------------------------------------ */
+    /* Layout helpers                                                        */
+    /* ------------------------------------------------------------------ */
+    .section {
+      margin-top: 32px;
+      padding-top: 20px;
+      border-top: 1px solid #e0e4ea;
+    }
+
+    .section:first-of-type { border-top: none; margin-top: 8px; }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                                */
+    /* ------------------------------------------------------------------ */
+    .report-header { margin-bottom: 8px; }
+    .report-meta   { font-size: 0.8rem; color: #666; margin-top: 4px; }
+
+    /* ------------------------------------------------------------------ */
+    /* Metric grid (power summary)                                           */
+    /* ------------------------------------------------------------------ */
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .metric-box {
+      background: #f6f8fc;
+      border: 1px solid #dce2ee;
+      border-radius: 8px;
+      padding: 12px 14px;
+      text-align: center;
+    }
+
+    .metric-box .metric-label {
+      font-size: 0.72rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+    }
+
+    .metric-box .metric-value {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .metric-box .metric-value.pass { color: #2a9d5c; }
+    .metric-box .metric-value.warn { color: #d4821a; }
+    .metric-box .metric-value.fail { color: #c0392b; }
+
+    /* ------------------------------------------------------------------ */
+    /* Badges                                                                */
+    /* ------------------------------------------------------------------ */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+    .badge-pass { background: #d4edda; color: #155724; }
+    .badge-warn { background: #fff3cd; color: #856404; }
+    .badge-fail { background: #f8d7da; color: #721c24; }
+
+    /* ------------------------------------------------------------------ */
+    /* Alerts                                                                */
+    /* ------------------------------------------------------------------ */
+    .alert {
+      padding: 10px 14px;
+      border-left: 4px solid;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      font-size: 0.85rem;
+    }
+    .alert-warn { background: #fff8e6; border-color: #f0ad4e; color: #6d4c00; }
+    .alert-info { background: #e8f4fd; border-color: #1f77b4; color: #0d3c6b; }
+
+    /* ------------------------------------------------------------------ */
+    /* Config definition list                                                */
+    /* ------------------------------------------------------------------ */
+    .config-grid {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 4px 16px;
+      margin-top: 8px;
+    }
+
+    .config-key {
+      font-weight: 600;
+      color: #444;
+      padding: 3px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .config-val {
+      padding: 3px 0;
+      border-bottom: 1px solid #f0f0f0;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.85rem;
+      word-break: break-all;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Tables                                                                */
+    /* ------------------------------------------------------------------ */
+    .table-wrap { overflow-x: auto; margin-top: 10px; }
+
+    table.report-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+    }
+
+    table.report-table th {
+      background: #1f77b4;
+      color: #fff;
+      font-weight: 600;
+      text-align: left;
+      padding: 7px 10px;
+      white-space: nowrap;
+    }
+
+    table.report-table td {
+      padding: 5px 10px;
+      border-bottom: 1px solid #e8ecf4;
+    }
+
+    table.report-table tr:nth-child(even) td { background: #f6f8fc; }
+    table.report-table tr:hover td { background: #eaf2fb; }
+
+    .table-note {
+      font-size: 0.78rem;
+      color: #888;
+      margin-top: 6px;
+      font-style: italic;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Figure                                                                */
+    /* ------------------------------------------------------------------ */
+    .figure-wrap { margin-top: 12px; text-align: center; }
+    .figure-wrap img { max-width: 100%; border: 1px solid #dce2ee; border-radius: 6px; }
+    .figure-placeholder {
+      background: #f6f8fc;
+      border: 1px dashed #bcc6d8;
+      border-radius: 6px;
+      padding: 24px;
+      text-align: center;
+      color: #888;
+      font-size: 0.85rem;
+      margin-top: 12px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Footer                                                                */
+    /* ------------------------------------------------------------------ */
+    .report-footer {
+      margin-top: 48px;
+      padding-top: 16px;
+      border-top: 1px solid #e0e4ea;
+      font-size: 0.75rem;
+      color: #999;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Print styles                                                          */
+    /* ------------------------------------------------------------------ */
+    @media print {
+      @page { margin: 15mm; }
+      body { max-width: 100%; padding: 0; }
+      .section { page-break-inside: avoid; }
+      h2 { page-break-before: auto; }
+      .metric-box { box-shadow: none !important; border: 1px solid #ccc; }
+      .figure-wrap img { max-height: 220px; }
+      a { color: #1f77b4; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ================================================================== -->
+<!-- HEADER                                                               -->
+<!-- ================================================================== -->
+<div class="report-header">
+  <h1>{{ title }}</h1>
+  <p class="report-meta">
+    Generated {{ generated_at }}
+    {% if version %}&nbsp;&middot;&nbsp; iopt-power-design v{{ version }}{% endif %}
+  </p>
+</div>
+
+<!-- ================================================================== -->
+<!-- CONFIG SUMMARY                                                        -->
+<!-- ================================================================== -->
+{% if config %}
+<div class="section">
+  <h2>Config Summary</h2>
+  <div class="config-grid">
+    <span class="config-key">Formula</span>
+    <span class="config-val">{{ config.formula }}</span>
+
+    <span class="config-key">Power mode</span>
+    <span class="config-val">{{ config.power_mode }}</span>
+
+    {% if config.factors %}
+    <span class="config-key">Factors</span>
+    <span class="config-val">
+      {% for f in config.factors %}
+        {% if f.type == "continuous" %}
+          {{ f.name }} [{{ f.low }}, {{ f.high }}]
+        {% else %}
+          {{ f.name }} {
+          {%- for lvl in f.levels %}{{ lvl }}{% if not loop.last %}, {% endif %}{% endfor -%}
+          }
+        {% endif %}
+        {% if not loop.last %}&nbsp;&bull;&nbsp;{% endif %}
+      {% endfor %}
+    </span>
+    {% endif %}
+
+    <span class="config-key">Alpha (&alpha;)</span>
+    <span class="config-val">{{ config.alpha }}</span>
+
+    <span class="config-key">Target power</span>
+    <span class="config-val">{{ config.power_target }}</span>
+
+    {% if config.power_mode == "contrast" %}
+    <span class="config-key">Sigma (&sigma;)</span>
+    <span class="config-val">{{ config.sigma }}</span>
+
+    <span class="config-key">max_n</span>
+    <span class="config-val">{{ config.max_n }}</span>
+
+    {% if config.L_shape %}
+    <span class="config-key">Contrast L</span>
+    <span class="config-val">{{ config.L_shape }} matrix</span>
+    {% endif %}
+
+    {% if config.delta %}
+    <span class="config-key">Delta (&delta;)</span>
+    <span class="config-val">{{ config.delta }}</span>
+    {% endif %}
+
+    {% else %}
+    <span class="config-key">R&sup2; target</span>
+    <span class="config-val">{{ config.r2_target }}</span>
+
+    <span class="config-key">&lambda; mode</span>
+    <span class="config-val">{{ config.lambda_mode }}</span>
+
+    <span class="config-key">max_n</span>
+    <span class="config-val">{{ config.max_n }}</span>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ================================================================== -->
+<!-- POWER METRICS                                                         -->
+<!-- ================================================================== -->
+{% if metrics %}
+<div class="section">
+  <h2>Power Metrics</h2>
+  <div class="metric-grid">
+    <div class="metric-box">
+      <div class="metric-label">Sample size</div>
+      <div class="metric-value">{{ metrics.n }}</div>
+    </div>
+    <div class="metric-box">
+      <div class="metric-label">Achieved power</div>
+      <div class="metric-value {{ metrics.power_class }}">{{ metrics.achieved_power }}</div>
+    </div>
+    <div class="metric-box">
+      <div class="metric-label">Target power</div>
+      <div class="metric-value">{{ metrics.target_power }}</div>
+    </div>
+    <div class="metric-box">
+      <div class="metric-label">Noncentrality &lambda;</div>
+      <div class="metric-value">{{ metrics.noncentrality_lambda }}</div>
+    </div>
+    <div class="metric-box">
+      <div class="metric-label">df (num / denom)</div>
+      <div class="metric-value">{{ metrics.df_num }} / {{ metrics.df_denom }}</div>
+    </div>
+    <div class="metric-box">
+      <div class="metric-label">Criterion</div>
+      <div class="metric-value">{{ metrics.criterion }}</div>
+    </div>
+    <div class="metric-box">
+      <div class="metric-label">Elapsed</div>
+      <div class="metric-value">{{ metrics.elapsed_sec }}</div>
+    </div>
+    <div class="metric-box">
+      <div class="metric-label">Strategy</div>
+      <div class="metric-value" style="font-size:0.75rem; padding-top:4px">{{ metrics.search_strategy }}</div>
+    </div>
+  </div>
+
+  {% if metrics.warnings %}
+  <div style="margin-top: 14px">
+    {% for w in metrics.warnings %}
+    <div class="alert alert-warn">&#9888; {{ w }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- ================================================================== -->
+<!-- DESIGN TABLE                                                          -->
+<!-- ================================================================== -->
+{% if design_html %}
+<div class="section">
+  <h2>Selected Runs{% if metrics %} (n&nbsp;=&nbsp;{{ metrics.n }}){% endif %}</h2>
+  <div class="table-wrap">
+    {{ design_html | safe }}
+  </div>
+  {% if design_truncated %}
+  <p class="table-note">Showing {{ design_rows_shown }} of {{ design_total_rows }} rows.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- ================================================================== -->
+<!-- BUCKETS TABLE                                                         -->
+<!-- ================================================================== -->
+{% if buckets_html %}
+<div class="section">
+  <h2>Unique Run Allocations</h2>
+  <div class="table-wrap">
+    {{ buckets_html | safe }}
+  </div>
+</div>
+{% endif %}
+
+<!-- ================================================================== -->
+<!-- DIAGNOSTICS                                                           -->
+<!-- ================================================================== -->
+{% if diagnostics %}
+<div class="section">
+  <h2>Design Diagnostics</h2>
+  <div class="config-grid">
+    {% if diagnostics.condition_number is not none %}
+    <span class="config-key">Condition number</span>
+    <span class="config-val">
+      {{ diagnostics.condition_number }}
+      &nbsp;<span class="badge badge-{{ diagnostics.condition_badge }}">{{ diagnostics.condition_badge | upper }}</span>
+    </span>
+    {% endif %}
+
+    {% if diagnostics.d_efficiency is not none %}
+    <span class="config-key">D-efficiency</span>
+    <span class="config-val">{{ diagnostics.d_efficiency }}</span>
+    {% endif %}
+
+    {% if diagnostics.i_criterion is not none %}
+    <span class="config-key">I-criterion (avg pred var)</span>
+    <span class="config-val">{{ diagnostics.i_criterion }}</span>
+    {% endif %}
+  </div>
+
+  {% if diagnostics.vifs %}
+  <h3>Variance Inflation Factors (VIFs)</h3>
+  <div class="table-wrap">
+    <table class="report-table">
+      <thead><tr><th>Term</th><th>VIF</th></tr></thead>
+      <tbody>
+        {% for term, vif in diagnostics.vifs.items() %}
+        <tr><td>{{ term }}</td><td>{{ vif }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- ================================================================== -->
+<!-- POWER CURVE FIGURE                                                    -->
+<!-- ================================================================== -->
+{% if power_curve_b64 %}
+<div class="section">
+  <h2>Power Curve</h2>
+  <div class="figure-wrap">
+    <img src="data:image/png;base64,{{ power_curve_b64 }}" alt="Power vs sample size">
+  </div>
+</div>
+{% elif include_power_curve_note %}
+<div class="section">
+  <h2>Power Curve</h2>
+  <div class="figure-placeholder">
+    Power curve not available. Install <code>iopt-power-design[viz]</code> or
+    <code>[app]</code> to include the figure.
+  </div>
+</div>
+{% endif %}
+
+<!-- ================================================================== -->
+<!-- FOOTER                                                                -->
+<!-- ================================================================== -->
+<div class="report-footer">
+  {% if metrics and metrics.random_state is not none %}
+  Reproducibility: <code>random_state={{ metrics.random_state }}</code>
+  &nbsp;&middot;&nbsp;
+  {% endif %}
+  Generated by iopt-power-design
+  {% if version %}v{{ version }}{% endif %}
+  on {{ generated_at }}.
+</div>
+
+</body>
+</html>

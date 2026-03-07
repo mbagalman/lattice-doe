@@ -51,6 +51,17 @@ app = [
   "plotly>=5.0",
   "pyyaml>=6.0,<7"
 ]
+# Optional dependencies for HTML report generation
+report = [
+  "jinja2>=3.0,<4",
+  "pillow>=9.0"
+]
+# Optional dependencies for PDF report generation (adds weasyprint)
+report-pdf = [
+  "jinja2>=3.0,<4",
+  "pillow>=9.0",
+  "weasyprint>=60.0"
+]
 # Convenience meta-group to install *everything* at once.
 # IMPORTANT: You cannot reference your own extras by name here; list their packages.
 all = [
@@ -64,7 +75,10 @@ all = [
   "xlsxwriter>=3.0,<4",
   # app
   "streamlit>=1.30",
-  "plotly>=5.0"
+  "plotly>=5.0",
+  # report
+  "jinja2>=3.0,<4",
+  "pillow>=9.0"
 ]
 
 [project.urls]
@@ -83,6 +97,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["iopt_power_design*"]
+
+[tool.setuptools.package-data]
+"iopt_power_design" = ["templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
