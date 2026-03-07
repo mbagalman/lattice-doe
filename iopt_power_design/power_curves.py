@@ -184,7 +184,7 @@ def power_curve_by_n(
             )
         
         # Compute design metrics for additional insight
-        from .diagnostics import compute_design_metrics
+        from .diag_metrics import compute_design_metrics
         metrics = compute_design_metrics(X, X_cand=X_cand)
         
         results.append({
