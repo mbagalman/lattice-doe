@@ -139,9 +139,22 @@ def _jsonify(obj):
     return obj
 
 
-def _approx_power_curve(n_vals: list[int], report: dict, alpha: float) -> list[float]:
+def _approx_power_curve(
+    n_vals: list[int],
+    report: dict,
+    alpha: float,
+    power_mode: str,
+    lambda_mode: str,
+) -> list[float]:
     """
-    Approximate power at each n by scaling the run's noncentrality (λ ∝ n)
+    Approximate power at each n by scaling the run's noncentrality
+    and recomputing the noncentral F-test.
+
+    Scaling convention:
+      - contrast mode: λ ∝ n
+      - R² mode + lambda_mode='n': λ ∝ n
+      - R² mode + lambda_mode='n_minus_p': λ ∝ (n - p)
+
     and recomputing the noncentral F-test. Fast — no additional design builds.
     """
     p = int(report["p"])
@@ -155,7 +168,11 @@ def _approx_power_curve(n_vals: list[int], report: dict, alpha: float) -> list[f
             powers.append(0.0)
             continue
         df_denom = n - p
-        lambda_n = lambda_result * (n / n_result)
+        if power_mode == "r2" and lambda_mode == "n_minus_p":
+            denom_ref = max(n_result - p, 1)
+            lambda_n = lambda_result * (df_denom / denom_ref)
+        else:
+            lambda_n = lambda_result * (n / n_result)
         f_crit = scipy_f.ppf(1.0 - alpha, df_num, df_denom)
         powers.append(float(scipy_ncf.sf(f_crit, df_num, df_denom, lambda_n)))
     return powers
@@ -397,7 +414,15 @@ with st.expander("Power curve (n sweep)"):
 
             n_vals = list(range(p_model + 1, n_max_slider + 1))
             alpha = float(ss.get("alpha", 0.05))
-            powers = _approx_power_curve(n_vals, report, alpha)
+            power_mode_ss = ss.get("power_mode", "contrast")
+            lambda_mode_ss = ss.get("lambda_mode", "n")
+            powers = _approx_power_curve(
+                n_vals=n_vals,
+                report=report,
+                alpha=alpha,
+                power_mode=power_mode_ss,
+                lambda_mode=lambda_mode_ss,
+            )
             target_power = float(report["target_power"])
             actual_power = float(report["achieved_power"])
 
@@ -430,8 +455,12 @@ with st.expander("Power curve (n sweep)"):
                 margin=dict(t=40, b=40), height=400,
             )
             st.plotly_chart(fig, use_container_width=True)
+            if power_mode_ss == "r2" and lambda_mode_ss == "n_minus_p":
+                scale_note = "\u03bb scaled with (n - p) (R\u00b2 mode, n_minus_p)."
+            else:
+                scale_note = "\u03bb scaled with n."
             st.caption(
-                "Power approximated by scaling \u03bb \u221d n from the run result. "
+                f"Power approximated from the run result using noncentral-F scaling; {scale_note} "
                 "The red dot is the exact achieved power."
             )
 
