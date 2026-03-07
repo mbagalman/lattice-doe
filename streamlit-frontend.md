@@ -21,14 +21,14 @@ Tracks all work for **Enhancement #15** (Streamlit front-end).
 | [B2](#b2-categorical-factor-rows) | Categorical factor rows | Factors | Done | Claude |
 | [B3](#b3-formula-input--patsy-validation) | Formula input & Patsy validation | Factors | Done | Claude |
 | [B4](#b4-factor--formula-persistence) | Factor & formula persistence | Factors | Done | Claude |
-| [C1](#c1-power-mode-toggle) | Power mode toggle | Power Config | Open | |
-| [C2](#c2-contrast-mode--l-matrix--delta) | Contrast mode — L matrix & delta | Power Config | Open | |
-| [C3](#c3-contrast-mode--scenario-builder) | Contrast mode — scenario builder | Power Config | Open | |
-| [C4](#c4-r-mode-ui) | R² mode UI | Power Config | Open | |
-| [C5](#c5-shared-power-parameters) | Shared power parameters | Power Config | Open | |
-| [D1](#d1-criterion-selector) | Criterion selector | Design Options | Open | |
-| [D2](#d2-search-options) | Search options | Design Options | Open | |
-| [D3](#d3-constraint-expression-input) | Constraint expression input | Design Options | Open | |
+| [C1](#c1-power-mode-toggle) | Power mode toggle | Power Config | Done | Claude |
+| [C2](#c2-contrast-mode--l-matrix--delta) | Contrast mode — L matrix & delta | Power Config | Done | Claude |
+| [C3](#c3-contrast-mode--scenario-builder) | Contrast mode — scenario builder | Power Config | Done | Claude |
+| [C4](#c4-r-mode-ui) | R² mode UI | Power Config | Done | Claude |
+| [C5](#c5-shared-power-parameters) | Shared power parameters | Power Config | Done | Claude |
+| [D1](#d1-criterion-selector) | Criterion selector | Design Options | Done | Claude |
+| [D2](#d2-search-options) | Search options | Design Options | Done | Claude |
+| [D3](#d3-constraint-expression-input) | Constraint expression input | Design Options | Done | Claude |
 | [E1](#e1-run-button--error-handling) | Run button & error handling | Results | Open | |
 | [E2](#e2-report-metrics-card) | Report metrics card | Results | Open | |
 | [E3](#e3-design-table--csv-download) | Design table & CSV download | Results | Open | |
@@ -44,7 +44,7 @@ Tracks all work for **Enhancement #15** (Streamlit front-end).
 | [H2](#h2-streamlit-config) | Streamlit config | Deploy | Open | |
 | [H3](#h3-deployment-guide) | Deployment guide | Deploy | Open | |
 
-**Progress:** 7 / 29 tickets done.
+**Progress:** 15 / 29 tickets done.
 
 ---
 
@@ -278,11 +278,11 @@ Also add a "Clear factors" button that resets only the factors/formula keys in s
 
 ### C1 Power mode toggle
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** A2
-**Progress note:**
+**Progress note:** Complete. Radio synced to `power_mode` ("contrast"/"r2"); manual index sync handles persistence across navigation.
 
 **What to do:**
 At the top of `app/pages/2_Power_Config.py`, render a `st.radio` toggle:
@@ -292,18 +292,18 @@ Power mode:  ( ) Contrast-based   ( ) Global R²
 Store selection in `st.session_state["power_mode"]`. Conditionally render C2/C3 or C4 below.
 
 **Acceptance criteria:**
-- [ ] Toggle switches between contrast and R² sections.
-- [ ] Mode persists across navigation.
+- [x] Toggle switches between contrast and R² sections.
+- [x] Mode persists across navigation.
 
 ---
 
 ### C2 Contrast mode — L matrix & delta
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 3–4 hours
 **Depends on:** C1, B3
-**Progress note:**
+**Progress note:** Complete. Two text areas (L_text, delta_text) with `_parse_matrix`/`_parse_vector`; live shape validation against p; "What is a contrast matrix?" expander.
 
 **What to do:**
 When `contrast_input_mode == "matrix"`:
@@ -314,19 +314,19 @@ When `contrast_input_mode == "matrix"`:
 5. Parse to numpy arrays on run (in E1), not here.
 
 **Acceptance criteria:**
-- [ ] Shape validation fires immediately on change.
-- [ ] Mismatch between L columns and p shows a clear error.
-- [ ] Valid configuration shows green badge.
+- [x] Shape validation fires immediately on change.
+- [x] Mismatch between L columns and p shows a clear error.
+- [x] Valid configuration shows green badge.
 
 ---
 
 ### C3 Contrast mode — scenario builder
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 2–3 hours
 **Depends on:** C1, B1, B2
-**Progress note:**
+**Progress note:** Complete. Per-factor A/B inputs (number_input for continuous, selectbox for categorical); stale-level guard; SESOI input; "Preview L and δ" expander calls `contrast_from_scenarios`.
 
 **What to do:**
 When `contrast_input_mode == "scenario"`:
@@ -337,18 +337,18 @@ When `contrast_input_mode == "scenario"`:
 Add a toggle above the contrast section: `Input method: (•) Matrix  ( ) Scenario builder`
 
 **Acceptance criteria:**
-- [ ] Scenario inputs update dynamically as factors change.
-- [ ] Preview shows correct L/delta or a clear error.
+- [x] Scenario inputs update dynamically as factors change.
+- [x] Preview shows correct L/delta or a clear error.
 
 ---
 
 ### C4 R² mode UI
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** C1
-**Progress note:**
+**Progress note:** Complete. r2_target slider (key="r2_target"); lambda_mode radio with manual index sync to "n"/"n_minus_p".
 
 **What to do:**
 When `power_mode == "r2"`:
@@ -357,18 +357,18 @@ When `power_mode == "r2"`:
 3. Store in session state.
 
 **Acceptance criteria:**
-- [ ] r2_target slider renders with current value.
-- [ ] lambda_mode radio persists.
+- [x] r2_target slider renders with current value.
+- [x] lambda_mode radio persists.
 
 ---
 
 ### C5 Shared power parameters
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** A2
-**Progress note:**
+**Progress note:** Complete. `render_power_params()` in `power_params.py`; reads `power_mode` from session state to hide/show sigma; all four inputs use direct session-state keys.
 
 **What to do:**
 In `app/components/power_params.py`, create `render_power_params()` that renders:
@@ -380,8 +380,8 @@ In `app/components/power_params.py`, create `render_power_params()` that renders
 Call this at the bottom of Page 2.
 
 **Acceptance criteria:**
-- [ ] All four inputs render and persist.
-- [ ] `sigma` is hidden (or marked N/A) in R² mode.
+- [x] All four inputs render and persist.
+- [x] `sigma` is hidden (or marked N/A) in R² mode.
 
 ---
 
@@ -393,28 +393,28 @@ Render as a collapsible `st.expander("Advanced design options")` on Page 2, belo
 
 ### D1 Criterion selector
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 30 min
 **Depends on:** A2
-**Progress note:**
+**Progress note:** Complete. selectbox with key="criterion" and detailed help tooltip for I/D/A inside the Advanced expander.
 
 **What to do:**
 `st.selectbox("Optimality criterion", ["I", "D", "A"])` with tooltip explaining each option. Store in `st.session_state["criterion"]`.
 
 **Acceptance criteria:**
-- [ ] Selectbox renders with tooltip.
-- [ ] Selection persists.
+- [x] Selectbox renders with tooltip.
+- [x] Selection persists.
 
 ---
 
 ### D2 Search options
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** A2
-**Progress note:**
+**Progress note:** Complete. starts slider, random_state input, auto_candidate checkbox, candidate_points (conditionally shown). All in Advanced expander.
 
 **What to do:**
 Inside the advanced expander:
@@ -424,25 +424,25 @@ Inside the advanced expander:
 - `candidate_points` — integer input, shown only if `auto_candidate` is False (default 2000)
 
 **Acceptance criteria:**
-- [ ] `candidate_points` input is hidden when `auto_candidate` is checked.
-- [ ] All values persist.
+- [x] `candidate_points` input is hidden when `auto_candidate` is checked.
+- [x] All values persist.
 
 ---
 
 ### D3 Constraint expression input
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** A2, B1, B2
-**Progress note:**
+**Progress note:** Complete. text_input with key="constraint_expr"; live `compile()` syntax check; green/red feedback.
 
 **What to do:**
 Text input for `constraint_expr`. Show a help tooltip listing the allowed functions (`abs`, `min`, `max`, `sqrt`, `log`, etc.). On input, attempt a syntax check (use `compile()` — same as the library does) and show green/red status. Store in session state.
 
 **Acceptance criteria:**
-- [ ] Syntax error shows red message immediately.
-- [ ] Valid expression shows green status.
+- [x] Syntax error shows red message immediately.
+- [x] Valid expression shows green status.
 
 ---
 
