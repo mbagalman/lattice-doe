@@ -8,6 +8,8 @@ from iopt_power_design.design import (
     build_candidate,
     build_model_matrix,
     estimate_candidate_size,
+    build_i_opt_design,
+    build_i_opt_design_with_idx,
     _i_criterion_for_indices,
     _d_criterion_for_indices,
     _a_criterion_for_indices,
@@ -79,6 +81,34 @@ class TestBuildCandidate:
     def test_no_nans(self):
         cand = build_candidate(MIXED, candidate_points=30, seed=0)
         assert not cand.isnull().any().any()
+
+
+class TestBuildIOptDesignGuards:
+    """Regression tests for n > n_cand behavior (Issue #1)."""
+
+    def test_build_i_opt_design_with_idx_raises_when_n_exceeds_candidates(self):
+        cand = pd.DataFrame({"A": [0.1, 0.2, 0.3]})
+        with pytest.raises(ValueError, match="exceeds the candidate set size"):
+            build_i_opt_design_with_idx(
+                cand=cand,
+                formula="~ 1 + A",
+                n=5,
+                n_start=1,
+                max_iter=10,
+                random_state=0,
+            )
+
+    def test_build_i_opt_design_raises_when_n_exceeds_candidates(self):
+        cand = pd.DataFrame({"A": [0.1, 0.2, 0.3]})
+        with pytest.raises(ValueError, match="exceeds the candidate set size"):
+            build_i_opt_design(
+                cand=cand,
+                formula="~ 1 + A",
+                n=5,
+                n_start=1,
+                max_iter=10,
+                random_state=0,
+            )
 
 
 # ---------------------------------------------------------------------------

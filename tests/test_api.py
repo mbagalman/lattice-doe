@@ -178,6 +178,19 @@ class TestPowerCurveByN:
         # Verify the last value is >= the first
         assert powers[-1] >= powers[0]
 
+    def test_raises_when_candidate_pool_too_small_for_requested_n(self):
+        # For FORMULA "~ 1 + A + B", p=3 so by_n starts at n>=4.
+        # candidate_points=3 guarantees n > n_cand and must fail fast.
+        tiny_opts = DesignOptions(
+            candidate_points=3,
+            auto_candidate=False,
+            starts=1,
+            max_iter=20,
+            random_state=0,
+        )
+        with pytest.raises(ValueError, match="exceeds the candidate set size"):
+            power_curve_by_n(FORMULA, FACTORS, _contrast_cfg(), design_opts=tiny_opts)
+
 
 # ---------------------------------------------------------------------------
 # power_curve_by_effect
@@ -215,6 +228,19 @@ class TestPowerCurveByEffect:
         with pytest.raises(ValueError):
             power_curve_by_effect(
                 FORMULA, FACTORS, n=1, power_cfg=_contrast_cfg(), design_opts=FAST_OPTS
+            )
+
+    def test_raises_when_candidate_pool_too_small_for_n(self):
+        tiny_opts = DesignOptions(
+            candidate_points=3,
+            auto_candidate=False,
+            starts=1,
+            max_iter=20,
+            random_state=0,
+        )
+        with pytest.raises(ValueError, match="exceeds the candidate set size"):
+            power_curve_by_effect(
+                FORMULA, FACTORS, n=5, power_cfg=_contrast_cfg(), design_opts=tiny_opts
             )
 
 
