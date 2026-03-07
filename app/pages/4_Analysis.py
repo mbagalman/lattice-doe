@@ -490,15 +490,29 @@ else:
 
         col1, col2, col3 = st.columns(3)
         if mode == "contrast":
+            delta_arr = np.asarray(power_cfg.delta, dtype=float).reshape(-1)
             col1.metric(
                 "MDE (scale on \u03b4)",
                 f"{mde_val:.4f}\u00d7",
                 help="Multiply your configured \u03b4 by this factor to get the minimum detectable effect.",
             )
-            col2.metric(
-                "MDE absolute (\u03b4\u202f\u00d7\u202fscale)",
-                f"{mde_val * float(np.asarray(power_cfg.delta).mean()):.4g}",
-            )
+            if delta_arr.size == 1:
+                abs_effect = mde_val * abs(float(delta_arr[0]))
+                col2.metric(
+                    "MDE absolute |\u03b4|",
+                    f"{abs_effect:.4g}",
+                    help="Absolute detectable effect for the single configured contrast.",
+                )
+            else:
+                abs_effect_norm = mde_val * float(np.linalg.norm(delta_arr))
+                col2.metric(
+                    "MDE absolute \u2016\u03b4\u2016\u2082",
+                    f"{abs_effect_norm:.4g}",
+                    help=(
+                        "For multi-contrast \u03b4 vectors, this reports a norm-based magnitude "
+                        "to avoid misleading cancellation from signed means."
+                    ),
+                )
         else:
             col1.metric(
                 "Min detectable R\u00b2",
@@ -511,6 +525,12 @@ else:
             )
 
         col3.metric("Achieved power at MDE", f"{ach_pwr:.1%}")
+
+        if mode == "contrast" and np.asarray(power_cfg.delta).size > 1:
+            st.caption(
+                "Multi-contrast mode: absolute MDE is reported as \u2016\u03b4\u2016\u2082 \u00d7 scale "
+                "(vector magnitude), not a signed mean."
+            )
 
         if mde_val == float("inf"):
             st.warning(
