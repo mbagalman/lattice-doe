@@ -33,24 +33,31 @@ Move an item to **In Progress** or **Completed** when work starts/finishes.
 
 ### Low effort · High value
 
-*(All low-effort items complete.)*
+| # | Enhancement | Description | Est. LOE | Value | Key files |
+|---|---|---|---|---|---|
+| 13 | **Plotly interactive power charts** | Opt-in `plot_backend="plotly"` in `power_curve_by_n`, `power_curve_by_effect`, `power_surface_2d`, and `power_sensitivity`. Enables hover tooltips, zoom, and one-click PNG export in Jupyter and Streamlit — no change to existing matplotlib default. | 2–3 days | High | `power_curves.py`, `api.py`, `pyproject.toml` (new dep: `plotly`) |
+| 14 | **PDF / HTML shareable report** | Auto-generate a one-page summary report (design table, power summary, diagnostics, power curve figure) via Jinja2 HTML template + `weasyprint` or `pdfkit`. Triggered by `export_report_to=` in `i_optimal_powered_design`. | 2–3 days | Medium-High | `api.py`, new `report_template.html`, `pyproject.toml` |
 
 ### Medium effort · High value
 
-| # | Enhancement | Description | Key files |
-|---|---|---|---|
-| 13 | **Interactive web UI** (Streamlit or Dash) | Wraps the Python API in a point-and-click interface. High value for collaborators and clients who are not Python users. Separate file or `app/` sub-package. | New: `app/app.py` (or similar) |
-| 14 | **Blocked designs** (nuisance factors / block structure) | Add a `blocks` parameter; encode block membership as a factor in the Patsy formula; treat block effects as nuisance. D-optimal is the natural criterion. Requires modified power calculation (block-adjusted degrees of freedom). | `design.py`, `api.py`, `config.py`, `README.md` |
-| 15 | **Robustness summary report** | Add a compact uncertainty report over ranges of `sigma`, `alpha`, and effect assumptions with worst/median/best power and threshold crossings. | `api.py`, `power_curves.py`, `README.md`, `tests/test_api.py` |
+| # | Enhancement | Description | Est. LOE | Value | Key files |
+|---|---|---|---|---|---|
+| 15 | **Streamlit front-end** | Multi-page point-and-click app wrapping the Python API. Pages: (1) factor builder with dynamic rows, (2) power config with mode toggle, (3) run + results with design table, buckets, report, and interactive power curve. Deployable to Streamlit Community Cloud. Primary way to reach non-Python users (statisticians, lab managers, clients). | 6–8 days | Very High | New: `app/app.py`, `app/pages/`, `pyproject.toml` (new dep: `streamlit`) |
+| 16 | **Google Sheets integration** | Bidirectional connector using `gspread` + OAuth2. Reads a structured template Sheet (factor table, power config cells) and writes design, buckets, and report back to a Results tab. Includes a ready-to-copy Sheet template and a `sheets_run()` helper. High value for teams that live in Sheets and share experiments collaboratively. | 4–6 days | High | New: `iopt_power_design/sheets.py`, `pyproject.toml` (new dep: `gspread`, `google-auth`) |
+| 17 | **Excel workbook template** | Structured `.xlsx` input/output workbook with (1) a Config sheet for factor entry, formula, and power parameters with dropdown validation, and (2) auto-populated Results, Design, and Buckets sheets on run. Uses `openpyxl`; complements the existing `--excel` CLI flag. High value for pharma / corporate users who share Excel files. | 3–5 days | High | New: `iopt_power_design/excel_template.py`, `templates/iopt_template.xlsx` |
+| 18 | **Jupyter ipywidgets UI** | Interactive in-notebook UI: dynamic factor-entry table, sliders for `alpha`/`power`/`sigma`, formula text field, run button, and inline Plotly power curve. No server needed — runs inside any JupyterLab / VS Code notebook. Ideal for data scientists who prototype in notebooks. | 3–4 days | Medium-High | New: `iopt_power_design/widgets.py`, `pyproject.toml` (new dep: `ipywidgets`) |
+| 19 | **Robustness summary report** | Compact uncertainty report over ranges of `sigma`, `alpha`, and effect assumptions with worst/median/best power and threshold crossings. | 3–5 days | High | `api.py`, `power_curves.py`, `README.md`, `tests/test_api.py` |
+| 20 | **Blocked designs** (nuisance factors / block structure) | Add a `blocks` parameter; encode block membership as a factor in the Patsy formula; treat block effects as nuisance. D-optimal is the natural criterion. Requires modified power calculation (block-adjusted degrees of freedom). | 8–12 days | High | `design.py`, `api.py`, `config.py`, `README.md` |
 
 ### High effort · High value
 
-| # | Enhancement | Description | Key files |
-|---|---|---|---|
-| 16 | **Split-plot / hard-to-change factors** | Two-stratum variance model (`σ²_whole + σ²_subplot`), two-level design search, and modified power calculations. Substantial architectural change. | `design.py`, `power.py`, `api.py`, `config.py` |
-| 17 | **Multi-response designs** | Joint power across `k` responses; noncentrality becomes a matrix; requires Hotelling T² or Roy's largest-root distribution. | `power.py`, `api.py`, `config.py` |
-| 18 | **Bayesian / robust optimal design** | Support local/Bayesian D-optimality with priors over coefficients and robust objective averaging over parameter uncertainty. | `design.py`, `config.py`, `api.py`, `README.md` |
-| 19 | **GLM support (logistic/Poisson)** | Extend candidate scoring and power calculations beyond Gaussian linear models for common classification/count use cases. | `design.py`, `power.py`, `api.py`, `config.py` |
+| # | Enhancement | Description | Est. LOE | Value | Key files |
+|---|---|---|---|---|---|
+| 21 | **REST API (FastAPI)** | HTTP endpoints for `/design`, `/power_curve`, `/sensitivity`, `/compare_criteria`, and `/augment`. Enables no-Python integration (R, Excel VBA, web dashboards). Includes OpenAPI docs, async support, and a Docker compose file for one-command deployment. | 7–10 days | High | New: `api_server/main.py`, `api_server/routers/`, `Dockerfile`, `docker-compose.yml` |
+| 22 | **Split-plot / hard-to-change factors** | Two-stratum variance model (`σ²_whole + σ²_subplot`), two-level design search, and modified power calculations. Substantial architectural change. | 15–25 days | Very High | `design.py`, `power.py`, `api.py`, `config.py` |
+| 23 | **Multi-response designs** | Joint power across `k` responses; noncentrality becomes a matrix; requires Hotelling T² or Roy's largest-root distribution. | 10–15 days | High | `power.py`, `api.py`, `config.py` |
+| 24 | **Bayesian / robust optimal design** | Support local/Bayesian D-optimality with priors over coefficients and robust objective averaging over parameter uncertainty. | 12–20 days | Medium-High | `design.py`, `config.py`, `api.py`, `README.md` |
+| 25 | **GLM support (logistic/Poisson)** | Extend candidate scoring and power calculations beyond Gaussian linear models for common classification/count use cases. | 10–15 days | High | `design.py`, `power.py`, `api.py`, `config.py` |
 
 ---
 
