@@ -1,0 +1,527 @@
+# cli.py
+# License: MIT
+"""
+Command-line interface for Power-Assured I-Optimal DOE
+=====================================================
+
+Example
+-------
+$ iopt-design --config config.yml --out ./design --excel
+$ iopt-design --config config.yml --dry-run
+$ iopt-design --config config.yml -v
+
+Config schema (YAML/JSON)
+-------------------------
+# Minimal contrast-powered example
+formula: "~ 1 + A + B + A:B"
+factors:
+  A: [low, med, high]
+  B: [0.0, 10.0]         # OR use {B: [0.0, 10.0]} as list; tuple in JSON isn't standard
+
+# Contrast definition via scenarios (recommended)
+contrast:
+  scenario_a: {A: low, B: 5.0}
+  scenario_b: {A: high, B: 5.0}
+  sesoi: 1.0
+
+alpha: 0.05
+power: 0.9
+sigma: 2.0
+
+# Design options (all optional)
+design:
+  candidate_points: 4000
+  starts: 8
+  algo: fedorov   # or coordinate, detmax
+  criterion: I
+  max_iter: 200
+  random_state: 42
+  xtx_jitter: 1.0e-8
+
+# Output (all optional)
+output:
+  basename: design
+  excel: true     # also write design.xlsx; csv/json always written
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import os
+import logging  # ADDED: For logging
+from pathlib import Path
+from typing import Any, Dict, Optional, List
+
+try:
+    import yaml  # type: ignore
+    _HAS_YAML = True
+except Exception:  # pragma: no cover - optional dep
+    _HAS_YAML = False
+
+import pandas as pd
+
+from .api import i_optimal_powered_design
+from .config import PowerContrastConfig, PowerR2Config, DesignOptions
+from .contrasts import contrast_from_scenarios
+
+# ADDED: Setup a logger for the module
+logger = logging.getLogger(__name__)
+
+
+# -------------------------
+# Parsing helpers
+# -------------------------
+
+def _load_config(path: Path) -> Dict[str, Any]:
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() in {".yml", ".yaml"}:
+        if not _HAS_YAML:
+            # CHANGED: Use logger for error
+            logger.error("PyYAML is required to read YAML configs. Install with: pip install pyyaml")
+            raise RuntimeError("PyYAML is not installed.")
+        try:
+            return yaml.safe_load(text)  # type: ignore
+        except Exception as e:
+            # CHANGED: More specific error
+            raise ValueError(f"Failed to parse YAML file at {path}: {e}") from e
+            
+    # Fallback to JSON
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        # CHANGED: More specific error
+        raise ValueError(f"Failed to parse JSON file at {path}: {e}") from e
+
+
+def _validate_config_keys(cfg: Dict[str, Any]) -> None:
+    """
+    Check for presence of required top-level config keys before processing.
+    Raises KeyError with actionable messages.
+    """
+    if not isinstance(cfg, dict):
+        raise ValueError(
+            "Config file is empty or not a valid YAML/JSON mapping. "
+            "Expected a top-level key/value structure."
+        )
+    if "formula" not in cfg:
+        raise KeyError("Config validation failed: 'formula' key is required.")
+    if "factors" not in cfg:
+        raise KeyError("Config validation failed: 'factors' key is required.")
+        
+    if "contrast" not in cfg and "r2_target" not in cfg:
+        raise KeyError(
+            "Config validation failed: Must contain either a 'contrast' block or 'r2_target' key."
+        )
+        
+    if "contrast" in cfg:
+        c = cfg.get("contrast") or {}
+        is_scenario = {"scenario_a", "scenario_b", "sesoi"} <= c.keys()
+        is_explicit = {"L", "delta"} <= c.keys()
+        if not is_scenario and not is_explicit:
+            raise KeyError(
+                "Config 'contrast' block validation failed: "
+                "Must contain [scenario_a, scenario_b, sesoi] OR explicit [L, delta]."
+            )
+            
+
+def _as_factors(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize factor specs from config to the package FactorSpec.
+
+    Accepted forms:
+    - Explicit (recommended):
+        A:
+          type: continuous
+          range: [0, 10]
+        B:
+          type: categorical
+          levels: [low, med, high]
+    - Shorthand:
+        A: [0, 10]       # continuous (2-number list)
+        B: [low, high]   # categorical (list of strings)
+    """
+    factors: Dict[str, Any] = {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Config 'factors' must be a dictionary, not {type(raw).__name__}."
+        )
+        
+    for k, v in raw.items():
+        if isinstance(v, dict):
+            t = (v.get("type") or "").lower()
+            if t == "continuous":
+                r = v.get("range")
+                if not (isinstance(r, (list, tuple)) and len(r) == 2):
+                    raise ValueError(f"Factor '{k}': continuous requires 'range: [low, high]'")
+                factors[k] = (float(r[0]), float(r[1]))
+            elif t == "categorical":
+                levels = v.get("levels")
+                if not isinstance(levels, (list, tuple)) or len(levels) == 0:
+                    raise ValueError(f"Factor '{k}': categorical requires non-empty 'levels: [...]'")
+                factors[k] = list(levels)
+            else:
+                raise ValueError(f"Factor '{k}': unknown type {t!r}; use 'continuous' or 'categorical'")
+        elif isinstance(v, (list, tuple)):
+            # Heuristic: list of strings => categorical; 2-number list => continuous; else categorical
+            if len(v) == 2 and all(isinstance(x, (int, float)) for x in v):
+                factors[k] = (float(v[0]), float(v[1]))
+            else:
+                factors[k] = list(v)
+        else:
+            raise ValueError(f"Factor '{k}': unsupported spec {v!r}")
+    return factors
+
+
+def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
+    alpha = float(cfg.get("alpha", 0.05))
+    power = float(cfg.get("power", 0.8))
+    sigma = float(cfg.get("sigma", 1.0))
+
+    if "contrast" in cfg:
+        c = cfg["contrast"] or {}
+        if {"scenario_a", "scenario_b", "sesoi"} <= c.keys():
+            L, delta = contrast_from_scenarios(
+                formula,
+                factors,
+                c["scenario_a"],
+                c["scenario_b"],
+                float(c["sesoi"]),
+            )
+            return PowerContrastConfig(L=L, delta=delta, alpha=alpha, power=power, sigma=sigma)
+        else:
+            # Allow advanced users to pass L and delta explicitly
+            if "L" in c and "delta" in c:
+                import numpy as np  # local import to avoid hard dep here
+                L = np.asarray(c["L"], dtype=float)
+                delta = np.asarray(c["delta"], dtype=float)
+                return PowerContrastConfig(L=L, delta=delta, alpha=alpha, power=power, sigma=sigma)
+            # This path should be unreachable due to _validate_config_keys
+            raise ValueError("Internal error: Invalid contrast config structure.")
+
+    # Otherwise R^2 mode
+    if "r2_target" not in cfg:
+        # This path should be unreachable due to _validate_config_keys
+        raise ValueError("Internal error: Missing r2_target or contrast block.")
+    return PowerR2Config(r2_target=float(cfg["r2_target"]), alpha=alpha, power=power, sigma=sigma)
+
+
+def _make_design_opts(cfg: Dict[str, Any]) -> DesignOptions:
+    d = cfg.get("design", {})
+    # workers: None means serial; YAML can specify an int or omit/null it
+    raw_workers = d.get("workers", None)
+    workers = int(raw_workers) if raw_workers is not None else None
+    return DesignOptions(
+        # Candidate generation
+        candidate_points=int(d.get("candidate_points", 2000)),
+        auto_candidate=bool(d.get("auto_candidate", False)),
+        cand_min=int(d.get("cand_min", 1000)),
+        cand_max=int(d.get("cand_max", 10000)),
+        cat_cells_cap=int(d.get("cat_cells_cap", 10000)),
+        per_cell_alpha=float(d.get("per_cell_alpha", 1.5)),
+        per_cell_min=int(d.get("per_cell_min", 5)),
+        per_cell_max=int(d.get("per_cell_max", 20)),
+        # Adaptive refinement
+        allow_candidate_growth=bool(d.get("allow_candidate_growth", False)),
+        growth_factor=float(d.get("growth_factor", 2.0)),
+        # Search configuration
+        starts=int(d.get("starts", 5)),
+        algo=str(d.get("algo", "fedorov")),
+        criterion=str(d.get("criterion", "I")),
+        max_iter=int(d.get("max_iter", 1000)),
+        random_state=int(d.get("random_state", 123)),
+        xtx_jitter=float(d.get("xtx_jitter", 1e-8)),
+        # Constraint
+        constraint_expr=str(d["constraint_expr"]) if d.get("constraint_expr") is not None else None,
+        # Parallel options
+        workers=workers,
+        parallel_seed_stride=int(d.get("parallel_seed_stride", 10000)),
+    )
+
+
+# -------------------------
+# CLI entry point
+# -------------------------
+
+_TEMPLATE_CONTRAST = """\
+# iopt-design config — contrast mode
+# Generate with: iopt-design --template contrast > config.yml
+
+formula: "~ 1 + A + B + A:B"
+
+factors:
+  A: [low, high]      # categorical: list of levels
+  B: [0.0, 10.0]      # continuous:  [low, high] (two numeric values)
+
+# Power mode: contrast test  (use r2_target instead for global F-test)
+contrast:
+  # Option 1 — scenario-based (recommended; automatically builds L and delta)
+  scenario_a: {{A: low,  B: 5.0}}
+  scenario_b: {{A: high, B: 5.0}}
+  sesoi: 1.0           # smallest effect of interest (response units)
+
+  # Option 2 — explicit L matrix and delta vector (advanced users)
+  # L: [[0, 0, 1, 0]]  # one row per contrast; p columns (must match Patsy encoding)
+  # delta: [0.5]        # one element per contrast row
+
+alpha: 0.05
+power: 0.80
+sigma: 1.0             # assumed residual standard deviation
+
+design:
+  auto_candidate: true           # adaptive candidate sizing (recommended)
+  candidate_points: 2000         # used only when auto_candidate: false
+  cand_min: 1000                 # lower bound for adaptive sizing
+  cand_max: 10000                # upper bound for adaptive sizing
+  allow_candidate_growth: false  # grow candidate once if conditioning is poor
+  starts: 5                      # number of random starts
+  algo: fedorov                  # fedorov | coordinate
+  criterion: I                   # I = I-optimal (avg prediction variance); D = D-optimal (det X'X); A = A-optimal (sum of coeff variances)
+  max_iter: 1000                 # max iterations per start
+  random_state: 123              # random seed for reproducibility
+  xtx_jitter: 1.0e-8             # ridge for numerical stability
+  workers: null                  # null = serial; integer > 1 for parallel starts
+  # constraint_expr: "Temperature <= 2 * Pressure"  # optional; string alternative to constraint_func
+
+output:
+  basename: design               # output file prefix
+  excel: false                   # also write an .xlsx workbook
+"""
+
+_TEMPLATE_R2 = """\
+# iopt-design config — global R² mode
+# Generate with: iopt-design --template r2 > config.yml
+
+formula: "~ 1 + A + B + A:B"
+
+factors:
+  A: [low, high]      # categorical: list of levels
+  B: [0.0, 10.0]      # continuous:  [low, high] (two numeric values)
+
+# Power mode: omnibus F-test for global R²
+r2_target: 0.15        # detect R² >= this value (Cohen's f² = r2 / (1 - r2))
+alpha: 0.05
+power: 0.80
+
+design:
+  auto_candidate: true
+  starts: 5
+  algo: fedorov
+  criterion: I                   # I = I-optimal (avg prediction variance); D = D-optimal (det X'X); A = A-optimal (sum of coeff variances)
+  random_state: 123
+  # constraint_expr: "Temperature <= 2 * Pressure"  # optional; string constraint
+
+output:
+  basename: design
+  excel: false
+"""
+
+
+def _print_template(mode: str) -> None:
+    """Print a fully-commented YAML config template to stdout."""
+    if mode == "contrast":
+        print(_TEMPLATE_CONTRAST)
+    elif mode == "r2":
+        print(_TEMPLATE_R2)
+    else:
+        raise ValueError(f"Unknown template mode: {mode!r}")
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="iopt-design",
+        description="Power-assured I-optimal DOE generator",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to YAML/JSON config file (required unless --template is used)",
+    )
+    parser.add_argument("--out", default="design", help="Output basename (no extension)")
+    parser.add_argument("--excel", action="store_true", help="Also write an Excel workbook")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate config and output path, then exit without running design generation."
+    )
+    parser.add_argument(
+        "--template",
+        choices=["contrast", "r2"],
+        metavar="MODE",
+        help="Print a commented example config (contrast | r2) to stdout and exit.",
+    )
+    # ADDED: Verbose flag
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose logging output (DEBUG level)"
+    )
+    args = parser.parse_args(argv)
+
+    # Handle --template before anything else (no --config required)
+    if args.template:
+        _print_template(args.template)
+        return 0
+
+    # --config is required for all other operations
+    if args.config is None:
+        parser.error("--config is required (or use --template contrast|r2 to generate one)")
+
+    # --- ADDED: Setup Logging ---
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)-7s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stderr  # Log to stderr to separate from stdout results
+    )
+    # Re-get the logger now that it's configured (if root was configured)
+    logger = logging.getLogger("iopt-design") 
+    logger.debug("Verbose logging enabled.")
+    # ---
+
+    cfg_path = Path(args.config)
+
+    # --- CHANGED: Wrapped main logic in try/except ---
+    try:
+        # 1. Load Config
+        if not cfg_path.exists():
+            # Use FileNotFoundError for specific I/O error
+            raise FileNotFoundError(f"Config file not found: {cfg_path.resolve()}")
+            
+        logger.info(f"Loading config from: {cfg_path.resolve()}")
+        cfg = _load_config(cfg_path)
+        
+        # 2. Validate Config Structure
+        logger.debug("Validating config keys...")
+        _validate_config_keys(cfg)
+        
+        # 3. Parse Config Sections (can raise ValueError)
+        logger.debug("Parsing config sections...")
+        formula = str(cfg["formula"])
+        factors = _as_factors(cfg["factors"])
+        power_cfg = _make_power_cfg(cfg, formula, factors)
+        design_opts = _make_design_opts(cfg)
+
+        # 4. Validate Output Path
+        out_cfg = cfg.get("output", {})
+        basename = out_cfg.get("basename", args.out)
+        out_path = Path(basename)
+        out_dir = out_path.parent
+        
+        # Create parent directory
+        logger.debug(f"Ensuring output directory exists: {out_dir.resolve()}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Check write permissions
+        if not os.access(out_dir, os.W_OK):
+            raise PermissionError(
+                f"Output directory is not writable: {out_dir.resolve()}"
+            )
+        logger.debug("Output directory is writable.")
+
+        # 5. Handle --dry-run
+        # FIXED: Use .dry_run, not .dry-run
+        if args.dry_run:
+            logger.info("\n--- Dry Run Validation Successful ---")
+            logger.info(f"  Formula: {formula}")
+            logger.info(f"  Factors: {list(factors.keys())}")
+            logger.info(f"Power Config: {power_cfg.__class__.__name__}")
+            logger.info(f"Design Algo: {design_opts.algo}")
+            logger.info(f" Output Dir: {out_dir.resolve()} (writable)")
+            logger.info("--- Exiting without design generation ---")
+            return 0
+
+        # --- End Validation, Start Main Task ---
+        logger.info("Config validated. Running powered design generation...")
+        
+        result = i_optimal_powered_design(
+            formula,
+            factors,
+            power_cfg,
+            design_opts,
+        )
+        
+        design_df = result["design_df"]
+        buckets_df = result["buckets_df"]
+        report = result["report"]
+
+        # Determine output basename (already done, just use `out_path`)
+        logger.info(f"Writing output files with basename: {out_path}")
+
+        # Always write CSV + JSON
+        design_csv = out_path.with_name(out_path.name + "_design.csv")
+        buckets_csv = out_path.with_name(out_path.name + "_buckets.csv")
+        report_json = out_path.with_name(out_path.name + "_report.json")
+
+        design_df.to_csv(design_csv, index=False)
+        buckets_df.to_csv(buckets_csv, index=False)
+        pd.Series(report).to_json(report_json)
+
+        logger.info(f"Wrote: {design_csv}")
+        logger.info(f"Wrote: {buckets_csv}")
+        logger.info(f"Wrote: {report_json}")
+
+        # Optional Excel (CLI flag has priority; config can also request excel)
+        excel_flag = args.excel or bool(out_cfg.get("excel", False))
+        if excel_flag:
+            excel_path = out_path.with_suffix(".xlsx")
+            logger.debug(f"Writing Excel file to: {excel_path}")
+            with pd.ExcelWriter(excel_path, engine="xlsxwriter") as xw:
+                design_df.to_excel(xw, index=False, sheet_name="design")
+                buckets_df.to_excel(xw, index=False, sheet_name="buckets")
+                pd.DataFrame([report]).to_excel(xw, index=False, sheet_name="report")
+            logger.info(f"Wrote: {excel_path}")
+
+        # Pretty-print short summary (This stays as print() to stdout)
+        print("\n=== I-Optimal Powered Design ===")
+        for k in ("n", "p", "df_num", "df_denom", "alpha", "target_power", "achieved_power"):
+            if k in report:
+                print(f"{k:>15}: {report[k]}")
+        print(f"{'criterion':>15}: {report.get('criterion', 'N/A')}")
+        print(f"{'algo':>15}: {report.get('algo', 'N/A')}")
+        print(f"{'starts':>15}: {report.get('starts', 'N/A')}")
+        # --- Enhancement 10: richer run metadata ---
+        if "elapsed_sec" in report:
+            print(f"{'elapsed_sec':>15}: {report['elapsed_sec']:.4f} s")
+        if "search_strategy" in report:
+            print(f"{'strategy':>15}: {report['search_strategy']}")
+        if "random_state" in report:
+            print(f"{'random_state':>15}: {report['random_state']}")
+        _warns = report.get("warnings", [])
+        if _warns:
+            print(f"{'warnings':>15}: {len(_warns)} issue(s)")
+            for _w in _warns:
+                print(f"{'':>17}! {_w}")
+        else:
+            print(f"{'warnings':>15}: none")
+        
+        return 0
+
+    # --- Specific Error Handling ---
+    except FileNotFoundError as e:
+        logger.error(f"[Config Error] {e}")
+        return 2  # CHANGED: Exit code 2
+        
+    except (KeyError, ValueError) as e:
+        # Catches validation errors, parsing errors
+        logger.error(f"[Config Error] {e}")
+        return 2  # CHANGED: Exit code 2
+        
+    except PermissionError as e:
+        logger.error(f"[IO Error] {e}")
+        return 2  # CHANGED: Exit code 2
+        
+    except IOError as e:
+        logger.error(f"[IO Error] Failed to write output files: {e}")
+        return 2  # CHANGED: Exit code 2
+
+    except Exception as e:
+        # Catch-all for unexpected runtime errors
+        # exc_info=True will add traceback if logging level is DEBUG
+        logger.error(f"[Unexpected Error] {type(e).__name__}: {e}", exc_info=args.verbose)
+        return 2 # CHANGED: Exit code 2
+    # --- End Error Handling ---
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

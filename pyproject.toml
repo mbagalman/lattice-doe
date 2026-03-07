@@ -1,0 +1,90 @@
+[project]
+name = "iopt-power-design"
+version = "0.1.0"
+description = "I-optimal experimental designs with power assurance for linear models."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.9"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Typing :: Typed"
+]
+
+# Core dependencies — minimal install required for core API functionality
+dependencies = [
+  "numpy>=1.23",
+  "pandas>=1.5,<3",
+  "scipy>=1.10",
+  "pyDOE3>=1.0,<2.0",
+  "patsy>=0.5,<1"
+]
+
+[project.optional-dependencies]
+# Optional dependencies for CLI functionality
+cli = [
+  "pyyaml>=6.0,<7"
+]
+# Optional dependencies for visualization
+viz = [
+  "matplotlib>=3.5,<4",
+  "seaborn>=0.11,<1"
+]
+# Optional dependencies for progress bar and Excel output
+extras = [
+  "tqdm>=4.65,<5",
+  "xlsxwriter>=3.0,<4"
+]
+# Convenience meta-group to install *everything* at once.
+# IMPORTANT: You cannot reference your own extras by name here; list their packages.
+all = [
+  # cli
+  "pyyaml>=6.0,<7",
+  # viz
+  "matplotlib>=3.5,<4",
+  "seaborn>=0.11,<1",
+  # extras
+  "tqdm>=4.65,<5",
+  "xlsxwriter>=3.0,<4"
+]
+
+[project.urls]
+Homepage = "https://github.com/yourname/iopt-power-design"
+Repository = "https://github.com/yourname/iopt-power-design"
+Issues = "https://github.com/yourname/iopt-power-design/issues"
+
+[project.scripts]
+# Registers a CLI entry point; users can run `iopt-design` after installation.
+iopt-design = "iopt_power_design.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["iopt_power_design*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=iopt_power_design --cov-report=term --cov-report=html"
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_unused_configs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true

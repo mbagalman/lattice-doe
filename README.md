@@ -1,0 +1,689 @@
+# iopt-power-design
+
+**I-optimal experimental designs with power assurance for linear models.**
+
+Generate powered optimal designs that are guaranteed (or as close as possible) to meet a target statistical power for either a linear contrast test or a global R² F-test. The package automatically searches for the minimum sample size `n` that achieves your power target, then selects the best design at that `n` under your chosen criterion (`"I"` by default, or `"D"` / `"A"`).
+
+> **I-optimality** minimises *average prediction variance* over the design region — preferred when prediction accuracy across the factor space is the primary goal.  Set `criterion="D"` in `DesignOptions` to switch to **D-optimality** (maximises `det(X'X)`, preferred when precise coefficient estimation matters most), or `criterion="A"` for **A-optimality** (minimises `trace((X'X)⁻¹)`, equalising coefficient-estimate variances).
+
+New here? Start with the 10-minute guide: [Quick Start Guide](docs/quickstart.md).  
+Looking for task-oriented examples? See [Recipes](docs/recipes.md).
+
+---
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start Guide (10 minutes)](docs/quickstart.md)
+- [Recipes](docs/recipes.md)
+- [Quick Start — Python API](#quick-start--python-api)
+- [Quick Start — CLI](#quick-start--cli)
+- [Power Modes](#power-modes)
+- [Configuration Reference](#configuration-reference)
+- [Output Structure](#output-structure)
+- [Power Curves](#power-curves)
+- [Sensitivity Analysis & MDE](#sensitivity-analysis)
+- [Comparing Criteria](#comparing-criteria)
+- [Augmenting Designs](#augmenting-an-existing-design)
+- [Diagnostics](#diagnostics)
+- [Candidate Set & Algorithm Details](#candidate-set--algorithm-details)
+- [Reproducibility](#reproducibility)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+---
+
+## Installation
+
+Requires Python ≥ 3.9.
+
+```bash
+# Core install (from source)
+pip install -e .
+
+# With CLI support (YAML configs)
+pip install -e ".[cli]"
+
+# With visualization (power curve plots)
+pip install -e ".[viz]"
+
+# With progress bars and Excel export
+pip install -e ".[extras]"
+
+# Everything at once
+pip install -e ".[all]"
+```
+
+**Core dependencies:** `numpy`, `scipy`, `pandas`, `patsy`, `pyDOE3`
+
+---
+
+## Quick Start — Python API
+
+### Contrast-based power
+
+Specify which linear combination of coefficients you want to detect and by how much.
+
+```python
+from iopt_power_design import (
+    i_optimal_powered_design,
+    PowerContrastConfig,
+    DesignOptions,
+)
+
+formula = "~ 1 + A + B + A:B"
+factors = {
+    "A": ["low", "high"],   # 2-level categorical → Patsy encodes 1 dummy column
+    "B": (0.0, 10.0),       # continuous: (low, high) tuple
+}
+# With these factors, Patsy encodes p = 4 columns:
+#   [Intercept, A[T.high], B, A[T.high]:B]
+# so L must have exactly 4 columns.
+
+# Contrast: test that the B main effect equals 0.5
+# L must be (q x p) where p = number of columns in the Patsy model matrix
+power_cfg = PowerContrastConfig(
+    L=[[0, 0, 1, 0]],   # one-row contrast selecting the B main-effect coefficient
+    delta=[0.5],         # minimum detectable effect (same units as sigma)
+    alpha=0.05,
+    power=0.80,
+    sigma=1.0,
+    max_n=500,
+)
+
+opts = DesignOptions(
+    auto_candidate=True,   # adaptive candidate sizing (recommended)
+    starts=8,
+    random_state=42,
+)
+
+result = i_optimal_powered_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=opts,
+)
+
+design_df  = result["design_df"]    # DataFrame: n-run I-optimal design
+buckets_df = result["buckets_df"]   # DataFrame: unique run allocations with counts
+report     = result["report"]       # dict: power, n, lambda, df, timing, etc.
+
+print(f"n = {report['n']},  achieved power = {report['achieved_power']:.3f}")
+print(buckets_df)
+```
+
+### Building contrasts from scenarios
+
+Use `contrast_from_scenarios` to construct `L` and `delta` automatically by comparing two factor settings:
+
+```python
+from iopt_power_design.contrasts import contrast_from_scenarios
+
+scenario_a = {"A": "low",  "B": 5.0}
+scenario_b = {"A": "high", "B": 5.0}
+
+L, delta = contrast_from_scenarios(
+    formula=formula,
+    factors=factors,
+    scenario_a=scenario_a,
+    scenario_b=scenario_b,
+    sesoi=1.0,   # smallest effect of interest (in response units)
+)
+
+power_cfg = PowerContrastConfig(L=L, delta=delta, alpha=0.05, power=0.80, sigma=1.0)
+```
+
+### Global R² power
+
+Test whether the full model explains a meaningful proportion of variance.
+
+```python
+from iopt_power_design import PowerR2Config
+
+power_cfg = PowerR2Config(
+    r2_target=0.15,   # detect R² ≥ 0.15
+    alpha=0.05,
+    power=0.80,
+    max_n=500,
+    lambda_mode="n",  # "n" (default) or "n_minus_p" (more conservative)
+)
+
+result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+```
+
+---
+
+## Quick Start — CLI
+
+Install with `pip install -e ".[cli]"` for YAML support, then run:
+
+```bash
+# Generate a starter config (no installation of PyYAML needed for this step)
+iopt-design --template contrast > config.yml   # contrast mode template
+iopt-design --template r2      > config.yml   # global R² mode template
+
+# Generate a design
+iopt-design --config config.yml --out ./output/design
+
+# With Excel output and verbose logging
+iopt-design --config config.yml --out ./output/design --excel -v
+
+# Validate config without running (dry run)
+iopt-design --config config.yml --dry-run
+```
+
+**Contrast mode config (`config.yml`):**
+
+```yaml
+formula: "~ 1 + A + B + A:B"
+
+factors:
+  A: [low, high]           # 2-level categorical → Patsy encodes 1 dummy column
+  B: [0.0, 10.0]           # continuous [low, high]
+# With these factors, Patsy encodes p = 4 columns:
+#   [Intercept, A[T.high], B, A[T.high]:B]
+# so L must have exactly 4 columns.
+
+# Option 1: explicit contrast matrix
+contrast:
+  L: [[0, 0, 1, 0]]        # selects the B main-effect coefficient (column index 2)
+  delta: [0.5]
+
+# Option 2: scenario-based (auto-builds L and delta — safer, formula-agnostic)
+# contrast:
+#   scenario_a: {A: low,  B: 5.0}
+#   scenario_b: {A: high, B: 5.0}
+#   sesoi: 1.0
+
+alpha: 0.05
+power: 0.80
+sigma: 1.0
+
+design:
+  auto_candidate: true
+  starts: 8
+  algo: fedorov
+  random_state: 42
+
+output:
+  basename: my_design
+  excel: false
+```
+
+**Global R² mode config:**
+
+```yaml
+formula: "~ 1 + A + B + A:B"
+factors:
+  A: [low, med, high]
+  B: [0.0, 10.0]
+
+r2_target: 0.15
+alpha: 0.05
+power: 0.80
+
+design:
+  auto_candidate: true
+  starts: 8
+  random_state: 42
+```
+
+The CLI always writes `<basename>_design.csv`, `<basename>_buckets.csv`, and `<basename>_report.json`. Pass `--excel` (or set `output.excel: true`) to also produce an `.xlsx` workbook.
+
+---
+
+## Power Modes
+
+### Contrast-based (`PowerContrastConfig`)
+
+Tests H₀: Lβ = 0 against H₁: Lβ = δ using an F-test on the linear contrast.
+
+**Noncentrality parameter:**
+
+```
+λ = δᵀ [L (X'X)⁻¹ Lᵀ]⁺ δ / σ²
+```
+
+- `df_num` = rank(L), `df_denom` = n − rank(X)
+- Supports multiple simultaneous contrasts (q > 1 rows in L)
+- L and delta are validated for shape consistency and non-zero content
+
+### Global R² (`PowerR2Config`)
+
+Tests H₀: R² = 0 (all slopes are zero) using the omnibus F-test.
+
+**Noncentrality parameter** (via Cohen's f² = R²/(1−R²)):
+
+| `lambda_mode` | Formula | Matches |
+|---|---|---|
+| `"n"` (default) | λ = f² · n | G\*Power, statsmodels |
+| `"n_minus_p"` | λ = f² · (n − p) | More conservative |
+
+- `df_num` = number of slope parameters (intercept excluded, per G\*Power convention)
+- `df_denom` = n − rank(X)
+
+---
+
+## Configuration Reference
+
+### `PowerContrastConfig`
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `L` | array (q×p) | — | Contrast matrix; must match model matrix column count |
+| `delta` | array (q,) | — | Minimum detectable effects (one per contrast row) |
+| `alpha` | float | `0.05` | Significance level |
+| `power` | float | `0.80` | Target power |
+| `sigma` | float | `1.0` | Residual standard deviation |
+| `max_n` | int | `2000` | Hard cap on sample size search |
+| `tol_power` | float | `1e-3` | Convergence tolerance |
+| `max_iter` | int | `200` | Max n-search iterations |
+
+### `PowerR2Config`
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `r2_target` | float | — | Target R² effect size (0, 1) |
+| `alpha` | float | `0.05` | Significance level |
+| `power` | float | `0.80` | Target power |
+| `max_n` | int | `2000` | Hard cap on sample size search |
+| `lambda_mode` | `"n"` \| `"n_minus_p"` | `"n"` | Noncentrality convention |
+| `tol_power` | float | `1e-3` | Convergence tolerance |
+| `max_iter` | int | `200` | Max n-search iterations |
+
+### `DesignOptions`
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `random_state` | int | `123` | Global random seed (must be an integer; `None` is not allowed) |
+| `algo` | `"fedorov"` \| `"coordinate"` | `"fedorov"` | API-compatibility selector; both map to the internal Fedorov exchange engine |
+| `starts` | int | `5` | Number of random starts |
+| `max_iter` | int | `1000` | Max iterations per start |
+| `xtx_jitter` | float | `1e-8` | Ridge added to X'X for numerical stability |
+| `criterion` | str | `"I"` | Optimality criterion: `"I"` (minimise average prediction variance), `"D"` (maximise `det(X'X)`), or `"A"` (minimise `trace((X'X)⁻¹)`) |
+| `candidate_points` | int | `2000` | Fixed candidate size (when `auto_candidate=False`) |
+| `auto_candidate` | bool | `False` | Adaptively size the candidate set |
+| `cand_min` | int | `1000` | Minimum candidate points (auto mode) |
+| `cand_max` | int | `10000` | Maximum candidate points (auto mode) |
+| `cat_cells_cap` | int | `10000` | Cap on categorical cell enumeration |
+| `per_cell_alpha` | float | `1.5` | Candidate multiplier per categorical cell |
+| `per_cell_min` | int | `5` | Min points per cell (mixed designs) |
+| `per_cell_max` | int | `20` | Max points per cell (mixed designs) |
+| `allow_candidate_growth` | bool | `False` | Grow candidate once if conditioning is poor |
+| `growth_factor` | float | `2.0` | Multiplier applied when growing candidate |
+| `workers` | int \| None | `None` | Parallel workers for starts (None = serial) |
+| `parallel_seed_stride` | int | `10000` | Seed offset between parallel workers |
+| `constraint_func` | callable \| None | `None` | Row-level feasibility filter (Python callable) |
+| `constraint_expr` | str \| None | `None` | Row-level feasibility filter as a string expression (YAML/JSON-friendly alternative to `constraint_func`; see [Feasibility constraints](#candidate-set--algorithm-details)) |
+
+**Parallel starts note:** On macOS and Windows, set `workers > 1` only inside `if __name__ == "__main__":` (standard `multiprocessing` requirement).
+
+---
+
+## Output Structure
+
+`i_optimal_powered_design(...)` returns a dict with three keys:
+
+### `result["design_df"]` — `DataFrame`
+
+The n-run optimal design (I-, D-, or A-optimal depending on `criterion`). Each row is a selected point from the candidate set. Duplicate rows represent replicated runs.
+
+### `result["buckets_df"]` — `DataFrame`
+
+Unique run allocations with replication counts:
+
+| A | B | count |
+|---|---|---|
+| low | 3.2 | 3 |
+| high | 7.8 | 2 |
+| ... | ... | ... |
+
+### `result["report"]` — `dict`
+
+Key metrics from the design search:
+
+| Key | Description |
+|---|---|
+| `n` | Final sample size |
+| `p` | Number of model parameters |
+| `df_num` | Numerator degrees of freedom |
+| `df_denom` | Denominator degrees of freedom |
+| `alpha` | Significance level used |
+| `target_power` | Requested power |
+| `achieved_power` | Power of the returned design |
+| `noncentrality_lambda` | Noncentrality parameter λ |
+| `criterion` | Optimality criterion |
+| `algo` | Search algorithm used |
+| `starts` | Number of starts configured |
+| `workers` | Number of parallel workers used |
+| `candidate_points` | Candidate set size used |
+| `elapsed_sec` | Wall-clock seconds for the full n-search (excludes file export) |
+| `search_strategy` | Phases executed, e.g. `"bisection"`, `"bisection+growth"`, `"bisection+verification"` |
+| `verify_window` | Number of n values checked in the Phase 2 downward scan (0 if only bisection ran) |
+| `random_state` | The `random_state` seed that was used (from `DesignOptions`) |
+| `warnings` | List of warning messages issued during search (empty list if none) |
+| `diagnostics` | Dict of design quality metrics (condition number, D-efficiency, etc.) |
+
+---
+
+## Power Curves
+
+Explore how power varies with sample size or effect size without committing to a final design.
+
+```python
+from iopt_power_design import power_curve_by_n, power_curve_by_effect
+
+# Power vs. n (sweeps a range of n values)
+df_n = power_curve_by_n(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=opts,
+)
+print(df_n)   # columns: n, power
+
+# Power vs. effect size (sweeps delta or r2_target at a fixed n)
+df_eff = power_curve_by_effect(
+    formula=formula,
+    factors=factors,
+    n=30,            # fixed sample size for the sweep
+    power_cfg=power_cfg,
+    design_opts=opts,
+)
+print(df_eff)   # columns: effect_scale,power (contrast) or r2_target,power (R²)
+```
+
+Both functions respect `auto_candidate` in `DesignOptions`.
+
+### 2D power surface
+
+Sweep two parameters simultaneously to produce a contour map — useful for understanding the joint sensitivity of your design to (n, effect), (effect, sigma), etc.
+
+```python
+from iopt_power_design.power_curves import power_surface_2d
+
+result = power_surface_2d(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    param1="n",           # y-axis: 'n', 'effect', 'sigma', or 'alpha'
+    param1_range=(10, 80),
+    param2="effect",      # x-axis: multiplier on delta (1.0 = nominal)
+    param2_range=(0.3, 2.0),
+    grid_points=20,
+    design_opts=opts,
+    plot=True,            # returns a filled contour figure
+)
+
+print(result["data"])          # DataFrame: param1, param2, power, noncentrality_lambda
+print(result["power_grid"])    # 2D numpy array of power values
+# result["figure"]             # matplotlib Figure with contour plot
+```
+
+**Notes on `param1` / `param2` semantics:**
+
+| Parameter | `PowerContrastConfig` | `PowerR2Config` |
+|---|---|---|
+| `"n"` | Sample size (integer) | Sample size (integer) |
+| `"effect"` | Scale multiplier on `delta` (1.0 = nominal) | Actual `r2_target` value |
+| `"sigma"` | Absolute σ value | ❌ not applicable |
+| `"alpha"` | Significance level | Significance level |
+
+When neither axis is `"n"`, the function builds one I-optimal design at a representative n and sweeps analytically (fast). When `"n"` is an axis, one I-optimal design is built per unique n value (expensive but cached).
+
+### Sensitivity analysis
+
+Reveal how much power changes if a key assumption is wrong — without rebuilding any designs.
+
+```python
+from iopt_power_design import power_sensitivity
+
+# Contrast mode: sweep sigma
+sensitivity = power_sensitivity(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,          # PowerContrastConfig → sweeps sigma
+    design_df=result["design_df"],
+    sigma_range=(0.5, 2.0),       # sweep σ from 0.5 to 2.0
+    sigma_points=30,
+    plot=True,
+)
+print(sensitivity["data"])           # DataFrame: sigma, power, noncentrality_lambda
+print(sensitivity["nominal_power"])  # power at the configured sigma
+# sensitivity["figure"]              # matplotlib Figure
+
+# R² mode: sweep r2_target (sigma does not enter the R² power formula)
+sensitivity_r2 = power_sensitivity(
+    formula=formula,
+    factors=factors,
+    power_cfg=r2_power_cfg,       # PowerR2Config → sweeps r2_target
+    design_df=result["design_df"],
+    r2_range=(0.05, 0.50),        # sweep R² from 5 % to 50 %
+    r2_points=30,
+    plot=True,
+)
+print(sensitivity_r2["data"])        # DataFrame: r2_target, power, noncentrality_lambda
+print(sensitivity_r2["r2_nominal"])  # the nominal r2_target from power_cfg
+```
+
+### Minimum detectable effect
+
+Find the smallest effect your design can detect at a given power — no new design needed.
+
+```python
+from iopt_power_design import min_detectable_effect
+
+# Contrast mode: MDE expressed as a scale factor on delta
+mde = min_detectable_effect(
+    design_df=result["design_df"],
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,       # PowerContrastConfig
+    target_power=0.80,
+)
+print(mde["mde"])              # scale factor (1.0 = original delta is just detectable)
+print(mde["achieved_power"])   # power at the MDE
+
+# R² mode: MDE expressed as the minimum detectable r2_target
+mde_r2 = min_detectable_effect(
+    design_df=result["design_df"],
+    formula=formula,
+    factors=factors,
+    power_cfg=r2_power_cfg,    # PowerR2Config
+    target_power=0.80,
+)
+print(mde_r2["mde"])           # minimum r2_target detectable at 80 % power
+```
+
+### Comparing criteria
+
+Not sure which optimality criterion is right for your study?  `compare_criteria` runs the full powered-design search under each of `"I"`, `"D"`, and `"A"` (or any subset) and returns a side-by-side summary in a single call.
+
+```python
+from iopt_power_design import compare_criteria, DesignOptions
+
+comparison = compare_criteria(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,          # shared across all criteria
+    design_opts=DesignOptions(    # criterion field is overridden per run
+        auto_candidate=True,
+        starts=8,
+        random_state=42,
+    ),
+    criteria=["I", "D", "A"],    # default; any non-empty subset is valid
+    plot=True,                    # side-by-side bar charts (requires matplotlib)
+)
+
+print(comparison["summary"])
+# criterion   n   achieved_power  elapsed_sec  condition_number  d_efficiency
+# I          24        0.814         1.23           12.5             0.81
+# D          22        0.823         1.17           10.2             1.00
+# A          23        0.811         1.19           11.8             0.94
+
+# Access the full result for a specific criterion
+i_design = comparison["results"]["I"]["design_df"]
+d_report  = comparison["results"]["D"]["report"]
+```
+
+The function never mutates *design_opts* — it uses `dataclasses.replace` to create a per-criterion copy.  When only two criteria are needed, pass `criteria=["I", "D"]` etc.
+
+---
+
+### Augmenting an existing design
+
+Add runs to a design that already exists, fixing the original rows in place:
+
+```python
+from iopt_power_design import augment_design, DesignOptions
+
+# Suppose existing_design is a DataFrame with 20 runs
+augmented, new_runs = augment_design(
+    design_df=existing_design,
+    m=5,                            # add 5 new runs
+    formula=formula,
+    factors=factors,
+    design_opts=DesignOptions(criterion="I", random_state=42),
+)
+
+print(f"Original: {len(existing_design)} runs")
+print(f"Augmented: {len(augmented)} runs")
+print(new_runs)                     # the 5 newly added rows
+```
+
+`augment_design` uses a greedy one-point-at-a-time exchange that optimises the same criterion (`"I"`, `"D"`, or `"A"`) as the original design search. It is fast but does not guarantee global optimality.
+
+---
+
+## Diagnostics
+
+Export design quality metrics alongside your design files:
+
+```python
+result = i_optimal_powered_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=opts,
+    export_diagnostics_to="./output/",   # folder path
+)
+```
+
+Diagnostics written to the output folder include:
+
+- **Condition number** — detects near-collinearity
+- **D-efficiency** — relative efficiency vs. D-optimal reference
+- **Leverage** — per-row hat values and summary statistics
+- **VIFs** — variance inflation factors per regressor
+- **I-criterion** — average prediction variance over the candidate region
+
+Output formats: HTML tables, CSV, and optional plots.
+
+---
+
+## Candidate Set & Algorithm Details
+
+### Factor specifications
+
+```python
+factors = {
+    "Temperature": (20.0, 80.0),       # continuous: 2-element numeric tuple/list
+    "Catalyst":    ["A", "B", "C"],    # categorical: list of levels
+    "Time":        (1.0, 5.0),         # continuous
+}
+```
+
+Continuous factors with exactly two numeric elements are sampled via Latin Hypercube. Categorical factors are enumerated as a Cartesian product (capped at `cat_cells_cap`). Mixed designs combine both.
+
+### Adaptive candidate sizing (`auto_candidate=True`)
+
+Recommended for most use cases. The package sizes the candidate set based on:
+
+- Number and type of factors
+- Categorical cell count (capped at `cat_cells_cap`)
+- `per_cell_alpha`, `per_cell_min`, `per_cell_max` multipliers
+- Bounded by `cand_min` and `cand_max`
+
+### Candidate growth
+
+If `allow_candidate_growth=True`, the candidate set is grown by `growth_factor` once during the search if the design matrix condition number exceeds 10⁶. This is a safety net for difficult factor spaces.
+
+### Search algorithm
+
+Design search uses an internal Fedorov point-exchange optimizer that operates
+directly on the Patsy model matrix.
+
+The `algo` option (`"fedorov"` or `"coordinate"`) is currently retained for
+API compatibility; both settings route to this internal exchange implementation.
+
+`pyDOE3` remains a package dependency, but the core design search no longer
+depends on pyDOE3's internal optimizer API signatures.
+
+### Feasibility constraints
+
+Two equivalent ways to exclude infeasible candidate points:
+
+**Python callable** — full flexibility, for use in Python scripts:
+
+```python
+def no_high_temp_low_time(row):
+    return not (row["Temperature"] > 70 and row["Time"] < 2)
+
+opts = DesignOptions(constraint_func=no_high_temp_low_time)
+```
+
+**String expression** — YAML/JSON-friendly, reproduces in config files without Python code:
+
+```python
+# In Python:
+opts = DesignOptions(constraint_expr="not (Temperature > 70 and Time < 2)")
+
+# Compound and math expressions work too:
+opts = DesignOptions(constraint_expr="sqrt(Temperature) + Pressure <= 20")
+opts = DesignOptions(constraint_expr="Catalyst != 'C' or Time <= 3")
+```
+
+In a YAML config file:
+
+```yaml
+design:
+  constraint_expr: "not (Temperature > 70 and Time < 2)"
+```
+
+Available functions inside `constraint_expr`: `abs`, `min`, `max`, `round`, `sqrt`, `log`, `log2`, `log10`, `exp`, `floor`, `ceil`, `pi`.  The expression is evaluated with each factor's column name as a local variable.  No imports or arbitrary code execution are permitted.
+
+If both `constraint_func` and `constraint_expr` are set, `constraint_expr` takes precedence.
+
+---
+
+## Reproducibility
+
+Fix `random_state` in `DesignOptions` to reproduce candidate generation, design search, and parallel start assignments exactly.
+
+---
+
+## Troubleshooting
+
+**`ImportError` for pyDOE3**
+Install `pyDOE3` in your environment (`pip install pyDOE3`) to satisfy package dependencies.
+
+**`ValueError: power_cfg.max_n must be greater than p`**
+Your `max_n` is too small for the model. Increase `max_n` or simplify the formula. The number of parameters `p` is reported in the error message.
+
+**Design did not converge to target power (RuntimeWarning)**
+The search hit `max_n` or `max_iter` without reaching the target. Try increasing `max_n`, increasing `starts`, or relaxing `power`. The best design found is still returned.
+
+**Poor conditioning / near-singular X'X**
+Enable `allow_candidate_growth=True`, increase `candidate_points`, or increase `xtx_jitter` slightly (e.g., `1e-6`).
+
+**Contrast shape errors**
+`L` must be `(q, p)` where `p` is the number of columns in the *Patsy-encoded* model matrix (includes intercept, dummy columns, interactions). Use `build_model_matrix(formula, candidate)` to inspect `p` before constructing `L` manually.
+
+**Parallelism on macOS / Windows**
+Guard `workers > 1` calls inside `if __name__ == "__main__":`.
+
+---
+
+## License
+
+MIT
