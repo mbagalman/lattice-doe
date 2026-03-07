@@ -16,11 +16,11 @@ Tracks all work for **Enhancement #14** (PDF / HTML shareable report).
 |----|-------|------|--------|------------|
 | [A1](#a1-report-module-skeleton--packaging) | Report module skeleton & packaging | Infrastructure | Done | Claude |
 | [A2](#a2-jinja2-html-template-skeleton) | Jinja2 HTML template skeleton | Infrastructure | Done | Claude |
-| [B1](#b1-config-summary-section) | Config summary section | Report Content | Open | |
-| [B2](#b2-power-metrics-section) | Power metrics section | Report Content | Open | |
-| [B3](#b3-design--buckets-tables-section) | Design & buckets tables section | Report Content | Open | |
-| [B4](#b4-diagnostics-section) | Diagnostics section | Report Content | Open | |
-| [B5](#b5-embedded-power-curve-figure) | Embedded power curve figure | Report Content | Open | |
+| [B1](#b1-config-summary-section) | Config summary section | Report Content | Done | Claude |
+| [B2](#b2-power-metrics-section) | Power metrics section | Report Content | Done | Claude |
+| [B3](#b3-design--buckets-tables-section) | Design & buckets tables section | Report Content | Done | Claude |
+| [B4](#b4-diagnostics-section) | Diagnostics section | Report Content | Done | Claude |
+| [B5](#b5-embedded-power-curve-figure) | Embedded power curve figure | Report Content | Done | Claude |
 | [C1](#c1-standalone-html-output) | Standalone HTML output | Export Backends | Open | |
 | [C2](#c2-optional-pdf-export) | Optional PDF export (weasyprint) | Export Backends | Open | |
 | [D1](#d1-api-integration) | API integration (`export_report_to=`) | Integration | Open | |
@@ -29,7 +29,7 @@ Tracks all work for **Enhancement #14** (PDF / HTML shareable report).
 | [E1](#e1-unit-tests) | Unit tests | Tests & Docs | Open | |
 | [E2](#e2-documentation-updates) | Documentation updates | Tests & Docs | Open | |
 
-**Progress:** 2 / 14 tickets done.
+**Progress:** 7 / 14 tickets done.
 
 ---
 
@@ -174,11 +174,11 @@ Build out each section of the template and the corresponding Python context-buil
 
 ### B1 Config summary section
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** A2
-**Progress note:**
+**Progress note:** Complete. `_build_config_ctx(formula, factors, power_cfg)` in `report.py`. Detects categorical (list of strings) vs continuous (2-element numeric tuple/list). Handles both PowerContrastConfig (adds sigma, L_shape, delta) and PowerR2Config (adds r2_target, lambda_mode).
 
 **What to do:**
 In `report.py`, write `_build_config_ctx(formula, factors, power_cfg) -> dict` that returns a context dict for the config summary section:
@@ -210,11 +210,11 @@ In the template, render this as a two-column definition list (`<dl>`) inside the
 
 ### B2 Power metrics section
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** A2
-**Progress note:**
+**Progress note:** Complete. `_build_metrics_ctx(report)` in `report.py`. Formats all 8 metric-box values; computes `power_class` (pass/warn/fail based on diff from target: ≥0/≥-5pp/else); formats elapsed_sec, noncentrality_lambda, df_num/df_denom, search_strategy, warnings list.
 
 **What to do:**
 In `report.py`, write `_build_metrics_ctx(report: dict) -> dict` that extracts and formats:
@@ -247,11 +247,11 @@ In the template, render the first six values as a `metric-grid` of `.metric-box`
 
 ### B3 Design & buckets tables section
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** A2
-**Progress note:**
+**Progress note:** Complete. `_df_to_html(df, max_rows)` in `report.py`. Returns `(html_str, was_truncated, total_rows)` tuple. Uses `df.to_html(classes="report-table", float_format=":.4g")`; truncation metadata passed to template which renders note.
 
 **What to do:**
 In `report.py`, write `_df_to_html(df: pd.DataFrame, max_rows: int) -> str` that converts a DataFrame to an HTML table string:
@@ -273,11 +273,11 @@ Pass `design_html` and `buckets_html` strings (pre-rendered) into the template c
 
 ### B4 Diagnostics section
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** A2
-**Progress note:**
+**Progress note:** Complete. `_build_diagnostics_ctx(report)` in `report.py`. Returns None when `report["diagnostics"]` is absent/empty (template skips section). Condition-number badge: pass <100, warn <1000, fail ≥1000. Formats d_efficiency, i_criterion, VIFs dict.
 
 **What to do:**
 In `report.py`, write `_build_diagnostics_ctx(report: dict) -> dict | None`. If `report.get("diagnostics")` is empty or absent, return `None` (section is skipped).
@@ -305,11 +305,11 @@ In the template, render as a table with coloured `.badge-pass` / `.badge-warn` /
 
 ### B5 Embedded power curve figure
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 2–3 hours
 **Depends on:** A2, B2
-**Progress note:**
+**Progress note:** Complete. `_build_power_curve_figure(result, formula, factors, power_cfg)` in `report.py`. Calls `power_curve_by_n` with starts=2, auto_candidate=True, random_state from report. Tries Plotly (with kaleido rasterisation) then matplotlib (Agg backend) for PNG → base64. Returns None on any failure (template shows placeholder note). Target-power hline and chosen-n vline included in both backends.
 
 **What to do:**
 In `report.py`, implement `_build_power_curve_figure(result, formula, factors, power_cfg, design_opts) -> str | None`:
