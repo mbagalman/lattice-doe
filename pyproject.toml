@@ -45,6 +45,12 @@ extras = [
   "tqdm>=4.65,<5",
   "xlsxwriter>=3.0,<4"
 ]
+# Optional dependencies for the Streamlit web front-end
+app = [
+  "streamlit>=1.30",
+  "plotly>=5.0",
+  "pyyaml>=6.0,<7"
+]
 # Convenience meta-group to install *everything* at once.
 # IMPORTANT: You cannot reference your own extras by name here; list their packages.
 all = [
@@ -55,7 +61,10 @@ all = [
   "seaborn>=0.11,<1",
   # extras
   "tqdm>=4.65,<5",
-  "xlsxwriter>=3.0,<4"
+  "xlsxwriter>=3.0,<4",
+  # app
+  "streamlit>=1.30",
+  "plotly>=5.0"
 ]
 
 [project.urls]

@@ -14,9 +14,9 @@ Tracks all work for **Enhancement #15** (Streamlit front-end).
 
 | ID | Title | Epic | Status | Claimed by |
 |----|-------|------|--------|------------|
-| [A1](#a1-project-scaffold) | Project scaffold | Setup | Open | |
-| [A2](#a2-session-state-schema) | Session state schema | Setup | Open | |
-| [A3](#a3-navigation--sidebar) | Navigation & sidebar | Setup | Open | |
+| [A1](#a1-project-scaffold) | Project scaffold | Setup | Done | Claude |
+| [A2](#a2-session-state-schema) | Session state schema | Setup | Done | Claude |
+| [A3](#a3-navigation--sidebar) | Navigation & sidebar | Setup | Done | Claude |
 | [B1](#b1-continuous-factor-rows) | Continuous factor rows | Factors | Open | |
 | [B2](#b2-categorical-factor-rows) | Categorical factor rows | Factors | Open | |
 | [B3](#b3-formula-input--patsy-validation) | Formula input & Patsy validation | Factors | Open | |
@@ -44,7 +44,7 @@ Tracks all work for **Enhancement #15** (Streamlit front-end).
 | [H2](#h2-streamlit-config) | Streamlit config | Deploy | Open | |
 | [H3](#h3-deployment-guide) | Deployment guide | Deploy | Open | |
 
-**Progress:** 0 / 29 tickets done.
+**Progress:** 3 / 29 tickets done.
 
 ---
 
@@ -83,10 +83,10 @@ Dependencies: none. Start here first; all other tickets depend on A1–A3.
 
 ### A1 Project scaffold
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 2–3 hours
-**Progress note:** *(leave notes here if interrupted)*
+**Progress note:** Complete.
 
 **What to do:**
 1. Create the directory tree above (`app/`, `app/pages/`, `app/components/`, `.streamlit/`).
@@ -97,19 +97,19 @@ Dependencies: none. Start here first; all other tickets depend on A1–A3.
 6. Verify: `pip install -e ".[app]"` succeeds and `streamlit run app/app.py` opens a blank page.
 
 **Acceptance criteria:**
-- [ ] `app/` directory and all stub files exist and are committed.
-- [ ] `pip install -e ".[app]"` installs without errors.
-- [ ] `streamlit run app/app.py` opens without a crash.
+- [x] `app/` directory and all stub files exist and are committed.
+- [x] `pip install -e ".[app]"` installs without errors.
+- [x] `streamlit run app/app.py` opens without a crash.
 
 ---
 
 ### A2 Session state schema
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** A1
-**Progress note:**
+**Progress note:** Complete. `app/state.py` contains `init_state()` (idempotent via `if key not in`) and `render_sidebar()`.
 
 **What to do:**
 Create `app/state.py` with a single function `init_state()` that populates `st.session_state` with default values for every key used across all pages. Call `init_state()` at the top of every page script.
@@ -149,18 +149,18 @@ Keys to define (with defaults):
 ```
 
 **Acceptance criteria:**
-- [ ] `state.py` exists with `init_state()`.
-- [ ] Calling `init_state()` twice is idempotent (uses `setdefault` or `if key not in`).
+- [x] `state.py` exists with `init_state()`.
+- [x] Calling `init_state()` twice is idempotent (uses `setdefault` or `if key not in`).
 
 ---
 
 ### A3 Navigation & sidebar
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** A1, A2
-**Progress note:**
+**Progress note:** Complete. Sidebar rendered via `render_sidebar()` in `state.py`; called from every page stub. Reset button clears all state keys and calls `st.rerun()`.
 
 **What to do:**
 1. Configure `app.py` as the Streamlit multipage entry point (Streamlit auto-discovers `pages/` directory).
@@ -172,9 +172,9 @@ Keys to define (with defaults):
 3. Add a sidebar "Reset all" button that clears `st.session_state` and reruns.
 
 **Acceptance criteria:**
-- [ ] Sidebar summary renders correctly.
-- [ ] "Reset all" clears state and returns to defaults.
-- [ ] All 4 pages are reachable from the nav.
+- [x] Sidebar summary renders correctly.
+- [x] "Reset all" clears state and returns to defaults.
+- [x] All 4 pages are reachable from the nav.
 
 ---
 
