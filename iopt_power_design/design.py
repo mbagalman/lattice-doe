@@ -476,7 +476,11 @@ def _fedorov_exchange_single(
     n_cand, p = X_cand.shape
 
     # --- Initial random design ---
-    idx = rng.choice(n_cand, size=min(n, n_cand), replace=False)
+    if n > n_cand:
+        raise ValueError(
+            f"n={n} exceeds candidate set size n_cand={n_cand}."
+        )
+    idx = rng.choice(n_cand, size=n, replace=False)
     in_design = np.zeros(n_cand, dtype=bool)
     in_design[idx] = True
 
@@ -947,6 +951,13 @@ def build_i_opt_design_with_idx(
         ) from e
 
     n_cand = len(cand)
+    if n > n_cand:
+        raise ValueError(
+            f"Requested design size n={n} exceeds the candidate set size "
+            f"n_cand={n_cand}. Increase candidate_points (or disable "
+            "auto_candidate and set a larger value) to generate a bigger "
+            "candidate pool, or reduce the target sample size."
+        )
     estimated_bytes = n_cand * p * 8  # 8 bytes per float64
     limit_bytes = memory_limit_gb * (1024**3)
 
