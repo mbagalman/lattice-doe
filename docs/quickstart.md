@@ -84,7 +84,40 @@ Outputs:
 2. Add runs to an existing design: use `augment_design(...)`.
 3. Sensitivity and MDE checks: use `power_sensitivity(...)` and `min_detectable_effect(...)`.
 
-## 5) If something fails
+## 5) Streamlit web UI
+
+The interactive web front-end lets you configure and run designs without writing code.
+
+### Local run
+
+```bash
+# Install the package with Streamlit and Plotly
+pip install -e ".[app]"
+
+# Launch the app (opens in your browser at http://localhost:8501)
+streamlit run app/app.py
+```
+
+### Streamlit Community Cloud (free hosting)
+
+1. Push this repository to GitHub (already done if you're reading this there).
+2. Go to [share.streamlit.io](https://share.streamlit.io) and click **New app**.
+3. Select your repository and set **Main file path** to `app/app.py`.
+4. Click **Deploy** — no secrets or environment variables required.
+
+### Docker
+
+Build and run with the included `Dockerfile`:
+
+```bash
+# Build the image (from the project root)
+docker build -t iopt-doe .
+
+# Run — app available at http://localhost:8501
+docker run -p 8501:8501 iopt-doe
+```
+
+## 6) If something fails
 
 - `ValueError: power_cfg.max_n must be greater than p`:
   increase `max_n` or simplify the formula.

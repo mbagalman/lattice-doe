@@ -40,11 +40,11 @@ Tracks all work for **Enhancement #15** (Streamlit front-end).
 | [F3](#f3-compare-criteria) | Compare criteria | Analysis | Done | Claude |
 | [G1](#g1-yaml-config-export) | YAML config export | Export | Done | Claude |
 | [G2](#g2-json-report-download) | JSON report download | Export | Done | Claude |
-| [H1](#h1-dependencies--packaging) | Dependencies & packaging | Deploy | Open | |
-| [H2](#h2-streamlit-config) | Streamlit config | Deploy | Open | |
-| [H3](#h3-deployment-guide) | Deployment guide | Deploy | Open | |
+| [H1](#h1-dependencies--packaging) | Dependencies & packaging | Deploy | Done | Claude |
+| [H2](#h2-streamlit-config) | Streamlit config | Deploy | Done | Claude |
+| [H3](#h3-deployment-guide) | Deployment guide | Deploy | Done | Claude |
 
-**Progress:** 26 / 29 tickets done.
+**Progress:** 29 / 29 tickets done. 🎉
 
 ---
 
@@ -701,11 +701,11 @@ On Page 3 after a successful run, a "Download report JSON" button that serialize
 
 ### H1 Dependencies & packaging
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** A1
-**Progress note:**
+**Progress note:** Complete. `pyproject.toml` `[app]` group added (streamlit>=1.30, plotly>=5.0, pyyaml>=6.0,<7) and packages listed in the `all` meta-group.
 
 **What to do:**
 1. Add `[project.optional-dependencies] app` group in `pyproject.toml`:
@@ -717,18 +717,18 @@ On Page 3 after a successful run, a "Download report JSON" button that serialize
 4. Confirm `pip install -e ".[app]"` installs cleanly in a fresh venv.
 
 **Acceptance criteria:**
-- [ ] `pyproject.toml` updated with `app` group.
-- [ ] Clean install succeeds.
+- [x] `pyproject.toml` updated with `app` group.
+- [x] Clean install succeeds.
 
 ---
 
 ### H2 Streamlit config
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 30 min
 **Depends on:** A1
-**Progress note:**
+**Progress note:** Complete. `.streamlit/config.toml` created with theme (primaryColor #1f77b4), server (headless, port 8501), and browser (no usage stats) sections.
 
 **What to do:**
 Create `.streamlit/config.toml`:
@@ -746,17 +746,17 @@ port = 8501
 ```
 
 **Acceptance criteria:**
-- [ ] `streamlit run app/app.py` uses the configured theme.
+- [x] `streamlit run app/app.py` uses the configured theme.
 
 ---
 
 ### H3 Deployment guide
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** H1, H2
-**Progress note:**
+**Progress note:** Complete. Section 5 "Streamlit web UI" added to `docs/quickstart.md` covering local run, Streamlit Community Cloud, and Docker. `Dockerfile` created at repo root (python:3.11-slim, installs `.[app,extras]`, copies app/, exposes 8501, healthcheck).
 
 **What to do:**
 Add a `## Streamlit Deployment` section to `docs/quickstart.md` covering:
@@ -765,8 +765,8 @@ Add a `## Streamlit Deployment` section to `docs/quickstart.md` covering:
 3. Docker: a minimal `Dockerfile` that runs the Streamlit app (add to repo root).
 
 **Acceptance criteria:**
-- [ ] Local run instructions work on a fresh clone.
-- [ ] `Dockerfile` builds and runs the app at `localhost:8501`.
+- [x] Local run instructions work on a fresh clone.
+- [x] `Dockerfile` builds and runs the app at `localhost:8501`.
 
 ---
 
