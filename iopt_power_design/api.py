@@ -34,12 +34,9 @@ import warnings
 from patsy import dmatrix  # ADDED: For early formula validation
 
 from .config import PowerContrastConfig, PowerR2Config, DesignOptions
-from .design import (
-    estimate_candidate_size,
-    build_candidate,
-    build_model_matrix,
-    build_i_opt_design_with_idx,
-)
+from .candidate import estimate_candidate_size, build_candidate
+from .model_matrix import build_model_matrix
+from .iopt_search import build_i_opt_design_with_idx
 from .diag_metrics import compute_design_metrics
 from .diag_export import export_diagnostics
 from .power import contrast_power, global_r2_power, _r2_df_num

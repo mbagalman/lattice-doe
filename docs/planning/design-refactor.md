@@ -14,16 +14,16 @@ Tracks all work for **TD-1** (splitting `design.py` into focused modules).
 
 | ID | Title | Epic | Status | Claimed by |
 |----|-------|------|--------|------------|
-| [A1](#a1-create-candidatepy) | Create `candidate.py` | Candidate | Open | |
-| [B1](#b1-create-model_matrixpy) | Create `model_matrix.py` | Model matrix | Open | |
-| [C1](#c1-create-iopt_searchpy--criterion-core) | Create `iopt_search.py` — criterion core | Search core | Open | |
-| [D1](#d1-iopt_searchpy--multi-start--public-api--augmentation) | `iopt_search.py` — multi-start + public API + augmentation | Search orchestration | Open | |
-| [E1](#e1-replace-designpy-with-backward-compat-wrapper) | Replace `design.py` with backward-compat wrapper | Wrapper | Open | |
-| [F1](#f1-update-callers-to-import-from-new-modules) | Update callers to import from new modules | Callers | Open | |
-| [G1](#g1-update-tests--final-verification) | Update tests + final verification | Tests | Open | |
-| [G2](#g2-documentation-updates) | Documentation updates | Docs | Open | |
+| [A1](#a1-create-candidatepy) | Create `candidate.py` | Candidate | Done | Claude |
+| [B1](#b1-create-model_matrixpy) | Create `model_matrix.py` | Model matrix | Done | Claude |
+| [C1](#c1-create-iopt_searchpy--criterion-core) | Create `iopt_search.py` — criterion core | Search core | Done | Claude |
+| [D1](#d1-iopt_searchpy--multi-start--public-api--augmentation) | `iopt_search.py` — multi-start + public API + augmentation | Search orchestration | Done | Claude |
+| [E1](#e1-replace-designpy-with-backward-compat-wrapper) | Replace `design.py` with backward-compat wrapper | Wrapper | Done | Claude |
+| [F1](#f1-update-callers-to-import-from-new-modules) | Update callers to import from new modules | Callers | Done | Claude |
+| [G1](#g1-update-tests--final-verification) | Update tests + final verification | Tests | Done | Claude |
+| [G2](#g2-documentation-updates) | Documentation updates | Docs | Done | Claude |
 
-**Progress:** 0 / 8 tickets done.
+**Progress:** 8 / 8 tickets done. ✅
 
 ---
 

@@ -25,7 +25,9 @@ from .api import (  # noqa: F401
 )
 from .power_curves import power_surface_2d  # noqa: F401
 from .config import DesignOptions  # noqa: F401
-from .design import build_candidate, build_model_matrix, augment_design  # noqa: F401
+from .candidate import build_candidate  # noqa: F401
+from .model_matrix import build_model_matrix  # noqa: F401
+from .iopt_search import augment_design  # noqa: F401
 from .report import generate_report  # noqa: F401
 
 __all__ = [

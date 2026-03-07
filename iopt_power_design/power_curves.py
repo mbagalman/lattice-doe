@@ -25,13 +25,9 @@ import numpy as np
 import pandas as pd
 
 from .config import PowerContrastConfig, PowerR2Config, DesignOptions
-from .design import (
-    build_candidate,
-    build_model_matrix,
-    build_i_opt_design,
-    build_i_opt_design_with_idx,
-    estimate_candidate_size,
-)
+from .candidate import build_candidate, estimate_candidate_size
+from .model_matrix import build_model_matrix
+from .iopt_search import build_i_opt_design, build_i_opt_design_with_idx
 from .power import contrast_power, global_r2_power
 
 # Optional plotting support

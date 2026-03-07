@@ -4,10 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from iopt_power_design.design import (
+from iopt_power_design.candidate import (
     build_candidate,
-    build_model_matrix,
     estimate_candidate_size,
+)
+from iopt_power_design.model_matrix import build_model_matrix
+from iopt_power_design.iopt_search import (
     build_i_opt_design,
     build_i_opt_design_with_idx,
     _i_criterion_for_indices,

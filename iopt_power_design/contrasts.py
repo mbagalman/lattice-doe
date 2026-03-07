@@ -28,7 +28,8 @@ from typing import Dict, Tuple, Union, Any
 import numpy as np
 import pandas as pd
 
-from .design import build_candidate, build_model_matrix
+from .candidate import build_candidate
+from .model_matrix import build_model_matrix
 
 FactorSpec = Dict[str, Union[list, tuple]]
 Scenario = Dict[str, Union[int, float, str]]
