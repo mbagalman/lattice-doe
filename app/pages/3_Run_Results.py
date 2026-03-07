@@ -438,7 +438,7 @@ st.markdown("---")
 # E6 — Export (Excel + redundant CSV buttons)
 # ---------------------------------------------------------------------------
 st.subheader("Export")
-exp_cols = st.columns([1, 1, 2])
+exp_cols = st.columns([1, 1, 1, 1])
 
 with exp_cols[0]:
     st.download_button(
@@ -460,3 +460,16 @@ with exp_cols[1]:
         )
     else:
         st.info("Install `iopt-power-design[extras]` to enable Excel export.")
+
+# G2 — JSON report download
+with exp_cols[2]:
+    import json as _json
+    _report_json = _json.dumps(_jsonify(report), indent=2).encode()
+    st.download_button(
+        "\u2b07 Report JSON",
+        data=_report_json,
+        file_name="iopt_report.json",
+        mime="application/json",
+        use_container_width=True,
+        help="Download the full run report as a JSON file.",
+    )

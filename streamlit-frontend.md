@@ -35,16 +35,16 @@ Tracks all work for **Enhancement #15** (Streamlit front-end).
 | [E4](#e4-buckets-table--csv-download) | Buckets table & CSV download | Results | Done | Claude |
 | [E5](#e5-power-curve-chart) | Power curve chart | Results | Done | Claude |
 | [E6](#e6-excel-download) | Excel download | Results | Done | Claude |
-| [F1](#f1-sensitivity-analysis) | Sensitivity analysis | Analysis | Open | |
-| [F2](#f2-minimum-detectable-effect) | Minimum detectable effect | Analysis | Open | |
-| [F3](#f3-compare-criteria) | Compare criteria | Analysis | Open | |
-| [G1](#g1-yaml-config-export) | YAML config export | Export | Open | |
-| [G2](#g2-json-report-download) | JSON report download | Export | Open | |
+| [F1](#f1-sensitivity-analysis) | Sensitivity analysis | Analysis | Done | Claude |
+| [F2](#f2-minimum-detectable-effect) | Minimum detectable effect | Analysis | Done | Claude |
+| [F3](#f3-compare-criteria) | Compare criteria | Analysis | Done | Claude |
+| [G1](#g1-yaml-config-export) | YAML config export | Export | Done | Claude |
+| [G2](#g2-json-report-download) | JSON report download | Export | Done | Claude |
 | [H1](#h1-dependencies--packaging) | Dependencies & packaging | Deploy | Open | |
 | [H2](#h2-streamlit-config) | Streamlit config | Deploy | Open | |
 | [H3](#h3-deployment-guide) | Deployment guide | Deploy | Open | |
 
-**Progress:** 21 / 29 tickets done.
+**Progress:** 26 / 29 tickets done.
 
 ---
 
@@ -589,11 +589,11 @@ If not installed, show a grey info box: "Install `iopt-power-design[extras]` to 
 
 ### F1 Sensitivity analysis
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 2–3 hours
 **Depends on:** E1
-**Progress note:**
+**Progress note:** Complete. `power_sensitivity()` sweep in `4_Analysis.py`; Plotly line chart with nominal-power and target-power reference lines; contrast mode sweeps σ, R² mode sweeps r2_target.
 
 **What to do:**
 In `app/pages/4_Analysis.py`, if no result exists show "Run a design first (Page 3)".
@@ -604,18 +604,18 @@ Otherwise, section "Sensitivity analysis":
 3. Show nominal power as a horizontal reference line.
 
 **Acceptance criteria:**
-- [ ] Sensitivity chart renders for both modes.
-- [ ] Nominal power reference line is visible.
+- [x] Sensitivity chart renders for both modes.
+- [x] Nominal power reference line is visible.
 
 ---
 
 ### F2 Minimum detectable effect
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** E1
-**Progress note:**
+**Progress note:** Complete. `min_detectable_effect()` called on fixed design; contrast mode shows scale factor and absolute δ; R² mode shows min R² and Cohen's f²; achieved power shown as st.metric.
 
 **What to do:**
 Section "Minimum detectable effect (MDE)":
@@ -627,18 +627,18 @@ For contrast mode display as "Scale factor on delta" and the absolute delta valu
 For R² mode display as "Minimum detectable R²".
 
 **Acceptance criteria:**
-- [ ] MDE renders for both modes.
-- [ ] Achieved power at MDE is shown.
+- [x] MDE renders for both modes.
+- [x] Achieved power at MDE is shown.
 
 ---
 
 ### F3 Compare criteria
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 2 hours
 **Depends on:** E1
-**Progress note:**
+**Progress note:** Complete. `compare_criteria()` called with selected criteria; summary dataframe with formatting; Plotly grouped bar chart (power bars + n diamond markers on secondary axis); per-criterion CSV download buttons.
 
 **What to do:**
 Section "Compare optimality criteria":
@@ -648,8 +648,8 @@ Section "Compare optimality criteria":
 4. Render Plotly grouped bar chart of `achieved_power` and `n` by criterion.
 
 **Acceptance criteria:**
-- [ ] Summary table renders with all columns.
-- [ ] Bar chart shows both metrics side by side.
+- [x] Summary table renders with all columns.
+- [x] Bar chart shows both metrics side by side.
 
 ---
 
@@ -659,11 +659,11 @@ Section "Compare optimality criteria":
 
 ### G1 YAML config export
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 2 hours
 **Depends on:** A2
-**Progress note:**
+**Progress note:** Complete. `_build_yaml()` in `4_Analysis.py` serializes session state to CLI-compatible YAML (factors, formula, alpha, power, contrast/R² block, design options); preview expander + download button at top of page 4.
 
 **What to do:**
 In the sidebar (or on Page 3 after a run), a "Download YAML config" button.
@@ -673,25 +673,25 @@ Build a YAML string from the current session state that is a valid input for the
 This allows users to reproduce any UI-generated run from the CLI or Python API.
 
 **Acceptance criteria:**
-- [ ] Downloaded YAML passes `iopt-design --config <file> --dry-run` without errors.
-- [ ] YAML is available before a run (reflects current config, not results).
+- [x] Downloaded YAML passes `iopt-design --config <file> --dry-run` without errors.
+- [x] YAML is available before a run (reflects current config, not results).
 
 ---
 
 ### G2 JSON report download
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 30 min
 **Depends on:** E1
-**Progress note:**
+**Progress note:** Complete. "Report JSON" download button added to page 3 export section (alongside Design CSV and Excel) and also on page 4. Uses `_jsonify()` for numpy serialization.
 
 **What to do:**
 On Page 3 after a successful run, a "Download report JSON" button that serializes `result["report"]` to JSON (handle numpy types with a custom encoder) and offers as a download.
 
 **Acceptance criteria:**
-- [ ] Downloaded JSON is valid and contains all report keys.
-- [ ] numpy `float64` / `int64` values are correctly serialized (not `NaN` or type errors).
+- [x] Downloaded JSON is valid and contains all report keys.
+- [x] numpy `float64` / `int64` values are correctly serialized (not `NaN` or type errors).
 
 ---
 
