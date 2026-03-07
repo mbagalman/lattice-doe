@@ -115,7 +115,14 @@ def _validate_config_keys(cfg: Dict[str, Any]) -> None:
         )
         
     if "contrast" in cfg:
-        c = cfg.get("contrast") or {}
+        c = cfg.get("contrast")
+        if not isinstance(c, dict):
+            raise KeyError(
+                f"Config validation failed: 'contrast' must be a mapping, "
+                f"got {type(c).__name__!r}. "
+                "Expected either {scenario_a, scenario_b, sesoi} for scenario mode "
+                "or {L, delta} for explicit matrix mode."
+            )
         is_scenario = {"scenario_a", "scenario_b", "sesoi"} <= c.keys()
         is_explicit = {"L", "delta"} <= c.keys()
         if not is_scenario and not is_explicit:

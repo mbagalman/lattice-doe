@@ -288,3 +288,47 @@ class TestCompileConstraintExpr:
         assert new_opts.constraint_expr == "A <= 10"
         assert callable(new_opts.constraint_func)
         assert new_opts.constraint_func(pd.Series({"A": 5.0})) is True
+
+
+# ---------------------------------------------------------------------------
+# Regression: _validate_config_keys raises cleanly on malformed contrast block
+# ---------------------------------------------------------------------------
+
+class TestValidateConfigKeysContrastType:
+    """_validate_config_keys must raise KeyError with an actionable message
+    when 'contrast' is present but is not a dict (issue #3)."""
+
+    from iopt_power_design.cli import _validate_config_keys as _vcfg
+
+    _BASE = {
+        "formula": "~ 1 + A",
+        "factors": {"A": [0.0, 1.0]},
+    }
+
+    def _cfg(self, contrast_val):
+        return {**self._BASE, "contrast": contrast_val}
+
+    def test_contrast_as_string_raises_key_error(self):
+        with pytest.raises(KeyError, match="mapping"):
+            self._vcfg(self._cfg("linear"))
+
+    def test_contrast_as_list_raises_key_error(self):
+        with pytest.raises(KeyError, match="mapping"):
+            self._vcfg(self._cfg(["scenario_a", "scenario_b"]))
+
+    def test_contrast_as_int_raises_key_error(self):
+        with pytest.raises(KeyError, match="mapping"):
+            self._vcfg(self._cfg(42))
+
+    def test_contrast_as_null_raises_key_error(self):
+        # None is falsy; old code silently replaced it with {} and passed validation
+        with pytest.raises(KeyError, match="mapping"):
+            self._vcfg(self._cfg(None))
+
+    def test_valid_contrast_scenario_passes(self):
+        cfg = self._cfg({"scenario_a": {"A": 0}, "scenario_b": {"A": 1}, "sesoi": 0.5})
+        self._vcfg(cfg)  # must not raise
+
+    def test_valid_contrast_explicit_passes(self):
+        cfg = self._cfg({"L": [[1, 0]], "delta": [0.5]})
+        self._vcfg(cfg)  # must not raise
