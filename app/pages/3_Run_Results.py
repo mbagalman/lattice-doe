@@ -301,6 +301,7 @@ if run_clicked and not _issues and _HAS_IOPT:
             )
         ss["result"] = result
         ss["run_error"] = None
+        ss["_last_power_cfg"] = power_cfg
         st.rerun()
     except Exception as exc:
         ss["run_error"] = str(exc)
@@ -469,6 +470,8 @@ st.markdown("---")
 # ---------------------------------------------------------------------------
 # E6 — Export (Excel + redundant CSV buttons)
 # ---------------------------------------------------------------------------
+_HAS_JINJA2 = importlib.util.find_spec("jinja2") is not None
+
 st.subheader("Export")
 exp_cols = st.columns([1, 1, 1, 1])
 
@@ -505,3 +508,42 @@ with exp_cols[2]:
         use_container_width=True,
         help="Download the full run report as a JSON file.",
     )
+
+# D3 — HTML report download
+with exp_cols[3]:
+    if _HAS_JINJA2:
+        import tempfile as _tempfile
+        from iopt_power_design import generate_report as _generate_report
+        from iopt_power_design.config import PowerContrastConfig as _PCC, PowerR2Config as _PR2
+        _power_cfg_d3 = st.session_state.get("_last_power_cfg")
+        _formula_d3 = st.session_state.get("formula", "")
+        _factors_d3_raw = st.session_state.get("factors", [])
+        _factors_d3 = {f["name"]: (f["low"], f["high"]) if f["type"] == "Continuous" else list(f["levels"]) for f in _factors_d3_raw}
+        if _power_cfg_d3 is not None and _factors_d3:
+            try:
+                with _tempfile.NamedTemporaryFile(suffix=".html", delete=False) as _tmp:
+                    _tmp_path = _tmp.name
+                _generate_report(
+                    result=result,
+                    formula=_formula_d3,
+                    factors=_factors_d3,
+                    power_cfg=_power_cfg_d3,
+                    output_path=_tmp_path,
+                    include_power_curve=False,
+                )
+                _html_bytes = open(_tmp_path, "rb").read()
+                st.download_button(
+                    "\u2b07 HTML report",
+                    data=_html_bytes,
+                    file_name="iopt_report.html",
+                    mime="text/html",
+                    use_container_width=True,
+                    help="Download a self-contained HTML report (opens offline in any browser).",
+                )
+            except Exception as _rpt_err:
+                st.warning(f"Report generation failed: {_rpt_err}")
+        else:
+            st.button("\u2b07 HTML report", disabled=True, use_container_width=True,
+                      help="Re-run the design to generate the report.")
+    else:
+        st.info('Install `iopt-power-design[report]` to enable HTML report download.')

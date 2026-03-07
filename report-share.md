@@ -23,13 +23,13 @@ Tracks all work for **Enhancement #14** (PDF / HTML shareable report).
 | [B5](#b5-embedded-power-curve-figure) | Embedded power curve figure | Report Content | Done | Claude |
 | [C1](#c1-standalone-html-output) | Standalone HTML output | Export Backends | Done | Claude |
 | [C2](#c2-optional-pdf-export) | Optional PDF export (weasyprint) | Export Backends | Done | Claude |
-| [D1](#d1-api-integration) | API integration (`export_report_to=`) | Integration | Open | |
-| [D2](#d2-cli-integration) | CLI `--html-report` flag | Integration | Open | |
-| [D3](#d3-streamlit-download-button) | Streamlit "Download report" button | Integration | Open | |
+| [D1](#d1-api-integration) | API integration (`export_report_to=`) | Integration | Done | Claude |
+| [D2](#d2-cli-integration) | CLI `--html-report` flag | Integration | Done | Claude |
+| [D3](#d3-streamlit-download-button) | Streamlit "Download report" button | Integration | Done | Claude |
 | [E1](#e1-unit-tests) | Unit tests | Tests & Docs | Open | |
 | [E2](#e2-documentation-updates) | Documentation updates | Tests & Docs | Open | |
 
-**Progress:** 9 / 14 tickets done.
+**Progress:** 12 / 14 tickets done.
 
 ---
 
@@ -407,11 +407,11 @@ When `weasyprint` is present, also add `@media print` CSS adjustments in the tem
 
 ### D1 API integration
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** C1
-**Progress note:**
+**Progress note:** Complete. `export_report_to: Optional[str] = None` added to `i_optimal_powered_design()` signature in `api.py`. After the diagnostics export block, calls `generate_report()` with `include_power_curve=False` (keeps API call fast). Stores written path in `result["report"]["report_path"]`; stores error string in `report_path_error` on failure — design result always returned.
 
 **What to do:**
 Add `export_report_to=` parameter to `i_optimal_powered_design()` in `iopt_power_design/api.py`:
@@ -441,11 +441,11 @@ Behaviour:
 
 ### D2 CLI integration
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** D1
-**Progress note:**
+**Progress note:** Complete. `--html-report` argparse flag added to `cli.py`. Writes `<basename>_report.html` directly (does not go through `export_report_to=` on api — uses `generate_report()` directly so the path is deterministic). Also honoured via `output.html_report: true` in YAML. Report path printed in summary. `ImportError` and other failures emit `logger.warning()` and continue.
 
 **What to do:**
 In `iopt_power_design/cli.py`, add a `--html-report` flag:
@@ -475,11 +475,11 @@ output:
 
 ### D3 Streamlit download button
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** C1
-**Progress note:**
+**Progress note:** Complete. `_HAS_JINJA2` flag added via `importlib.util.find_spec`. `ss["_last_power_cfg"] = power_cfg` stored immediately after each successful run. Download button added in `exp_cols[3]` using `tempfile.NamedTemporaryFile(suffix=".html", delete=False)` — writes report to temp file, reads bytes back, offers `st.download_button("⬇ HTML report", ...)`. Falls back to `st.info(...)` when jinja2 is absent.
 
 **What to do:**
 In `app/pages/3_Run_Results.py`, add an HTML report download button in the export section (alongside the existing Design CSV, Excel, and JSON download buttons).

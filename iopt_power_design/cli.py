@@ -346,6 +346,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out", default="design", help="Output basename (no extension)")
     parser.add_argument("--excel", action="store_true", help="Also write an Excel workbook")
     parser.add_argument(
+        "--html-report",
+        action="store_true",
+        help="Write a self-contained HTML report alongside the CSV outputs "
+             "(requires iopt-power-design[report])",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate config and output path, then exit without running design generation."
@@ -474,6 +480,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.info(f"Wrote: {buckets_csv}")
         logger.info(f"Wrote: {report_json}")
 
+        # Optional HTML report (CLI flag or config key)
+        html_report_flag = args.html_report or bool(out_cfg.get("html_report", False))
+        if html_report_flag:
+            report_html = out_path.with_name(out_path.name + "_report.html")
+            try:
+                from .report import generate_report
+                generate_report(
+                    result=result,
+                    formula=formula,
+                    factors=factors,
+                    power_cfg=power_cfg,
+                    output_path=report_html,
+                    include_power_curve=False,
+                )
+                logger.info(f"Wrote: {report_html}")
+            except ImportError:
+                logger.warning(
+                    "HTML report skipped: jinja2 is not installed. "
+                    'Install it with: pip install "iopt-power-design[report]"'
+                )
+            except Exception as _rpt_err:
+                logger.warning(f"HTML report failed: {_rpt_err}")
+
         # Optional Excel (CLI flag has priority; config can also request excel)
         excel_flag = args.excel or bool(out_cfg.get("excel", False))
         if excel_flag:
@@ -494,6 +523,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"{'algo':>15}: {report.get('algo', 'N/A')}")
         print(f"{'starts':>15}: {report.get('starts', 'N/A')}")
         # --- Enhancement 10: richer run metadata ---
+        if html_report_flag and report_html.exists():
+            print(f"{'html_report':>15}: {report_html}")
         if "elapsed_sec" in report:
             print(f"{'elapsed_sec':>15}: {report['elapsed_sec']:.4f} s")
         if "search_strategy" in report:

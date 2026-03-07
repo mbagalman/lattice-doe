@@ -110,6 +110,7 @@ def i_optimal_powered_design(
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     design_opts: Optional[DesignOptions] = None,
     export_diagnostics_to: Optional[str] = None,
+    export_report_to: Optional[str] = None,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,  # ADDED
 ) -> Dict[str, Any]:
     """
@@ -129,6 +130,11 @@ def i_optimal_powered_design(
         Design generation and numerical options.
     export_diagnostics_to : str, optional
         If provided, exports diagnostics (plots/tables) to this path.
+    export_report_to : str, optional
+        If provided, writes a self-contained HTML report to this path (or
+        directory).  Requires ``jinja2``; install with
+        ``pip install "iopt-power-design[report]"``.  A failure here does
+        **not** prevent the design result from being returned.
     progress_callback : callable, optional
         Function to call after each iteration, passing the current 'report' dict.
         Useful for logging or progress bars.
@@ -525,6 +531,22 @@ def i_optimal_powered_design(
         except Exception as e:
             # Don’t fail main computation due to export issues
             best["report"]["diagnostic_exports_error"] = str(e)
+
+    # 7. Optional HTML report export
+    if export_report_to is not None:
+        try:
+            from .report import generate_report
+            report_path = generate_report(
+                result=best,
+                formula=formula,
+                factors=factors,
+                power_cfg=power_cfg,
+                output_path=export_report_to,
+                include_power_curve=False,  # skip curve to keep API call fast
+            )
+            best["report"]["report_path"] = str(report_path)
+        except Exception as e:
+            best["report"]["report_path_error"] = str(e)
 
     # Strip internal cache
     best.pop("_selected_idx", None)
