@@ -512,36 +512,48 @@ with exp_cols[2]:
 # D3 — HTML report download
 with exp_cols[3]:
     if _HAS_JINJA2:
+        import os as _os
         import tempfile as _tempfile
         from iopt_power_design import generate_report as _generate_report
-        from iopt_power_design.config import PowerContrastConfig as _PCC, PowerR2Config as _PR2
         _power_cfg_d3 = st.session_state.get("_last_power_cfg")
         _formula_d3 = st.session_state.get("formula", "")
         _factors_d3_raw = st.session_state.get("factors", [])
         _factors_d3 = {f["name"]: (f["low"], f["high"]) if f["type"] == "Continuous" else list(f["levels"]) for f in _factors_d3_raw}
         if _power_cfg_d3 is not None and _factors_d3:
-            try:
-                with _tempfile.NamedTemporaryFile(suffix=".html", delete=False) as _tmp:
-                    _tmp_path = _tmp.name
-                _generate_report(
-                    result=result,
-                    formula=_formula_d3,
-                    factors=_factors_d3,
-                    power_cfg=_power_cfg_d3,
-                    output_path=_tmp_path,
-                    include_power_curve=False,
-                )
-                _html_bytes = open(_tmp_path, "rb").read()
+            # Generate HTML once per result; cache bytes in session state so
+            # repeated renders (slider drags, etc.) don't re-write to disk.
+            _result_key = id(result)
+            if ss.get("_html_report_result_id") != _result_key:
+                _tmp_path = None
+                try:
+                    _fd, _tmp_path = _tempfile.mkstemp(suffix=".html")
+                    _os.close(_fd)
+                    _generate_report(
+                        result=result,
+                        formula=_formula_d3,
+                        factors=_factors_d3,
+                        power_cfg=_power_cfg_d3,
+                        output_path=_tmp_path,
+                        include_power_curve=False,
+                    )
+                    ss["_html_report_bytes"] = open(_tmp_path, "rb").read()
+                    ss["_html_report_result_id"] = _result_key
+                except Exception as _rpt_err:
+                    ss.pop("_html_report_bytes", None)
+                    ss.pop("_html_report_result_id", None)
+                    st.warning(f"Report generation failed: {_rpt_err}")
+                finally:
+                    if _tmp_path is not None and _os.path.exists(_tmp_path):
+                        _os.unlink(_tmp_path)
+            if ss.get("_html_report_bytes"):
                 st.download_button(
                     "\u2b07 HTML report",
-                    data=_html_bytes,
+                    data=ss["_html_report_bytes"],
                     file_name="iopt_report.html",
                     mime="text/html",
                     use_container_width=True,
                     help="Download a self-contained HTML report (opens offline in any browser).",
                 )
-            except Exception as _rpt_err:
-                st.warning(f"Report generation failed: {_rpt_err}")
         else:
             st.button("\u2b07 HTML report", disabled=True, use_container_width=True,
                       help="Re-run the design to generate the report.")
