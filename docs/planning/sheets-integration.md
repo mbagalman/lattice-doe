@@ -14,16 +14,16 @@ Tracks all work for **Enhancement 16** (bidirectional Google Sheets connector).
 
 | ID | Title | Epic | Status | Claimed by |
 |----|-------|------|--------|------------|
-| [A1](#a1-scaffolding--soft-dependency-guard) | Scaffolding + soft-dependency guard | Foundation | Open | |
-| [B1](#b1-config-sheet-parser) | Config sheet parser | Input parsing | Open | |
-| [C1](#c1-results-writer) | Results writer | Output | Open | |
-| [D1](#d1-create_sheet_template) | `create_sheet_template()` | Template | Open | |
-| [E1](#e1-sheets_run-orchestrator) | `sheets_run()` orchestrator | Orchestration | Open | |
-| [F1](#f1-wiring--cli-flag) | Wiring + CLI flag | Integration | Open | |
-| [G1](#g1-unit-tests) | Unit tests | Tests | Open | |
-| [G2](#g2-documentation-updates) | Documentation updates | Docs | Open | |
+| [A1](#a1-scaffolding--soft-dependency-guard) | Scaffolding + soft-dependency guard | Foundation | Done | Claude |
+| [B1](#b1-config-sheet-parser) | Config sheet parser | Input parsing | Done | Claude |
+| [C1](#c1-results-writer) | Results writer | Output | Done | Claude |
+| [D1](#d1-create_sheet_template) | `create_sheet_template()` | Template | Done | Claude |
+| [E1](#e1-sheets_run-orchestrator) | `sheets_run()` orchestrator | Orchestration | Done | Claude |
+| [F1](#f1-wiring--cli-flag) | Wiring + CLI flag | Integration | Done | Claude |
+| [G1](#g1-unit-tests) | Unit tests | Tests | Done | Claude |
+| [G2](#g2-documentation-updates) | Documentation updates | Docs | Done | Claude |
 
-**Progress:** 0 / 8 tickets done.
+**Progress:** 8 / 8 tickets done. ✅
 
 ---
 

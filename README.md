@@ -732,6 +732,59 @@ generate_report(..., output_path="report.pdf")
 
 ---
 
+## Google Sheets Integration
+
+Connect directly to a Google Spreadsheet to read your design config and write results back — no local YAML file needed.
+
+### Install
+
+```bash
+pip install "iopt-power-design[sheets]"
+```
+
+### Create a starter spreadsheet (once)
+
+```python
+from iopt_power_design import create_sheet_template
+
+# Creates a new spreadsheet with Config/Results/Design/Buckets sheets pre-filled
+url = create_sheet_template(
+    title="My DOE",
+    credentials="service_account.json",   # or None for OAuth2 browser flow
+    example="r2",                         # "r2" or "contrast"
+)
+print(url)  # open this URL, fill in your factors and formula, then run below
+```
+
+### Run from the spreadsheet
+
+```python
+from iopt_power_design import sheets_run
+
+result = sheets_run(url, credentials="service_account.json")
+print(f"Optimal n = {result['report']['n']}")
+print(f"Achieved power = {result['report']['achieved_power']:.3f}")
+# Design/Results/Buckets sheets are now populated in the spreadsheet
+```
+
+### CLI
+
+```bash
+iopt-design --sheets "https://docs.google.com/spreadsheets/d/…" \
+            --sheets-credentials service_account.json
+```
+
+If `--sheets-credentials` is omitted, the `GOOGLE_APPLICATION_CREDENTIALS` environment variable is checked, then an OAuth2 browser flow is used as a fallback.
+
+### Authentication
+
+| `credentials` value | Auth mode |
+|---------------------|-----------|
+| `"path/to/sa.json"` | Service account — for CI/automation; share the spreadsheet with the SA email |
+| `None` | OAuth2 browser flow — opens a tab on first use, caches token in `~/.config/gspread/` |
+
+---
+
 ## Candidate Set & Algorithm Details
 
 ### Factor specifications

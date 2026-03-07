@@ -368,11 +368,63 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="Enable verbose logging output (DEBUG level)"
     )
+    parser.add_argument(
+        "--sheets",
+        metavar="URL_OR_ID",
+        default=None,
+        help=(
+            "Google Spreadsheet URL or ID. Reads config from the 'Config' sheet "
+            "and writes design results back to Results/Design/Buckets sheets. "
+            "Requires: pip install 'iopt-power-design[sheets]'"
+        ),
+    )
+    parser.add_argument(
+        "--sheets-credentials",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to a service account JSON credentials file for Google Sheets. "
+            "If omitted, falls back to the GOOGLE_APPLICATION_CREDENTIALS env var, "
+            "then to OAuth2 browser flow."
+        ),
+    )
     args = parser.parse_args(argv)
 
     # Handle --template before anything else (no --config required)
     if args.template:
         _print_template(args.template)
+        return 0
+
+    # Handle --sheets before --config check (sheets path does not need --config)
+    if args.sheets:
+        try:
+            from iopt_power_design.sheets import sheets_run, SheetsError  # noqa: PLC0415
+        except ImportError:
+            print(
+                "Error: Google Sheets support requires gspread.\n"
+                "  pip install 'iopt-power-design[sheets]'",
+                file=sys.stderr,
+            )
+            return 1
+
+        creds = (
+            args.sheets_credentials
+            or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        )
+        try:
+            result = sheets_run(args.sheets, credentials=creds)
+        except SheetsError as e:
+            print(f"Sheets error: {e}", file=sys.stderr)
+            return 1
+
+        r = result["report"]
+        print(
+            f"Design written to spreadsheet.\n"
+            f"  n={r['n']}, p={r['p']}, "
+            f"achieved_power={r['achieved_power']:.3f}, "
+            f"elapsed={r.get('elapsed_sec', 0.0):.1f}s\n"
+            f"  {result['spreadsheet_url']}"
+        )
         return 0
 
     # --config is required for all other operations

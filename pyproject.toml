@@ -63,6 +63,11 @@ report-pdf = [
   "pillow>=9.0",
   "weasyprint>=60.0"
 ]
+# Optional dependencies for Google Sheets integration
+sheets = [
+  "gspread>=6.0",
+  "google-auth>=2.0",
+]
 # Convenience meta-group to install *everything* at once.
 # IMPORTANT: You cannot reference your own extras by name here; list their packages.
 all = [
@@ -79,7 +84,10 @@ all = [
   "plotly>=5.0",
   # report
   "jinja2>=3.0,<4",
-  "pillow>=9.0"
+  "pillow>=9.0",
+  # sheets
+  "gspread>=6.0",
+  "google-auth>=2.0",
 ]
 
 [project.urls]
