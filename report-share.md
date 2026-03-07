@@ -26,10 +26,10 @@ Tracks all work for **Enhancement #14** (PDF / HTML shareable report).
 | [D1](#d1-api-integration) | API integration (`export_report_to=`) | Integration | Done | Claude |
 | [D2](#d2-cli-integration) | CLI `--html-report` flag | Integration | Done | Claude |
 | [D3](#d3-streamlit-download-button) | Streamlit "Download report" button | Integration | Done | Claude |
-| [E1](#e1-unit-tests) | Unit tests | Tests & Docs | Open | |
-| [E2](#e2-documentation-updates) | Documentation updates | Tests & Docs | Open | |
+| [E1](#e1-unit-tests) | Unit tests | Tests & Docs | Done | Claude |
+| [E2](#e2-documentation-updates) | Documentation updates | Tests & Docs | Done | Claude |
 
-**Progress:** 12 / 14 tickets done.
+**Progress:** 14 / 14 tickets done.
 
 ---
 
@@ -506,11 +506,11 @@ Implementation:
 
 ### E1 Unit tests
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 2–3 hours
 **Depends on:** C1, D1
-**Progress note:**
+**Progress note:** Complete. `tests/test_report.py` created with 12 tests across 3 classes: `TestGenerateReportHTML` (9 tests — file creation, parseability, key sections, self-contained, contrast mode, R² mode, truncation note, directory path, no-extension path), `TestGenerateReportAPIIntegration` (2 tests — export_report_to= path, failure-does-not-crash), `TestPDFExportImportError` (1 test). Also fixed template bug: `power_mode == "contrast"` → `"Contrast-based"`. All 12 tests pass.
 
 **What to do:**
 Create `tests/test_report.py` with the following test classes:
@@ -540,11 +540,11 @@ Create `tests/test_report.py` with the following test classes:
 
 ### E2 Documentation updates
 
-**Status:** Open
-**Claimed by:**
+**Status:** Done
+**Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** D1, D2
-**Progress note:**
+**Progress note:** Complete. `README.md`: added `[report]` and `[report-pdf]` install lines to Installation section; added `[Shareable Reports]` TOC entry; added full `## Shareable Reports` section (Python API, inline optimizer, CLI flag, PDF note). `docs/quickstart.md`: added step 5b with code snippet. `docs/recipes.md`: added Recipe 7 with full inline + export_report_to= + PDF examples.
 
 **What to do:**
 

@@ -27,6 +27,7 @@ Looking for task-oriented examples? See [Recipes](docs/recipes.md).
 - [Comparing Criteria](#comparing-criteria)
 - [Augmenting Designs](#augmenting-an-existing-design)
 - [Diagnostics](#diagnostics)
+- [Shareable Reports](#shareable-reports)
 - [Candidate Set & Algorithm Details](#candidate-set--algorithm-details)
 - [Reproducibility](#reproducibility)
 - [Troubleshooting](#troubleshooting)
@@ -50,6 +51,12 @@ pip install -e ".[viz]"
 
 # With Streamlit web UI (interactive frontend)
 pip install -e ".[app]"
+
+# With shareable HTML report generation (Jinja2 + Pillow)
+pip install -e ".[report]"
+
+# With PDF export support (requires system-level weasyprint dependencies)
+pip install -e ".[report-pdf]"
 
 # With progress bars and Excel export
 pip install -e ".[extras]"
@@ -615,6 +622,76 @@ Diagnostics written to the output folder include:
 - **I-criterion** — average prediction variance over the candidate region
 
 Output formats: HTML tables, CSV, and optional plots.
+
+---
+
+## Shareable Reports
+
+Generate a self-contained HTML file (no external dependencies, works offline) that summarises the design configuration, power metrics, design table, diagnostics, and an embedded power-curve figure.
+
+### Install
+
+```bash
+pip install -e ".[report]"          # HTML reports (Jinja2 + Pillow)
+pip install -e ".[report-pdf]"      # also enables PDF export via weasyprint
+```
+
+### Python API
+
+```python
+from iopt_power_design import generate_report
+
+generate_report(
+    result=result,          # dict returned by i_optimal_powered_design()
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    output_path="./reports/my_design.html",   # .html or .pdf
+)
+```
+
+### Inline with the optimizer
+
+Pass `export_report_to=` directly to `i_optimal_powered_design()` to write the report immediately after the design is found:
+
+```python
+result = i_optimal_powered_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=opts,
+    export_report_to="./output/",   # writes iopt_report.html into this folder
+)
+
+# Path stored in result for reference
+print(result["report"]["report_path"])
+```
+
+If report generation fails (e.g. `jinja2` not installed), the error message is stored in `result["report"]["report_path_error"]` and the design result is still returned normally.
+
+### CLI
+
+```bash
+iopt-design --config my_config.yaml --out results --html-report
+# writes: results_report.html alongside results_design.csv, etc.
+```
+
+Or set it permanently in your YAML config:
+
+```yaml
+output:
+  html_report: true
+```
+
+### PDF export
+
+Replace the `.html` extension with `.pdf`:
+
+```python
+generate_report(..., output_path="report.pdf")
+```
+
+> **Note:** PDF export requires `weasyprint`, which depends on system-level libraries (`libpango`, `libcairo`, `libgdk-pixbuf`). These are unavailable on Streamlit Community Cloud and some CI environments. Install with `pip install -e ".[report-pdf]"` and follow the [weasyprint installation guide](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html) for your OS.
 
 ---
 

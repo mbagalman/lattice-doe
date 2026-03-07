@@ -84,6 +84,29 @@ Outputs:
 2. Add runs to an existing design: use `augment_design(...)`.
 3. Sensitivity and MDE checks: use `power_sensitivity(...)` and `min_detectable_effect(...)`.
 
+## 5b) Export a shareable HTML report
+
+After running a design you can generate a self-contained HTML file — no internet connection required, safe to email — with `generate_report()`:
+
+```bash
+# Install the report extra first
+pip install -e ".[report]"
+```
+
+```python
+from iopt_power_design import generate_report
+
+generate_report(
+    result=result,       # dict returned by i_optimal_powered_design()
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    output_path="./quickstart_report.html",
+)
+```
+
+The report includes the configuration summary, power metrics, design table, diagnostics, and an embedded power-curve figure. For PDF output, change the extension to `.pdf` (requires `pip install -e ".[report-pdf]"`). See [Shareable Reports](../README.md#shareable-reports) in the main README for all options.
+
 ## 5) Streamlit web UI
 
 The interactive web front-end lets you configure and run designs without writing code.

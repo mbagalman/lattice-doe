@@ -152,3 +152,38 @@ Recommendations:
 - Keep `formula`, `factors`, and `random_state` fixed.
 - Keep `starts`/`workers` fixed when comparing alternatives.
 - Persist `result["report"]` with each run to track diagnostics and metadata.
+
+## 7) Generate a shareable HTML report for a team member
+
+```bash
+pip install -e ".[report]"
+```
+
+```python
+from iopt_power_design import generate_report
+
+generate_report(
+    result=result,
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    output_path="./reports/my_design_report.html",
+)
+```
+
+The output is a single `.html` file with all CSS inline and figures embedded as base64 — no internet connection required. Share it by email or drop it in a shared folder; recipients can open it in any browser without installing Python.
+
+To write the report automatically when the design is found:
+
+```python
+result = i_optimal_powered_design(
+    formula, factors, power_cfg, opts,
+    export_report_to="./reports/",   # writes iopt_report.html into this folder
+)
+```
+
+For PDF output, change the extension to `.pdf` (requires `pip install -e ".[report-pdf]"`):
+
+```python
+generate_report(..., output_path="./reports/my_design_report.pdf")
+```
