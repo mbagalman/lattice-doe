@@ -29,12 +29,12 @@ Tracks all work for **Enhancement #15** (Streamlit front-end).
 | [D1](#d1-criterion-selector) | Criterion selector | Design Options | Done | Claude |
 | [D2](#d2-search-options) | Search options | Design Options | Done | Claude |
 | [D3](#d3-constraint-expression-input) | Constraint expression input | Design Options | Done | Claude |
-| [E1](#e1-run-button--error-handling) | Run button & error handling | Results | Open | |
-| [E2](#e2-report-metrics-card) | Report metrics card | Results | Open | |
-| [E3](#e3-design-table--csv-download) | Design table & CSV download | Results | Open | |
-| [E4](#e4-buckets-table--csv-download) | Buckets table & CSV download | Results | Open | |
-| [E5](#e5-power-curve-chart) | Power curve chart | Results | Open | |
-| [E6](#e6-excel-download) | Excel download | Results | Open | |
+| [E1](#e1-run-button--error-handling) | Run button & error handling | Results | Done | Claude |
+| [E2](#e2-report-metrics-card) | Report metrics card | Results | Done | Claude |
+| [E3](#e3-design-table--csv-download) | Design table & CSV download | Results | Done | Claude |
+| [E4](#e4-buckets-table--csv-download) | Buckets table & CSV download | Results | Done | Claude |
+| [E5](#e5-power-curve-chart) | Power curve chart | Results | Done | Claude |
+| [E6](#e6-excel-download) | Excel download | Results | Done | Claude |
 | [F1](#f1-sensitivity-analysis) | Sensitivity analysis | Analysis | Open | |
 | [F2](#f2-minimum-detectable-effect) | Minimum detectable effect | Analysis | Open | |
 | [F3](#f3-compare-criteria) | Compare criteria | Analysis | Open | |
@@ -44,7 +44,7 @@ Tracks all work for **Enhancement #15** (Streamlit front-end).
 | [H2](#h2-streamlit-config) | Streamlit config | Deploy | Open | |
 | [H3](#h3-deployment-guide) | Deployment guide | Deploy | Open | |
 
-**Progress:** 15 / 29 tickets done.
+**Progress:** 21 / 29 tickets done.
 
 ---
 
