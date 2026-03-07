@@ -43,6 +43,10 @@ from .design import (
 from .diagnostics import compute_design_metrics, export_diagnostics
 from .power import contrast_power, global_r2_power, _r2_df_num
 from .utils import validate_factors, initial_n_guess
+from .power_curves import (
+    power_curve_by_n as _power_curve_by_n_impl,
+    power_curve_by_effect as _power_curve_by_effect_impl,
+)
 
 
 def _buckets_df(design_df: pd.DataFrame) -> pd.DataFrame:
@@ -535,90 +539,19 @@ def power_curve_by_n(
     design_opts: Optional[DesignOptions] = None,
     plot: bool = False,
 ) -> pd.DataFrame:
-    """Sweep n to visualize power as design size grows."""
-    if design_opts is None:
-        design_opts = DesignOptions()
+    """Sweep n to visualize power as design size grows.
 
-    # ADDED: Validate inputs for 'p'
-    validate_factors(factors)
-    p = _validate_api_inputs(formula, factors, power_cfg)
-
-    if design_opts.auto_candidate:
-        candidate_points = estimate_candidate_size(
-            formula=formula,
-            factors=factors,
-            cand_min=design_opts.cand_min,
-            cand_max=design_opts.cand_max,
-            cat_cells_cap=design_opts.cat_cells_cap,
-            per_cell_alpha=design_opts.per_cell_alpha,
-            per_cell_min=design_opts.per_cell_min,
-            per_cell_max=design_opts.per_cell_max,
-            seed=design_opts.random_state,
-        )
-    else:
-        candidate_points = int(design_opts.candidate_points)
-
-    cand = build_candidate(
+    This function is a compatibility wrapper around the canonical implementation
+    in ``power_curves.py`` and returns only the curve DataFrame.
+    """
+    out = _power_curve_by_n_impl(
+        formula=formula,
         factors=factors,
-        candidate_points=candidate_points,
-        seed=design_opts.random_state,
-        constraint_func=design_opts.constraint_func,
-        cat_cells_cap=design_opts.cat_cells_cap,
+        power_cfg=power_cfg,
+        design_opts=design_opts,
+        plot=plot,
     )
-    X_cand, _ = build_model_matrix(formula, cand)
-    # Re-check p
-    if X_cand.shape[1] != p:
-        p = X_cand.shape[1]
-
-    n_min = max(p + 1, 4)
-    n_vals = list(range(n_min, min(n_min + 20, 2 * n_min)))
-
-    rows = []
-    for n in n_vals:
-        design_df, selected_idx, _ = build_i_opt_design_with_idx(
-            cand=cand,
-            formula=formula,
-            n=n,
-            criterion=design_opts.criterion,
-            n_start=max(2, design_opts.starts // 2),
-            algo=design_opts.algo,
-            max_iter=design_opts.max_iter,
-            random_state=design_opts.random_state,
-            workers=design_opts.workers,
-            parallel_seed_stride=design_opts.parallel_seed_stride,
-        )
-        X = X_cand[selected_idx, :]
-        if isinstance(power_cfg, PowerContrastConfig):
-            power, _ = contrast_power(
-                L=power_cfg.L,
-                delta=power_cfg.delta,
-                X=X,
-                sigma=power_cfg.sigma,
-                alpha=power_cfg.alpha,
-                jitter=design_opts.xtx_jitter,
-            )
-        else:
-            power, _ = global_r2_power(
-                r2_target=power_cfg.r2_target,
-                X=X,
-                alpha=power_cfg.alpha,
-                lambda_mode=power_cfg.lambda_mode,
-            )
-        rows.append({"n": int(n), "power": float(power)})
-
-    df = pd.DataFrame(rows)
-    if plot:
-        try:
-            import matplotlib.pyplot as plt
-            fig = plt.figure()
-            plt.plot(df["n"], df["power"], marker="o")
-            plt.xlabel("n")
-            plt.ylabel("Power")
-            plt.title("Power vs n")
-            plt.grid(True, alpha=0.3)
-        except Exception:
-            pass
-    return df
+    return out["data"]
 
 
 def power_curve_by_effect(
@@ -629,92 +562,25 @@ def power_curve_by_effect(
     design_opts: Optional[DesignOptions] = None,
     plot: bool = False,
 ) -> pd.DataFrame:
-    """Sweep effect size (δ for contrast, R² for global) at fixed n."""
-    if design_opts is None:
-        design_opts = DesignOptions()
+    """Sweep effect size (δ for contrast, R² for global) at fixed n.
 
-    # ADDED: Validate inputs for 'p'
-    validate_factors(factors)
-    p = _validate_api_inputs(formula, factors, power_cfg)
-    
-    if n <= p:
-        raise ValueError(
-            f"Target n ({n}) must be greater than number of parameters p ({p}) "
-            "for power_curve_by_effect."
-        )
-
-    if design_opts.auto_candidate:
-        candidate_points = estimate_candidate_size(
-            formula=formula,
-            factors=factors,
-            cand_min=design_opts.cand_min,
-            cand_max=design_opts.cand_max,
-            cat_cells_cap=design_opts.cat_cells_cap,
-            per_cell_alpha=design_opts.per_cell_alpha,
-            per_cell_min=design_opts.per_cell_min,
-            per_cell_max=design_opts.per_cell_max,
-            seed=design_opts.random_state,
-        )
-    else:
-        candidate_points = int(design_opts.candidate_points)
-
-    cand = build_candidate(
-        factors=factors,
-        candidate_points=candidate_points,
-        seed=design_opts.random_state,
-        constraint_func=design_opts.constraint_func,
-        cat_cells_cap=design_opts.cat_cells_cap,
-    )
-    X_cand, _ = build_model_matrix(formula, cand)
-    design_df, selected_idx, _ = build_i_opt_design_with_idx(
-        cand=cand,
+    This function is a compatibility wrapper around the canonical implementation
+    in ``power_curves.py`` and returns only the curve DataFrame.
+    """
+    out = _power_curve_by_effect_impl(
         formula=formula,
+        factors=factors,
         n=n,
-        criterion=design_opts.criterion,
-        n_start=design_opts.starts,
-        algo=design_opts.algo,
-        max_iter=design_opts.max_iter,
-        random_state=design_opts.random_state,
-        workers=design_opts.workers,
-        parallel_seed_stride=design_opts.parallel_seed_stride,
+        power_cfg=power_cfg,
+        design_opts=design_opts,
+        plot=plot,
     )
-    X = X_cand[selected_idx, :]
-
-    rows = []
-    if isinstance(power_cfg, PowerContrastConfig):
-        for scale in [0.25, 0.5, 0.75, 1.0, 1.25]:
-            power, _ = contrast_power(
-                L=power_cfg.L,
-                delta=power_cfg.delta * scale,
-                X=X,
-                sigma=power_cfg.sigma,
-                alpha=power_cfg.alpha,
-                jitter=design_opts.xtx_jitter,
-            )
-            rows.append({"effect_scale": float(scale), "power": float(power)})
-    else:
-        for r2 in [0.05, 0.1, 0.2, 0.3, 0.4]:
-            power, _ = global_r2_power(
-                r2_target=r2,
-                X=X,
-                alpha=power_cfg.alpha,
-                lambda_mode=power_cfg.lambda_mode,
-            )
-            rows.append({"r2_target": float(r2), "power": float(power)})
-
-    df = pd.DataFrame(rows)
-    if plot:
-        try:
-            import matplotlib.pyplot as plt
-            fig = plt.figure()
-            x = "effect_scale" if "effect_scale" in df.columns else "r2_target"
-            plt.plot(df[x], df["power"], marker="o")
-            plt.xlabel(x)
-            plt.ylabel("Power")
-            plt.title("Power vs effect size")
-            plt.grid(True, alpha=0.3)
-        except Exception:
-            pass
+    df = out["data"].copy()
+    if "effect_size" in df.columns:
+        if isinstance(power_cfg, PowerContrastConfig):
+            df = df.rename(columns={"effect_size": "effect_scale"})
+        else:
+            df = df.rename(columns={"effect_size": "r2_target"})
     return df
 
 
