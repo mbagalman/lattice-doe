@@ -95,23 +95,13 @@ class TestSheetsImportGuard:
 # ---------------------------------------------------------------------------
 
 class TestGetClient:
-    def test_service_account_path_calls_from_service_account_file(self):
+    def test_service_account_path_calls_gspread_service_account(self):
         mg = _make_mock_gspread()
-        mock_creds_cls = MagicMock()
-        mock_creds_cls.from_service_account_file.return_value = MagicMock()
         with patch.object(sheets_module, "_HAS_GSPREAD", True), \
-             patch.object(sheets_module, "gspread", mg, create=True), \
-             patch.object(sheets_module, "Credentials", mock_creds_cls, create=True):
+             patch.object(sheets_module, "gspread", mg, create=True):
             sheets_module._get_client("path/to/sa.json")
 
-        mock_creds_cls.from_service_account_file.assert_called_once_with(
-            "path/to/sa.json",
-            scopes=[
-                "https://spreadsheets.google.com/feeds",
-                "https://www.googleapis.com/auth/drive",
-            ],
-        )
-        mg.authorize.assert_called_once()
+        mg.service_account.assert_called_once_with(filename="path/to/sa.json")
 
     def test_none_credentials_calls_gspread_oauth(self):
         mg = _make_mock_gspread()

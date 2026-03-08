@@ -219,7 +219,7 @@ def _read_config_sheet(
     criterion    = settings.get("criterion", "I").strip() or "I"
     starts       = _int("starts",         5)
     max_iter_do  = _int("max_iter",       1000)
-    random_state = _int("random_state",   42)
+    random_state = _int("random_state",   123)
 
     try:
         design_opts = DesignOptions(
@@ -475,7 +475,7 @@ def create_excel_template(
 
     _key_cell(ws, r, "starts",       5);     r += 1
     _key_cell(ws, r, "max_iter",     1000);  r += 1
-    _key_cell(ws, r, "random_state", 42);    r += 1
+    _key_cell(ws, r, "random_state", 123);   r += 1
 
     r += 1  # blank separator
 

@@ -500,7 +500,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # --config is required for all other operations
     if args.config is None:
-        parser.error("--config is required (or use --template contrast|r2 to generate one)")
+        parser.error(
+            "--config is required. Alternatives: "
+            "--template {r2,contrast} to print a YAML scaffold, "
+            "--sheets URL to run from a Google Sheet, "
+            "--excel-template PATH to create an Excel workbook, or "
+            "--excel-run PATH to run from an existing Excel workbook."
+        )
 
     # --- ADDED: Setup Logging ---
     log_level = logging.DEBUG if args.verbose else logging.INFO
