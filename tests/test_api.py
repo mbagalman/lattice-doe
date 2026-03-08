@@ -20,6 +20,7 @@ from iopt_power_design import (
     min_detectable_effect,
     compare_criteria,
     augment_design,
+    robustness_report,
 )
 from iopt_power_design.contrasts import contrast_from_scenarios
 
@@ -764,3 +765,264 @@ class TestReportJsonSerialization:
             )
         # Full report must still be JSON-serializable
         json.dumps(result["report"])
+
+
+# ---------------------------------------------------------------------------
+# robustness_report
+# ---------------------------------------------------------------------------
+
+# Shared fixture: small fast design for robustness tests
+_ROB_OPTS = DesignOptions(candidate_points=100, starts=2, max_iter=40, random_state=7)
+
+
+def _contrast_design():
+    """Build a small contrast-mode design for robustness tests."""
+    from iopt_power_design.contrasts import contrast_from_scenarios
+    L, delta = contrast_from_scenarios(
+        FORMULA, FACTORS,
+        {"A": "low",  "B": 0.0},
+        {"A": "high", "B": 10.0},
+        sesoi=1.0,
+    )
+    cfg = PowerContrastConfig(L=L, delta=delta, sigma=1.0, power=0.8, max_n=80)
+    result = i_optimal_powered_design(FORMULA, FACTORS, cfg, design_opts=_ROB_OPTS)
+    return result["design_df"], cfg
+
+
+def _r2_design():
+    """Build a small R²-mode design for robustness tests."""
+    cfg = PowerR2Config(r2_target=0.30, power=0.8, max_n=80)
+    result = i_optimal_powered_design(FORMULA, FACTORS, cfg, design_opts=_ROB_OPTS)
+    return result["design_df"], cfg
+
+
+class TestRobustnessReport:
+    """Tests for robustness_report() in both contrast and R² modes."""
+
+    # ------------------------------------------------------------------
+    # Return structure — contrast mode
+    # ------------------------------------------------------------------
+
+    def test_contrast_returns_dict_with_expected_keys(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        for key in ("mode", "nominal_power", "effect_sweep", "sigma_sweep",
+                    "alpha_sweep", "summary", "thresholds", "figure"):
+            assert key in rob, f"Missing key: {key}"
+
+    def test_contrast_mode_field_is_contrast(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        assert rob["mode"] == "contrast"
+
+    def test_contrast_nominal_power_in_unit_interval(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        assert 0.0 <= rob["nominal_power"] <= 1.0
+
+    def test_contrast_effect_sweep_has_correct_columns(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        assert list(rob["effect_sweep"].columns) == [
+            "effect_scale", "power", "noncentrality_lambda"
+        ]
+
+    def test_contrast_effect_sweep_length_matches_points(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, effect_points=7)
+        assert len(rob["effect_sweep"]) == 7
+
+    def test_contrast_sigma_sweep_is_dataframe_not_none(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        assert rob["sigma_sweep"] is not None
+        assert list(rob["sigma_sweep"].columns) == ["sigma", "power", "noncentrality_lambda"]
+
+    def test_contrast_sigma_sweep_length_matches_points(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, sigma_points=5)
+        assert len(rob["sigma_sweep"]) == 5
+
+    def test_contrast_alpha_sweep_has_correct_columns(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        assert list(rob["alpha_sweep"].columns) == ["alpha", "power", "noncentrality_lambda"]
+
+    def test_contrast_alpha_sweep_length_matches_points(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, alpha_points=5)
+        assert len(rob["alpha_sweep"]) == 5
+
+    # ------------------------------------------------------------------
+    # Return structure — R² mode
+    # ------------------------------------------------------------------
+
+    def test_r2_returns_dict_with_expected_keys(self):
+        design_df, cfg = _r2_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                effect_range=(0.05, 0.5))
+        for key in ("mode", "nominal_power", "effect_sweep", "sigma_sweep",
+                    "alpha_sweep", "summary", "thresholds", "figure"):
+            assert key in rob
+
+    def test_r2_mode_field_is_r2(self):
+        design_df, cfg = _r2_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                effect_range=(0.05, 0.5))
+        assert rob["mode"] == "r2"
+
+    def test_r2_sigma_sweep_is_none(self):
+        """sigma does not affect R² power — sigma_sweep must be None."""
+        design_df, cfg = _r2_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                effect_range=(0.05, 0.5))
+        assert rob["sigma_sweep"] is None
+
+    def test_r2_effect_sweep_has_r2_target_column(self):
+        design_df, cfg = _r2_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                effect_range=(0.05, 0.5))
+        assert "r2_target" in rob["effect_sweep"].columns
+
+    def test_r2_thresholds_max_sigma_is_none(self):
+        design_df, cfg = _r2_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                effect_range=(0.05, 0.5))
+        assert rob["thresholds"]["max_sigma_for_target"] is None
+
+    # ------------------------------------------------------------------
+    # Summary statistics
+    # ------------------------------------------------------------------
+
+    def test_summary_has_expected_keys(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        for k in ("worst_power", "median_power", "best_power",
+                  "power_target", "pct_scenarios_passing"):
+            assert k in rob["summary"]
+
+    def test_summary_worst_le_median_le_best(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        s = rob["summary"]
+        assert s["worst_power"] <= s["median_power"] <= s["best_power"]
+
+    def test_summary_power_target_matches_config(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        assert rob["summary"]["power_target"] == pytest.approx(cfg.power)
+
+    def test_summary_pct_passing_in_unit_interval(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        assert 0.0 <= rob["summary"]["pct_scenarios_passing"] <= 1.0
+
+    # ------------------------------------------------------------------
+    # Threshold crossings
+    # ------------------------------------------------------------------
+
+    def test_thresholds_has_expected_keys(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
+        for k in ("max_sigma_for_target", "min_effect_for_target", "min_alpha_for_target"):
+            assert k in rob["thresholds"]
+
+    def test_max_sigma_threshold_is_within_sweep_range(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                sigma_range=(0.5, 2.0))
+        t = rob["thresholds"]["max_sigma_for_target"]
+        if t is not None:
+            assert 0.5 <= t <= 2.0
+
+    def test_min_effect_threshold_is_within_sweep_range(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                effect_range=(0.5, 2.0))
+        t = rob["thresholds"]["min_effect_for_target"]
+        if t is not None:
+            assert 0.5 <= t <= 2.0
+
+    def test_min_alpha_threshold_is_within_sweep_range(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                alpha_range=(0.01, 0.10))
+        t = rob["thresholds"]["min_alpha_for_target"]
+        if t is not None:
+            assert 0.01 <= t <= 0.10
+
+    # ------------------------------------------------------------------
+    # Power monotonicity
+    # ------------------------------------------------------------------
+
+    def test_power_increases_with_effect_scale(self):
+        """Higher delta scale → higher power."""
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                effect_range=(0.3, 2.0), effect_points=6)
+        powers = rob["effect_sweep"]["power"].values
+        # Not strictly required to be monotone at every step, but overall trend must hold
+        assert powers[0] <= powers[-1]
+
+    def test_power_decreases_with_sigma(self):
+        """Higher sigma → lower power."""
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                sigma_range=(0.5, 3.0), sigma_points=6)
+        powers = rob["sigma_sweep"]["power"].values
+        assert powers[0] >= powers[-1]
+
+    def test_power_decreases_with_stricter_alpha(self):
+        """Smaller alpha → stricter threshold → lower power."""
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
+                                alpha_range=(0.005, 0.10), alpha_points=6)
+        powers = rob["alpha_sweep"]["power"].values
+        assert powers[0] <= powers[-1]
+
+    # ------------------------------------------------------------------
+    # Validation errors
+    # ------------------------------------------------------------------
+
+    def test_invalid_sigma_range_raises(self):
+        design_df, cfg = _contrast_design()
+        with pytest.raises(ValueError, match="sigma_range"):
+            robustness_report(design_df, FORMULA, FACTORS, cfg,
+                              sigma_range=(2.0, 0.5))
+
+    def test_invalid_alpha_range_raises(self):
+        design_df, cfg = _contrast_design()
+        with pytest.raises(ValueError, match="alpha_range"):
+            robustness_report(design_df, FORMULA, FACTORS, cfg,
+                              alpha_range=(0.10, 0.01))
+
+    def test_invalid_effect_range_r2_above_one_raises(self):
+        design_df, cfg = _r2_design()
+        with pytest.raises(ValueError, match="effect_range"):
+            robustness_report(design_df, FORMULA, FACTORS, cfg,
+                              effect_range=(0.5, 1.5))
+
+    def test_sigma_points_below_two_raises(self):
+        design_df, cfg = _contrast_design()
+        with pytest.raises(ValueError, match="sigma_points"):
+            robustness_report(design_df, FORMULA, FACTORS, cfg, sigma_points=1)
+
+    def test_alpha_points_below_two_raises(self):
+        design_df, cfg = _contrast_design()
+        with pytest.raises(ValueError, match="alpha_points"):
+            robustness_report(design_df, FORMULA, FACTORS, cfg, alpha_points=1)
+
+    # ------------------------------------------------------------------
+    # Figure output
+    # ------------------------------------------------------------------
+
+    def test_figure_is_none_when_plot_false(self):
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, plot=False)
+        assert rob["figure"] is None
+
+    def test_figure_returned_when_plot_true(self):
+        pytest.importorskip("matplotlib")
+        design_df, cfg = _contrast_design()
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, plot=True)
+        assert rob["figure"] is not None

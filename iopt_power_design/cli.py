@@ -413,6 +413,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             "Requires: pip install 'iopt-power-design[extras]'"
         ),
     )
+    parser.add_argument(
+        "--robustness-report",
+        action="store_true",
+        default=False,
+        help=(
+            "After running the design search, print a compact robustness summary "
+            "showing how power changes across ranges of sigma, effect size, and alpha. "
+            "No additional dependencies required."
+        ),
+    )
     args = parser.parse_args(argv)
 
     # Handle --template before anything else (no --config required)
@@ -639,6 +649,39 @@ def main(argv: Optional[List[str]] = None) -> int:
                 buckets_df.to_excel(xw, index=False, sheet_name="buckets")
                 pd.DataFrame([report]).to_excel(xw, index=False, sheet_name="report")
             logger.info(f"Wrote: {excel_path}")
+
+        # Optional robustness report
+        if args.robustness_report:
+            try:
+                from iopt_power_design.analysis import robustness_report  # noqa: PLC0415
+                rob = robustness_report(
+                    design_df=design_df,
+                    formula=formula,
+                    factors=factors,
+                    power_cfg=power_cfg,
+                )
+                s = rob["summary"]
+                t = rob["thresholds"]
+                print("\n=== Robustness Report ===")
+                print(f"{'mode':>22}: {rob['mode']}")
+                print(f"{'nominal_power':>22}: {rob['nominal_power']:.3f}")
+                print(f"{'target_power':>22}: {s['power_target']:.2f}")
+                print(f"{'pct_scenarios_passing':>22}: {s['pct_scenarios_passing']:.1%}")
+                print(f"{'worst_power':>22}: {s['worst_power']:.3f}")
+                print(f"{'median_power':>22}: {s['median_power']:.3f}")
+                print(f"{'best_power':>22}: {s['best_power']:.3f}")
+                print("  Threshold crossings (where power = target):")
+                if t["max_sigma_for_target"] is not None:
+                    print(f"{'max_sigma':>22}: {t['max_sigma_for_target']:.4g}"
+                          "  (σ must not exceed this)")
+                if t["min_effect_for_target"] is not None:
+                    effect_label = "min_effect_scale" if rob["mode"] == "contrast" else "min_r2_target"
+                    print(f"{'':>22}  ({effect_label}: {t['min_effect_for_target']:.4g})")
+                if t["min_alpha_for_target"] is not None:
+                    print(f"{'min_alpha':>22}: {t['min_alpha_for_target']:.4g}"
+                          "  (α must not be below this)")
+            except Exception as _rob_err:
+                logger.warning(f"Robustness report failed: {_rob_err}")
 
         # Pretty-print short summary (This stays as print() to stdout)
         print("\n=== I-Optimal Powered Design ===")

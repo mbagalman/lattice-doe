@@ -17,6 +17,7 @@ generate_power_curves(...) — convenience wrapper combining both sweeps.
 power_sensitivity(...)     — sweep sigma or R² on a fixed design.
 min_detectable_effect(...) — invert the power curve to find the MDE.
 compare_criteria(...)      — run I/D/A designs in one call and compare results.
+robustness_report(...)     — multi-axis uncertainty summary for a fixed design.
 
 Note on return types
 --------------------
@@ -740,6 +741,480 @@ def compare_criteria(
     }
 
 
+# ---------------------------------------------------------------------------
+# robustness_report — multi-axis uncertainty summary for a fixed design
+# ---------------------------------------------------------------------------
+
+def _threshold_crossing(
+    values: np.ndarray,
+    powers: np.ndarray,
+    target: float,
+    increasing: bool,
+) -> Optional[float]:
+    """Return the linearly-interpolated x at which *powers* cross *target*.
+
+    Parameters
+    ----------
+    values : array-like
+        Swept x values (monotonically ordered).
+    powers : array-like
+        Corresponding power values.
+    target : float
+        The threshold to locate.
+    increasing : bool
+        True when power increases with *values* (e.g. effect size or r²).
+        False when power decreases with *values* (e.g. sigma).
+
+    Returns
+    -------
+    float or None
+        Interpolated crossing x, or None if the threshold is never crossed.
+    """
+    passing = powers >= target
+    if passing.all():
+        # All scenarios pass: return the "safe" edge value
+        return float(values[0]) if increasing else float(values[-1])
+    if not passing.any():
+        return None
+
+    if increasing:
+        # Power rises — find the first index that passes; interpolate left edge
+        first_pass = int(np.where(passing)[0][0])
+        if first_pass == 0:
+            return float(values[0])
+        x0, x1 = float(values[first_pass - 1]), float(values[first_pass])
+        p0, p1 = float(powers[first_pass - 1]), float(powers[first_pass])
+    else:
+        # Power falls — find the last index that passes; interpolate right edge
+        last_pass = int(np.where(passing)[0][-1])
+        if last_pass == len(values) - 1:
+            return float(values[-1])
+        x0, x1 = float(values[last_pass]), float(values[last_pass + 1])
+        p0, p1 = float(powers[last_pass]), float(powers[last_pass + 1])
+
+    if p1 == p0:
+        return x0
+    return float(x0 + (target - p0) * (x1 - x0) / (p1 - p0))
+
+
+def robustness_report(
+    design_df: pd.DataFrame,
+    formula: str,
+    factors: Dict[str, Any],
+    power_cfg: Union[PowerContrastConfig, PowerR2Config],
+    design_opts: Optional[DesignOptions] = None,
+    sigma_range: Tuple[float, float] = (0.5, 2.0),
+    sigma_points: int = 11,
+    effect_range: Optional[Tuple[float, float]] = None,
+    effect_points: int = 11,
+    alpha_range: Tuple[float, float] = (0.01, 0.10),
+    alpha_points: int = 9,
+    plot: bool = False,
+    figsize: Tuple[float, float] = (10, 4),
+    plot_backend: str = "matplotlib",
+) -> Dict[str, Any]:
+    """Multi-axis robustness summary for a fixed design.
+
+    Re-evaluates power across three independent assumption axes — effect size,
+    noise (sigma), and significance level (alpha) — using the **fixed** design
+    matrix from *design_df*.  No new I-optimal designs are built; all sweeps
+    are fast, purely analytical evaluations of the power formula.
+
+    For each axis the function reports:
+
+    * A 1-D sweep DataFrame (power as a function of that axis).
+    * A **threshold crossing**: the boundary value at which power transitions
+      through the target (e.g. the maximum sigma that still achieves the target
+      power).
+
+    Summary statistics (worst, median, best power; fraction of all scenarios
+    that pass the target) are computed by pooling every scenario from all three
+    sweeps.
+
+    Parameters
+    ----------
+    design_df : DataFrame
+        The fixed design to evaluate (e.g. ``result["design_df"]``).
+    formula : str
+        Patsy formula used when building *design_df*.
+    factors : dict
+        Factor specifications (only needed to rebuild the model matrix).
+    power_cfg : PowerContrastConfig or PowerR2Config
+        Power configuration.  The type determines how each axis is interpreted.
+    design_opts : DesignOptions, optional
+        Used only for ``xtx_jitter``.  Defaults to ``DesignOptions()``.
+    sigma_range : (lo, hi), default (0.5, 2.0)
+        Absolute sigma values for the sigma sweep.  **Contrast mode only**;
+        ignored in R² mode (sigma does not enter the R² power formula).
+    sigma_points : int, default 11
+        Number of evenly-spaced sigma values in the sweep.
+    effect_range : (lo, hi) or None
+        Range for the effect-size sweep.
+
+        * **Contrast mode** — scale factors applied to ``power_cfg.delta``
+          (e.g. ``(0.5, 2.0)`` means 0.5× to 2.0× the nominal delta).
+          Defaults to ``(0.5, 2.0)``.
+        * **R² mode** — direct ``r2_target`` values (e.g. ``(0.05, 0.50)``).
+          Defaults to ``(0.05, 0.50)``.
+    effect_points : int, default 11
+        Number of evenly-spaced values in the effect sweep.
+    alpha_range : (lo, hi), default (0.01, 0.10)
+        Significance levels for the alpha sweep (both modes).
+    alpha_points : int, default 9
+        Number of evenly-spaced alpha values in the sweep.
+    plot : bool, default False
+        If True, produce a summary figure (2 panels for R² mode, 3 panels for
+        contrast mode).
+    figsize : tuple, default (10, 4)
+        Figure size passed to matplotlib.
+    plot_backend : str, default "matplotlib"
+        Plotting backend; only ``"matplotlib"`` is currently supported.
+
+    Returns
+    -------
+    dict with keys:
+
+    ``mode``
+        ``"contrast"`` or ``"r2"``.
+    ``nominal_power``
+        Power at the configured nominal assumptions.
+    ``effect_sweep``
+        DataFrame — columns: ``effect_scale`` (contrast) or ``r2_target`` (R²),
+        ``power``, ``noncentrality_lambda``.
+    ``sigma_sweep``
+        DataFrame — columns: ``sigma``, ``power``, ``noncentrality_lambda``.
+        ``None`` in R² mode.
+    ``alpha_sweep``
+        DataFrame — columns: ``alpha``, ``power``, ``noncentrality_lambda``.
+    ``summary``
+        dict — ``worst_power``, ``median_power``, ``best_power``,
+        ``power_target``, ``pct_scenarios_passing``.
+    ``thresholds``
+        dict — ``max_sigma_for_target`` (contrast only, else ``None``),
+        ``min_effect_for_target``, ``min_alpha_for_target``.
+    ``figure``
+        matplotlib Figure if *plot* is True, else ``None``.
+
+    Raises
+    ------
+    ValueError
+        For invalid range parameters.
+
+    Examples
+    --------
+    >>> report = robustness_report(
+    ...     result["design_df"], formula, factors, power_cfg
+    ... )
+    >>> report["summary"]
+    {'worst_power': 0.42, 'median_power': 0.81, 'best_power': 0.99,
+     'power_target': 0.80, 'pct_scenarios_passing': 0.61}
+    >>> report["thresholds"]["max_sigma_for_target"]
+    1.43
+    """
+    if design_opts is None:
+        design_opts = DesignOptions()
+
+    # Build the model matrix once from the fixed design — all sweeps reuse X
+    X, _ = build_model_matrix(formula, design_df)
+    n = int(X.shape[0])
+    jitter = design_opts.xtx_jitter
+    mode = "contrast" if isinstance(power_cfg, PowerContrastConfig) else "r2"
+    power_target = float(power_cfg.power)
+
+    # ------------------------------------------------------------------ #
+    # Input validation                                                     #
+    # ------------------------------------------------------------------ #
+    if sigma_range[0] <= 0 or sigma_range[1] <= 0:
+        raise ValueError("sigma_range values must be > 0")
+    if sigma_range[0] >= sigma_range[1]:
+        raise ValueError("sigma_range[0] must be < sigma_range[1]")
+    if sigma_points < 2:
+        raise ValueError("sigma_points must be >= 2")
+    if alpha_range[0] <= 0 or alpha_range[1] <= 0:
+        raise ValueError("alpha_range values must be > 0")
+    if alpha_range[0] >= alpha_range[1]:
+        raise ValueError("alpha_range[0] must be < alpha_range[1]")
+    if alpha_range[0] >= 1 or alpha_range[1] >= 1:
+        raise ValueError("alpha_range values must be < 1")
+    if alpha_points < 2:
+        raise ValueError("alpha_points must be >= 2")
+
+    # Set mode-appropriate defaults for effect_range
+    if effect_range is None:
+        effect_range = (0.5, 2.0) if mode == "contrast" else (0.05, 0.50)
+
+    if effect_range[0] <= 0 or effect_range[1] <= 0:
+        raise ValueError("effect_range values must be > 0")
+    if effect_range[0] >= effect_range[1]:
+        raise ValueError("effect_range[0] must be < effect_range[1]")
+    if mode == "r2" and (effect_range[0] >= 1 or effect_range[1] >= 1):
+        raise ValueError(
+            "effect_range values must be < 1 in R² mode (they are r2_target values)"
+        )
+    if effect_points < 2:
+        raise ValueError("effect_points must be >= 2")
+
+    # ------------------------------------------------------------------ #
+    # Nominal power at configured assumptions                              #
+    # ------------------------------------------------------------------ #
+    if mode == "contrast":
+        nominal_pwr, _ = contrast_power(
+            L=power_cfg.L,
+            delta=power_cfg.delta,
+            X=X,
+            sigma=power_cfg.sigma,
+            alpha=power_cfg.alpha,
+            jitter=jitter,
+        )
+    else:
+        nominal_pwr, _ = global_r2_power(
+            r2_target=power_cfg.r2_target,
+            X=X,
+            alpha=power_cfg.alpha,
+            lambda_mode=power_cfg.lambda_mode,
+        )
+
+    # ------------------------------------------------------------------ #
+    # 1. Effect sweep                                                      #
+    # ------------------------------------------------------------------ #
+    effect_vals = np.linspace(effect_range[0], effect_range[1], effect_points)
+    effect_rows = []
+    for ev in effect_vals:
+        if mode == "contrast":
+            pwr, lam = contrast_power(
+                L=power_cfg.L,
+                delta=power_cfg.delta * float(ev),  # scale the nominal delta
+                X=X,
+                sigma=power_cfg.sigma,
+                alpha=power_cfg.alpha,
+                jitter=jitter,
+            )
+            effect_rows.append({
+                "effect_scale": float(ev),
+                "power": float(pwr),
+                "noncentrality_lambda": float(lam),
+            })
+        else:
+            pwr, lam = global_r2_power(
+                r2_target=float(ev),
+                X=X,
+                alpha=power_cfg.alpha,
+                lambda_mode=power_cfg.lambda_mode,
+            )
+            effect_rows.append({
+                "r2_target": float(ev),
+                "power": float(pwr),
+                "noncentrality_lambda": float(lam),
+            })
+    effect_sweep_df = pd.DataFrame(effect_rows)
+    effect_col = "effect_scale" if mode == "contrast" else "r2_target"
+
+    # ------------------------------------------------------------------ #
+    # 2. Sigma sweep (contrast mode only)                                  #
+    # ------------------------------------------------------------------ #
+    sigma_sweep_df: Optional[pd.DataFrame] = None
+    if mode == "contrast":
+        sigma_vals = np.linspace(sigma_range[0], sigma_range[1], sigma_points)
+        sigma_rows = []
+        for sigma in sigma_vals:
+            pwr, lam = contrast_power(
+                L=power_cfg.L,
+                delta=power_cfg.delta,
+                X=X,
+                sigma=float(sigma),
+                alpha=power_cfg.alpha,
+                jitter=jitter,
+            )
+            sigma_rows.append({
+                "sigma": float(sigma),
+                "power": float(pwr),
+                "noncentrality_lambda": float(lam),
+            })
+        sigma_sweep_df = pd.DataFrame(sigma_rows)
+
+    # ------------------------------------------------------------------ #
+    # 3. Alpha sweep (both modes)                                          #
+    # ------------------------------------------------------------------ #
+    alpha_vals = np.linspace(alpha_range[0], alpha_range[1], alpha_points)
+    alpha_rows = []
+    for alpha in alpha_vals:
+        if mode == "contrast":
+            pwr, lam = contrast_power(
+                L=power_cfg.L,
+                delta=power_cfg.delta,
+                X=X,
+                sigma=power_cfg.sigma,
+                alpha=float(alpha),
+                jitter=jitter,
+            )
+        else:
+            pwr, lam = global_r2_power(
+                r2_target=power_cfg.r2_target,
+                X=X,
+                alpha=float(alpha),
+                lambda_mode=power_cfg.lambda_mode,
+            )
+        alpha_rows.append({
+            "alpha": float(alpha),
+            "power": float(pwr),
+            "noncentrality_lambda": float(lam),
+        })
+    alpha_sweep_df = pd.DataFrame(alpha_rows)
+
+    # ------------------------------------------------------------------ #
+    # 4. Summary statistics (pooled across all sweeps)                     #
+    # ------------------------------------------------------------------ #
+    all_powers_parts = [
+        effect_sweep_df["power"].values,
+        alpha_sweep_df["power"].values,
+    ]
+    if sigma_sweep_df is not None:
+        all_powers_parts.append(sigma_sweep_df["power"].values)
+    all_powers = np.concatenate(all_powers_parts)
+
+    summary = {
+        "worst_power": float(np.min(all_powers)),
+        "median_power": float(np.median(all_powers)),
+        "best_power": float(np.max(all_powers)),
+        "power_target": power_target,
+        "pct_scenarios_passing": float(np.mean(all_powers >= power_target)),
+    }
+
+    # ------------------------------------------------------------------ #
+    # 5. Threshold crossings                                               #
+    # ------------------------------------------------------------------ #
+    # Effect sweep: power increases with effect size — find smallest value
+    # at which power reaches the target.
+    min_effect = _threshold_crossing(
+        values=effect_sweep_df[effect_col].values,
+        powers=effect_sweep_df["power"].values,
+        target=power_target,
+        increasing=True,
+    )
+
+    # Alpha sweep: as alpha increases power increases — find the smallest
+    # (most conservative) alpha that still meets the target.
+    min_alpha = _threshold_crossing(
+        values=alpha_sweep_df["alpha"].values,
+        powers=alpha_sweep_df["power"].values,
+        target=power_target,
+        increasing=True,
+    )
+
+    # Sigma sweep (contrast only): as sigma increases power decreases — find
+    # the largest sigma that still meets the target.
+    max_sigma: Optional[float] = None
+    if sigma_sweep_df is not None:
+        max_sigma = _threshold_crossing(
+            values=sigma_sweep_df["sigma"].values,
+            powers=sigma_sweep_df["power"].values,
+            target=power_target,
+            increasing=False,
+        )
+
+    thresholds: Dict[str, Optional[float]] = {
+        "max_sigma_for_target": max_sigma,
+        "min_effect_for_target": min_effect,
+        "min_alpha_for_target": min_alpha,
+    }
+
+    # ------------------------------------------------------------------ #
+    # 6. Optional plot                                                     #
+    # ------------------------------------------------------------------ #
+    fig = None
+    if plot:
+        try:
+            import matplotlib.pyplot as plt
+
+            n_panels = 3 if mode == "contrast" else 2
+            fig, axes = plt.subplots(1, n_panels, figsize=figsize)
+            if n_panels == 2:
+                axes = list(axes)
+            else:
+                axes = list(axes)
+
+            def _decorate(ax: Any, xlabel: str, nominal_x: float, title: str) -> None:
+                ax.axhline(y=power_target, color="red", linestyle="--", linewidth=1.2,
+                           label=f"Target power = {power_target:.2f}")
+                ax.axvline(x=nominal_x, color="gray", linestyle="--", linewidth=1,
+                           label=f"Nominal = {nominal_x:.3g}")
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel("Statistical Power")
+                ax.set_ylim([0, 1.05])
+                ax.set_title(title)
+                ax.legend(fontsize=7)
+                ax.grid(True, alpha=0.3)
+
+            # Panel 0: effect sweep
+            ax0 = axes[0]
+            if mode == "contrast":
+                ax0.plot(effect_sweep_df["effect_scale"], effect_sweep_df["power"],
+                         "b-", linewidth=2)
+                _decorate(ax0, "Effect scale (× δ)", 1.0, "Effect Sweep")
+                if min_effect is not None:
+                    ax0.axvline(x=min_effect, color="darkorange", linestyle=":",
+                                linewidth=1.2, label=f"Threshold ≈ {min_effect:.3g}")
+                    ax0.legend(fontsize=7)
+            else:
+                ax0.plot(effect_sweep_df["r2_target"], effect_sweep_df["power"],
+                         "b-", linewidth=2)
+                _decorate(ax0, "R² target", power_cfg.r2_target, "Effect Sweep (R²)")
+                if min_effect is not None:
+                    ax0.axvline(x=min_effect, color="darkorange", linestyle=":",
+                                linewidth=1.2, label=f"Threshold ≈ {min_effect:.3g}")
+                    ax0.legend(fontsize=7)
+
+            # Panel 1: sigma sweep (contrast) or alpha sweep (r2)
+            if mode == "contrast":
+                ax1 = axes[1]
+                ax1.plot(sigma_sweep_df["sigma"], sigma_sweep_df["power"],
+                         "b-", linewidth=2)
+                _decorate(ax1, "σ (residual std dev)", power_cfg.sigma, "Sigma Sweep")
+                if max_sigma is not None:
+                    ax1.axvline(x=max_sigma, color="darkorange", linestyle=":",
+                                linewidth=1.2, label=f"Threshold ≈ {max_sigma:.3g}")
+                    ax1.legend(fontsize=7)
+                # Alpha sweep in Panel 2
+                ax2 = axes[2]
+                ax2.plot(alpha_sweep_df["alpha"], alpha_sweep_df["power"],
+                         "b-", linewidth=2)
+                _decorate(ax2, "α (significance level)", power_cfg.alpha, "Alpha Sweep")
+                if min_alpha is not None:
+                    ax2.axvline(x=min_alpha, color="darkorange", linestyle=":",
+                                linewidth=1.2, label=f"Threshold ≈ {min_alpha:.3g}")
+                    ax2.legend(fontsize=7)
+            else:
+                # R² mode has no sigma sweep — alpha in Panel 1
+                ax1 = axes[1]
+                ax1.plot(alpha_sweep_df["alpha"], alpha_sweep_df["power"],
+                         "b-", linewidth=2)
+                _decorate(ax1, "α (significance level)", power_cfg.alpha, "Alpha Sweep")
+                if min_alpha is not None:
+                    ax1.axvline(x=min_alpha, color="darkorange", linestyle=":",
+                                linewidth=1.2, label=f"Threshold ≈ {min_alpha:.3g}")
+                    ax1.legend(fontsize=7)
+
+            plt.suptitle(
+                f"Robustness Report  (n = {n}, nominal power = {float(nominal_pwr):.3f})",
+                fontsize=11,
+                fontweight="bold",
+            )
+            plt.tight_layout()
+        except ImportError:
+            pass  # matplotlib unavailable — return fig=None
+
+    return {
+        "mode": mode,
+        "nominal_power": float(nominal_pwr),
+        "effect_sweep": effect_sweep_df,
+        "sigma_sweep": sigma_sweep_df,
+        "alpha_sweep": alpha_sweep_df,
+        "summary": summary,
+        "thresholds": thresholds,
+        "figure": fig,
+    }
+
+
 __all__ = [
     "power_curve_by_n",
     "power_curve_by_effect",
@@ -747,4 +1222,5 @@ __all__ = [
     "power_sensitivity",
     "min_detectable_effect",
     "compare_criteria",
+    "robustness_report",
 ]

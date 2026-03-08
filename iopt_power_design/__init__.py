@@ -26,6 +26,7 @@ from .analysis import (  # noqa: F401
     power_sensitivity,
     min_detectable_effect,
     compare_criteria,
+    robustness_report,
 )
 from .candidate import build_candidate  # noqa: F401
 from .model_matrix import build_model_matrix  # noqa: F401
@@ -44,6 +45,7 @@ __all__ = [
     "power_sensitivity",
     "min_detectable_effect",
     "compare_criteria",
+    "robustness_report",
     # Design utilities
     "augment_design",
     # Config / options
