@@ -598,6 +598,7 @@ def create_sheet_template(
     title: str = "iopt-power-design template",
     credentials: Optional[str] = None,
     example: str = "r2",
+    share_anyone: bool = False,
 ) -> str:
     """Create a new Google Spreadsheet pre-populated with a working example.
 
@@ -608,9 +609,9 @@ def create_sheet_template(
     * **Design**  — empty; populated by ``sheets_run()``.
     * **Buckets** — empty; populated by ``sheets_run()``.
 
-    The spreadsheet is shared with ``"anyone"`` (link-based write access) so
-    that the URL returned can be opened immediately in a browser.  Change the
-    sharing settings in Google Drive if stricter access control is needed.
+    By default the spreadsheet is **not** shared publicly.  Pass
+    ``share_anyone=True`` to grant link-based write access to anyone — useful
+    for quick prototyping but **not recommended** for private data.
 
     Parameters
     ----------
@@ -625,6 +626,9 @@ def create_sheet_template(
         * ``"r2"``       — global R² power config with two continuous factors.
         * ``"contrast"`` — single contrast (L matrix + delta) with two
           continuous factors.
+    share_anyone : bool, default False
+        If ``True``, share the new spreadsheet with anyone who has the link
+        (writer access).  Disabled by default to avoid accidental data exposure.
 
     Returns
     -------
@@ -660,12 +664,13 @@ def create_sheet_template(
     except Exception as e:
         raise SheetsError(f"Failed to create spreadsheet {title!r}: {e}") from e
 
-    try:
-        sh.share(None, perm_type="anyone", role="writer")
-    except Exception:
-        # Sharing is best-effort; don't abort template creation if it fails
-        # (e.g. organisation policies that disallow public sharing).
-        pass
+    if share_anyone:
+        try:
+            sh.share(None, perm_type="anyone", role="writer")
+        except Exception:
+            # Sharing is best-effort; don't abort template creation if it fails
+            # (e.g. organisation policies that disallow public sharing).
+            pass
 
     try:
         # Rename the default first sheet to "Config"

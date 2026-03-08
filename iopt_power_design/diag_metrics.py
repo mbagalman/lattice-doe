@@ -185,7 +185,7 @@ def compute_design_metrics(
         "d_efficiency": d_eff,
         "leverage_mean": leverage_mean,
         "leverage_max": leverage_max,
-        "leverages": leverages,
+        "leverages": leverages.tolist(),
     }
 
     # I-criterion over candidate region
