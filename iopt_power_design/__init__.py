@@ -32,6 +32,7 @@ from .model_matrix import build_model_matrix  # noqa: F401
 from .iopt_search import augment_design  # noqa: F401
 from .report import generate_report  # noqa: F401
 from .sheets import SheetsError, sheets_run, create_sheet_template  # noqa: F401
+from .excel_template import ExcelError, excel_run, create_excel_template  # noqa: F401
 
 __all__ = [
     "__version__",
@@ -60,4 +61,8 @@ __all__ = [
     "SheetsError",
     "sheets_run",
     "create_sheet_template",
+    # Excel integration
+    "ExcelError",
+    "excel_run",
+    "create_excel_template",
 ]

@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 import warnings
 
+from patsy import dmatrix
 from .config import PowerContrastConfig, PowerR2Config, DesignOptions
 from .candidate import estimate_candidate_size, build_candidate
 from .model_matrix import build_model_matrix

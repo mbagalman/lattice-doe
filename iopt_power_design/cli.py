@@ -387,6 +387,32 @@ def main(argv: Optional[List[str]] = None) -> int:
             "then to OAuth2 browser flow."
         ),
     )
+    parser.add_argument(
+        "--excel-template",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Create a pre-filled Excel workbook template at PATH (.xlsx) and exit. "
+            "Use --template-mode to choose 'r2' (default) or 'contrast'. "
+            "Requires: pip install 'iopt-power-design[extras]'"
+        ),
+    )
+    parser.add_argument(
+        "--template-mode",
+        choices=["r2", "contrast"],
+        default="r2",
+        help="Example mode for --excel-template: 'r2' (default) or 'contrast'.",
+    )
+    parser.add_argument(
+        "--excel-run",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Read config from the 'Config' sheet of an existing .xlsx workbook at PATH, "
+            "run the design search, and write Results/Design/Buckets sheets back. "
+            "Requires: pip install 'iopt-power-design[extras]'"
+        ),
+    )
     args = parser.parse_args(argv)
 
     # Handle --template before anything else (no --config required)
@@ -423,6 +449,52 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"achieved_power={r['achieved_power']:.3f}, "
             f"elapsed={r.get('elapsed_sec', 0.0):.1f}s\n"
             f"  {result['spreadsheet_url']}"
+        )
+        return 0
+
+    # Handle --excel-template (create a starter workbook and exit)
+    if args.excel_template:
+        try:
+            from iopt_power_design.excel_template import create_excel_template, ExcelError  # noqa: PLC0415
+        except ImportError:
+            print(
+                "Error: Excel support requires openpyxl.\n"
+                "  pip install 'iopt-power-design[extras]'",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            dest = create_excel_template(args.excel_template, example=args.template_mode)
+            print(f"Excel template created: {dest}")
+        except (ExcelError, Exception) as e:
+            print(f"Error creating Excel template: {e}", file=sys.stderr)
+            return 1
+        return 0
+
+    # Handle --excel-run (bidirectional Excel run and exit)
+    if args.excel_run:
+        try:
+            from iopt_power_design.excel_template import excel_run, ExcelError  # noqa: PLC0415
+        except ImportError:
+            print(
+                "Error: Excel support requires openpyxl.\n"
+                "  pip install 'iopt-power-design[extras]'",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            result = excel_run(args.excel_run)
+        except ExcelError as e:
+            print(f"Excel error: {e}", file=sys.stderr)
+            return 1
+
+        r = result["report"]
+        print(
+            f"Design written to workbook.\n"
+            f"  n={r['n']}, p={r['p']}, "
+            f"achieved_power={r['achieved_power']:.3f}, "
+            f"elapsed={r.get('elapsed_sec', 0.0):.1f}s\n"
+            f"  {result['excel_path']}"
         )
         return 0
 
