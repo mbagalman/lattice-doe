@@ -536,7 +536,8 @@ with exp_cols[3]:
                         output_path=_tmp_path,
                         include_power_curve=False,
                     )
-                    ss["_html_report_bytes"] = open(_tmp_path, "rb").read()
+                    with open(_tmp_path, "rb") as _fh:
+                        ss["_html_report_bytes"] = _fh.read()
                     ss["_html_report_result_id"] = _result_key
                 except Exception as _rpt_err:
                     ss.pop("_html_report_bytes", None)

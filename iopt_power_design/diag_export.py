@@ -30,7 +30,7 @@ def export_diagnostics(
     design_df: pd.DataFrame,
     output_path: Union[str, Path],
     feature_names: Optional[List[str]] = None,
-    formats: List[str] = ["html", "pdf"],
+    formats: Optional[List[str]] = None,
     include_data: bool = True,
 ) -> Dict[str, Path]:
     """Export comprehensive diagnostic report with plots and data.
@@ -55,6 +55,8 @@ def export_diagnostics(
     dict
         Mapping of format to output Path.
     """
+    if formats is None:
+        formats = ["html", "pdf"]
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -174,9 +176,9 @@ def export_diagnostics(
                             </td>
                         </tr>
                         <tr>
-                            <td>D-Efficiency</td>
+                            <td>D-Efficiency (0–1)</td>
                             <td class="metric-value">{metrics['d_efficiency']:.4f}</td>
-                            <td>{'Good' if metrics['d_efficiency'] > 0.8 else 'Moderate'}</td>
+                            <td>{'Good (≥0.8)' if metrics['d_efficiency'] >= 0.8 else 'Moderate (<0.8)'}</td>
                         </tr>
                         <tr>
                             <td>Mean Leverage</td>

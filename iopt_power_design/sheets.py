@@ -60,7 +60,6 @@ from .config import PowerContrastConfig, PowerR2Config, DesignOptions
 # ---------------------------------------------------------------------------
 try:
     import gspread  # type: ignore
-    from google.oauth2.service_account import Credentials  # type: ignore
     _HAS_GSPREAD = True
 except ImportError:
     _HAS_GSPREAD = False
@@ -116,12 +115,7 @@ def _get_client(credentials: Optional[str]) -> "gspread.Client":
             f"gspread is required for Google Sheets integration. {_INSTALL_HINT}"
         )
     if credentials is not None:
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive",
-        ]
-        creds = Credentials.from_service_account_file(credentials, scopes=scope)
-        return gspread.authorize(creds)
+        return gspread.service_account(filename=credentials)
     return gspread.oauth()
 
 

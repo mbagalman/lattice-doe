@@ -29,6 +29,7 @@ from .candidate import build_candidate, estimate_candidate_size
 from .model_matrix import build_model_matrix
 from .iopt_search import build_i_opt_design, build_i_opt_design_with_idx
 from .power import contrast_power, global_r2_power
+from .diag_metrics import compute_design_metrics
 
 # Optional plotting support
 try:
@@ -157,8 +158,9 @@ def power_curve_by_n(
             algo=design_opts.algo,
             max_iter=design_opts.max_iter,
             random_state=design_opts.random_state,
+            jitter=design_opts.xtx_jitter,
         )
-        
+
         # Get design matrix
         X, _ = build_model_matrix(formula, design_df)
         
@@ -181,7 +183,6 @@ def power_curve_by_n(
             )
         
         # Compute design metrics for additional insight
-        from .diag_metrics import compute_design_metrics
         metrics = compute_design_metrics(X, X_cand=X_cand)
         
         results.append({
@@ -350,8 +351,10 @@ def power_curve_by_effect(
         algo=design_opts.algo,
         max_iter=design_opts.max_iter,
         random_state=design_opts.random_state,
+        jitter=design_opts.xtx_jitter,
     )
-    
+
+
     # --- Reviewer Feedback: Caching ---
     # Model matrix X is built ONCE and reused in the loop, as suggested.
     X, _ = build_model_matrix(formula, design_df)
@@ -586,6 +589,7 @@ def power_surface_2d(
                 random_state=design_opts.random_state,
                 workers=design_opts.workers,
                 parallel_seed_stride=design_opts.parallel_seed_stride,
+                jitter=design_opts.xtx_jitter,
             )
             _x_cache[n_val] = X_cand[sel_idx, :]
         return _x_cache[n_val]

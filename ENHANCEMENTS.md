@@ -73,6 +73,46 @@ Internal improvements with no user-visible behavior change. Worthwhile for maint
 
 ---
 
+## Code Review Issues
+
+Bugs and omissions found during a full codebase audit (2026-03-08).
+Severity: 🔴 Critical · 🟠 High · 🟡 Medium · 🔵 Low
+
+### 🔴 Critical
+
+| # | File | Line(s) | Issue | Impact |
+|---|---|---|---|---|
+| ~~CR-1~~ | ~~`report.py`~~ | ~~298–308~~ | ~~**Wrong API call to `power_curve_by_n` in `_build_power_curve_figure`**~~ | **Fixed.** `n_min=`/`n_max=` replaced with `n_range=(n_min, n_max)`; intermediate variable renamed to `curve_result` and `["data"]` extracted before DataFrame access. |
+
+### 🟠 High
+
+| # | File | Line(s) | Issue | Impact |
+|---|---|---|---|---|
+| ~~CR-2~~ | ~~`sheets.py`~~ | ~~124~~ | ~~**`gspread.authorize()` removed in gspread 6.x**~~ | **Fixed.** Replaced manual `Credentials.from_service_account_file()` + `gspread.authorize()` with `gspread.service_account(filename=credentials)`. Removed now-unused `from google.oauth2.service_account import Credentials` import. |
+| ~~CR-3~~ | ~~`pyproject.toml`~~ | ~~29~~ | ~~**`pyDOE3` listed as core dependency but never imported**~~ | **Fixed.** Removed `pyDOE3>=1.0,<2.0` from `[project.dependencies]` in `pyproject.toml`. Updated `README.md`: removed from core-dependencies list, replaced stale "remains a package dependency" note with accurate description of the internal exchange, and deleted the now-irrelevant `ImportError for pyDOE3` troubleshooting entry. |
+
+### 🟡 Medium
+
+| # | File | Line(s) | Issue | Impact |
+|---|---|---|---|---|
+| ~~CR-4~~ | ~~`iopt_search.py`, `api.py`, `power_curves.py`~~ | ~~multiple~~ | ~~**`DesignOptions.xtx_jitter` not propagated to design search**~~ | **Fixed.** Added `jitter: float = 1e-8` parameter to `build_i_opt_design_with_idx` and `build_i_opt_design` in `iopt_search.py`; threaded through to both serial and parallel Fedorov paths. Updated all 3 call sites in `api.py` and all 3 call sites in `power_curves.py` (`power_curve_by_n`, `power_curve_by_effect`, `power_surface_2d._get_X`) to pass `jitter=design_opts.xtx_jitter`. |
+| ~~CR-5~~ | ~~`pyproject.toml`~~ | ~~58–65~~ | ~~**`kaleido` missing from `[report]` extras**~~ | **Fixed.** Added `"kaleido>=0.2"` to `[report]`, `[report-pdf]`, and `[all]` extras in `pyproject.toml`. `pip install iopt-power-design[report]` now installs kaleido, enabling `fig.to_image(format="png")` for Plotly figure embedding in HTML reports. |
+| ~~CR-6~~ | ~~`pyproject.toml`~~ | ~~7, 95–98~~ | ~~**Placeholder author name and email**~~ | **Fixed.** Updated `authors` to `Michael Bagalman <Michael@ParadoxResolution.com>` and all three project URLs (Homepage, Repository, Issues) to `https://github.com/mbagalman/DOE-Idea`. |
+| ~~CR-7~~ | ~~`api.py`~~ | ~~558–583~~ | ~~**`power_curve_by_n` public wrapper silently drops `n_range` and `n_points` parameters**~~ | **Fixed.** Added `n_range`, `n_points`, and `figsize` parameters to the `api.py` wrapper; all three are now forwarded to the canonical `power_curves.py` implementation. Updated docstring to document the new parameters. |
+
+### 🔵 Low
+
+| # | File | Line(s) | Issue | Impact |
+|---|---|---|---|---|
+| ~~CR-8~~ | ~~`candidate.py`~~ | ~~313~~ | ~~**`seed=0` treated as falsy**~~ | **Fixed.** Changed `seed + idx if seed else idx` to `seed + idx if seed is not None else idx`. `random_state=0` now correctly propagates through per-cell LHS seeding. |
+| ~~CR-9~~ | ~~`diag_export.py`~~ | ~~33~~ | ~~**Mutable default argument**~~ | **Fixed.** Changed `formats: List[str] = ["html", "pdf"]` to `formats: Optional[List[str]] = None`; added `if formats is None: formats = ["html", "pdf"]` as the first line of the function body. Default behaviour is unchanged. |
+| ~~CR-10~~ | ~~`power_curves.py`~~ | ~~184~~ | ~~**Late import inside a hot loop**~~ | **Fixed.** Moved `from .diag_metrics import compute_design_metrics` from inside the `for n in n_values:` loop to module-level imports (line 32). The in-loop statement was removed. |
+| ~~CR-11~~ | ~~`cli.py`~~ | ~~69, 443~~ | ~~**`logger` variable shadowing**~~ | **Fixed.** Changed the module-level logger from `logging.getLogger(__name__)` to `logging.getLogger("iopt-design")` so it matches the intended name from the start. Removed the redundant re-assignment inside `main()`. All log calls now use the same `"iopt-design"` logger throughout the module lifetime. |
+| ~~CR-12~~ | ~~`app/pages/3_Run_Results.py`~~ | ~~539~~ | ~~**File opened without context manager**~~ | **Fixed.** Replaced `open(_tmp_path, "rb").read()` with a `with open(_tmp_path, "rb") as _fh: ... _fh.read()` block, ensuring the file handle is released before the `finally` clause calls `os.unlink(_tmp_path)`. |
+| ~~CR-13~~ | ~~`diag_metrics.py`, `diag_export.py`~~ | ~~162–168, 181~~ | ~~**D-efficiency formula may produce values > 1**~~ | **Fixed.** Clamped `d_eff` to `min(1.0, ...)` in `diag_metrics.py` and added a comment explaining the `(det(X'X)/n^p)^(1/p)` convention. Updated the HTML label in `diag_export.py` to `"D-Efficiency (0–1)"` and made the threshold explicit: `"Good (≥0.8)"` / `"Moderate (<0.8)"`. |
+
+---
+
 ## Ideas / Future Consideration
 
 Add rough ideas here before they are fleshed out enough to promote to the backlog.

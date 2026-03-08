@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "I-optimal experimental designs with power assurance for linear models."
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "Michael Bagalman", email = "Michael@ParadoxResolution.com" }]
 requires-python = ">=3.9"
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -26,7 +26,6 @@ dependencies = [
   "numpy>=1.23",
   "pandas>=1.5,<3",
   "scipy>=1.10",
-  "pyDOE3>=1.0,<2.0",
   "patsy>=0.5,<1"
 ]
 
@@ -55,12 +54,14 @@ app = [
 # Optional dependencies for HTML report generation
 report = [
   "jinja2>=3.0,<4",
-  "pillow>=9.0"
+  "pillow>=9.0",
+  "kaleido>=0.2"
 ]
 # Optional dependencies for PDF report generation (adds weasyprint)
 report-pdf = [
   "jinja2>=3.0,<4",
   "pillow>=9.0",
+  "kaleido>=0.2",
   "weasyprint>=60.0"
 ]
 # Optional dependencies for Google Sheets integration
@@ -85,15 +86,17 @@ all = [
   # report
   "jinja2>=3.0,<4",
   "pillow>=9.0",
+  "kaleido>=0.2",
   # sheets
   "gspread>=6.0",
   "google-auth>=2.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourname/iopt-power-design"
-Repository = "https://github.com/yourname/iopt-power-design"
-Issues = "https://github.com/yourname/iopt-power-design/issues"
+Homepage = "https://github.com/mbagalman/DOE-Idea"
+Repository = "https://github.com/mbagalman/DOE-Idea"
+Issues = "https://github.com/mbagalman/DOE-Idea/issues"
+
 
 [project.scripts]
 # Registers a CLI entry point; users can run `iopt-design` after installation.

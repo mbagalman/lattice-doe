@@ -245,6 +245,7 @@ def i_optimal_powered_design(
             random_state=design_opts.random_state,
             workers=design_opts.workers,
             parallel_seed_stride=design_opts.parallel_seed_stride,
+            jitter=design_opts.xtx_jitter,
         )
         X = X_cand[selected_idx, :]
 
@@ -307,6 +308,7 @@ def i_optimal_powered_design(
                 random_state=design_opts.random_state,
                 workers=design_opts.workers,
                 parallel_seed_stride=design_opts.parallel_seed_stride,
+                jitter=design_opts.xtx_jitter,
             )
             X = X_cand[selected_idx, :]
             if mode == "contrast":
@@ -400,6 +402,7 @@ def i_optimal_powered_design(
                 algo=design_opts.algo, max_iter=design_opts.max_iter,
                 random_state=design_opts.random_state, workers=design_opts.workers,
                 parallel_seed_stride=design_opts.parallel_seed_stride,
+                jitter=design_opts.xtx_jitter,
             )
             X_v = X_cand[sel_idx_v, :]
             if mode == "contrast":
@@ -557,7 +560,10 @@ def power_curve_by_n(
     factors: Dict[str, Any],
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     design_opts: Optional[DesignOptions] = None,
+    n_range: Optional[tuple] = None,
+    n_points: int = 20,
     plot: bool = False,
+    figsize: tuple = (8, 5),
     plot_backend: str = "matplotlib",
 ) -> pd.DataFrame:
     """Sweep n to visualize power as design size grows.
@@ -565,16 +571,29 @@ def power_curve_by_n(
     This function is a compatibility wrapper around the canonical implementation
     in ``power_curves.py`` and returns only the curve DataFrame.
 
-    Note: This wrapper discards the figure. To access the figure (including
-    Plotly figures), call ``iopt_power_design.power_curves.power_curve_by_n()``
-    directly.
+    Parameters
+    ----------
+    n_range : tuple of (int, int), optional
+        ``(n_min, n_max)`` sweep bounds.  Defaults to ``(p+1, 3*p)`` where
+        ``p`` is the number of model parameters.
+    n_points : int, optional
+        Number of evenly-spaced n values to evaluate.  Default 20.
+    figsize : tuple of (float, float), optional
+        Matplotlib figure size.  Default ``(8, 5)``.  Ignored when
+        ``plot_backend="plotly"``.
+
+    Note: To access the figure object directly (e.g. for Plotly figures),
+    call ``iopt_power_design.power_curves.power_curve_by_n()`` directly.
     """
     out = _power_curve_by_n_impl(
         formula=formula,
         factors=factors,
         power_cfg=power_cfg,
         design_opts=design_opts,
+        n_range=n_range,
+        n_points=n_points,
         plot=plot,
+        figsize=figsize,
         plot_backend=plot_backend,
     )
     return out["data"]

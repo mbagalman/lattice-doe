@@ -65,7 +65,7 @@ pip install -e ".[extras]"
 pip install -e ".[all]"
 ```
 
-**Core dependencies:** `numpy`, `scipy`, `pandas`, `patsy`, `pyDOE3`
+**Core dependencies:** `numpy`, `scipy`, `pandas`, `patsy`
 
 ---
 
@@ -820,8 +820,8 @@ directly on the Patsy model matrix.
 The `algo` option (`"fedorov"` or `"coordinate"`) is currently retained for
 API compatibility; both settings route to this internal exchange implementation.
 
-`pyDOE3` remains a package dependency, but the core design search no longer
-depends on pyDOE3's internal optimizer API signatures.
+The core design search uses an internal vectorised Fedorov exchange that operates
+directly on the Patsy model matrix and has no dependency on external design-of-experiments libraries.
 
 ### Feasibility constraints
 
@@ -867,9 +867,6 @@ Fix `random_state` in `DesignOptions` to reproduce candidate generation, design 
 ---
 
 ## Troubleshooting
-
-**`ImportError` for pyDOE3**
-Install `pyDOE3` in your environment (`pip install pyDOE3`) to satisfy package dependencies.
 
 **`ValueError: power_cfg.max_n must be greater than p`**
 Your `max_n` is too small for the model. Increase `max_n` or simplify the formula. The number of parameters `p` is reported in the error message.

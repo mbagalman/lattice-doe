@@ -159,13 +159,15 @@ def compute_design_metrics(
     XtX = _xtx(X)
     cond = float(np.linalg.cond(XtX))
 
-    # D-efficiency — use slogdet for numerical stability
+    # D-efficiency — normalised to [0, 1] via (det(X'X) / n^p)^(1/p).
+    # Clamped to 1.0: values above 1 can arise from the continuous
+    # normalisation baseline and would be uninterpretable in the [0,1] scale.
     sign, logdet = np.linalg.slogdet(XtX)
     if sign <= 0:
         d_eff = 0.0
     else:
         log_d_eff = (1.0 / p) * logdet - np.log(n)
-        d_eff = float(np.exp(log_d_eff))
+        d_eff = min(1.0, float(np.exp(log_d_eff)))
 
     # Leverage statistics
     try:

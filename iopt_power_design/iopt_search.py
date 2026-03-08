@@ -489,6 +489,7 @@ def build_i_opt_design_with_idx(
     workers: Optional[int] = None,
     parallel_seed_stride: int = 10_000,
     memory_limit_gb: float = 1.0,
+    jitter: float = 1e-8,
 ) -> Tuple[pd.DataFrame, np.ndarray, List[str]]:
     """Build an I-optimal design and also return selected row indices.
 
@@ -525,6 +526,9 @@ def build_i_opt_design_with_idx(
         Offset between per-start seeds to minimize correlation across workers.
     memory_limit_gb : float, default 1.0
         Warn if the candidate model matrix X_cand is estimated to exceed this size.
+    jitter : float, default 1e-8
+        Diagonal ridge added to X'X for numerical stability in the Fedorov
+        exchange.  Passed through from ``DesignOptions.xtx_jitter``.
 
     Returns
     -------
@@ -605,6 +609,7 @@ def build_i_opt_design_with_idx(
                     algo=algo,
                     criterion=criterion,
                     max_iter=max_iter,
+                    jitter=jitter,
                 )
                 for seed in seeds
             ]
@@ -656,6 +661,7 @@ def build_i_opt_design_with_idx(
         n_start=n_start,
         max_iter=max_iter,
         random_state=random_state,
+        jitter=jitter,
     )
     design_df = cand.iloc[selected_idx].reset_index(drop=True)
     return design_df, selected_idx, p_names
@@ -672,6 +678,7 @@ def build_i_opt_design(
     random_state: Optional[int] = None,
     workers: Optional[int] = None,
     memory_limit_gb: float = 1.0,
+    jitter: float = 1e-8,
 ) -> pd.DataFrame:
     """Build an I-optimal design from a candidate set.
 
@@ -698,6 +705,9 @@ def build_i_opt_design(
         Number of parallel workers (processes). If None or <=1, runs serially.
     memory_limit_gb : float, default 1.0
         Warn if the candidate model matrix X_cand is estimated to exceed this size.
+    jitter : float, default 1e-8
+        Diagonal ridge added to X'X for numerical stability in the Fedorov
+        exchange.  Passed through from ``DesignOptions.xtx_jitter``.
 
     Returns
     -------
@@ -715,6 +725,7 @@ def build_i_opt_design(
         random_state=random_state,
         workers=workers,
         memory_limit_gb=memory_limit_gb,
+        jitter=jitter,
     )
     return design_df
 

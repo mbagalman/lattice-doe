@@ -295,15 +295,15 @@ def _build_power_curve_figure(
     )
 
     try:
-        curve_df = power_curve_by_n(
+        curve_result = power_curve_by_n(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
             design_opts=opts,
-            n_min=n_min,
-            n_max=n_max,
+            n_range=(n_min, n_max),
             n_points=25,
         )
+        curve_df = curve_result["data"]
     except Exception:
         return None
 

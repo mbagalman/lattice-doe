@@ -65,8 +65,7 @@ from .api import i_optimal_powered_design
 from .config import PowerContrastConfig, PowerR2Config, DesignOptions
 from .contrasts import contrast_from_scenarios
 
-# ADDED: Setup a logger for the module
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("iopt-design")
 
 
 # -------------------------
@@ -439,10 +438,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         datefmt="%Y-%m-%d %H:%M:%S",
         stream=sys.stderr  # Log to stderr to separate from stdout results
     )
-    # Re-get the logger now that it's configured (if root was configured)
-    logger = logging.getLogger("iopt-design") 
     logger.debug("Verbose logging enabled.")
-    # ---
 
     cfg_path = Path(args.config)
 

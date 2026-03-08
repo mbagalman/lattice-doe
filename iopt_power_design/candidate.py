@@ -310,7 +310,7 @@ def build_candidate(
         for idx, cat_row in cat_df.iterrows():
             # Sample continuous within this categorical stratum
             if samples_per_cell > 1:
-                sampler = LatinHypercube(d=len(cont), seed=seed + idx if seed else idx)
+                sampler = LatinHypercube(d=len(cont), seed=seed + idx if seed is not None else idx)
                 lhs_samples = sampler.random(n=samples_per_cell)
             else:
                 # Single sample - use center or random point
