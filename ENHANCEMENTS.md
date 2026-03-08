@@ -104,6 +104,7 @@ Severity: 🔴 Critical · 🟠 High · 🟡 Medium · 🔵 Low
 |---|---|---|---|---|
 | ~~CR-2~~ | ~~`sheets.py`~~ | ~~124~~ | ~~**`gspread.authorize()` removed in gspread 6.x**~~ | **Fixed.** Replaced manual `Credentials.from_service_account_file()` + `gspread.authorize()` with `gspread.service_account(filename=credentials)`. Removed now-unused `from google.oauth2.service_account import Credentials` import. |
 | ~~CR-3~~ | ~~`pyproject.toml`~~ | ~~29~~ | ~~**`pyDOE3` listed as core dependency but never imported**~~ | **Fixed.** Removed `pyDOE3>=1.0,<2.0` from `[project.dependencies]` in `pyproject.toml`. Updated `README.md`: removed from core-dependencies list, replaced stale "remains a package dependency" note with accurate description of the internal exchange, and deleted the now-irrelevant `ImportError for pyDOE3` troubleshooting entry. |
+| CR-14 | `tests/test_sheets.py` | 98–114 | **Service-account auth test is stale after the gspread 6 migration.** `_get_client()` now calls `gspread.service_account(...)`, but this test still asserts `Credentials.from_service_account_file(...)`. | `python3 -m pytest -q` currently fails (`1 failed, 281 passed`), so CI/release gating is red despite production code being updated. |
 
 ### 🟡 Medium
 
@@ -113,6 +114,7 @@ Severity: 🔴 Critical · 🟠 High · 🟡 Medium · 🔵 Low
 | ~~CR-5~~ | ~~`pyproject.toml`~~ | ~~58–65~~ | ~~**`kaleido` missing from `[report]` extras**~~ | **Fixed.** Added `"kaleido>=0.2"` to `[report]`, `[report-pdf]`, and `[all]` extras in `pyproject.toml`. `pip install iopt-power-design[report]` now installs kaleido, enabling `fig.to_image(format="png")` for Plotly figure embedding in HTML reports. |
 | ~~CR-6~~ | ~~`pyproject.toml`~~ | ~~7, 95–98~~ | ~~**Placeholder author name and email**~~ | **Fixed.** Updated `authors` to `Michael Bagalman <Michael@ParadoxResolution.com>` and all three project URLs (Homepage, Repository, Issues) to `https://github.com/mbagalman/DOE-Idea`. |
 | ~~CR-7~~ | ~~`api.py`~~ | ~~558–583~~ | ~~**`power_curve_by_n` public wrapper silently drops `n_range` and `n_points` parameters**~~ | **Fixed.** Added `n_range`, `n_points`, and `figsize` parameters to the `api.py` wrapper; all three are now forwarded to the canonical `power_curves.py` implementation. Updated docstring to document the new parameters. |
+| CR-15 | `iopt_power_design/excel_template.py`, `iopt_power_design/sheets.py` | 222, 478; 270, 571 | **Connector defaults are inconsistent for `random_state` (Excel=42 vs Sheets=123).** Same logical config yields different stochastic search seeds depending on interface. | Reproducibility differs across front-ends for equivalent configs, making cross-tool comparisons and debugging harder. |
 
 ### 🔵 Low
 
@@ -124,6 +126,7 @@ Severity: 🔴 Critical · 🟠 High · 🟡 Medium · 🔵 Low
 | ~~CR-11~~ | ~~`cli.py`~~ | ~~69, 443~~ | ~~**`logger` variable shadowing**~~ | **Fixed.** Changed the module-level logger from `logging.getLogger(__name__)` to `logging.getLogger("iopt-design")` so it matches the intended name from the start. Removed the redundant re-assignment inside `main()`. All log calls now use the same `"iopt-design"` logger throughout the module lifetime. |
 | ~~CR-12~~ | ~~`app/pages/3_Run_Results.py`~~ | ~~539~~ | ~~**File opened without context manager**~~ | **Fixed.** Replaced `open(_tmp_path, "rb").read()` with a `with open(_tmp_path, "rb") as _fh: ... _fh.read()` block, ensuring the file handle is released before the `finally` clause calls `os.unlink(_tmp_path)`. |
 | ~~CR-13~~ | ~~`diag_metrics.py`, `diag_export.py`~~ | ~~162–168, 181~~ | ~~**D-efficiency formula may produce values > 1**~~ | **Fixed.** Clamped `d_eff` to `min(1.0, ...)` in `diag_metrics.py` and added a comment explaining the `(det(X'X)/n^p)^(1/p)` convention. Updated the HTML label in `diag_export.py` to `"D-Efficiency (0–1)"` and made the threshold explicit: `"Good (≥0.8)"` / `"Moderate (<0.8)"`. |
+| CR-16 | `iopt_power_design/cli.py` | 503 | **`--config` validation message is outdated.** It only mentions `--template` as an alternative, but `--sheets`, `--excel-template`, and `--excel-run` are now valid non-config entry paths. | Misleading UX when users invoke CLI without `--config`; increases support friction and onboarding confusion. |
 
 ---
 
