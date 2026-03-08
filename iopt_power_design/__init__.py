@@ -12,19 +12,21 @@ from __future__ import annotations
 __version__ = "0.1.0"
 
 # Re-export primary API and configuration types
-from .api import (  # noqa: F401
-    i_optimal_powered_design,
+from .api import i_optimal_powered_design  # noqa: F401
+from .config import PowerContrastConfig, PowerR2Config, DesignOptions  # noqa: F401
+
+# Power surface — canonical implementation in power_curves
+from .power_curves import power_surface_2d  # noqa: F401
+
+# Analysis utilities (includes DataFrame-returning wrappers for the two curves)
+from .analysis import (  # noqa: F401
     power_curve_by_n,
     power_curve_by_effect,
     generate_power_curves,
     power_sensitivity,
     min_detectable_effect,
     compare_criteria,
-    PowerContrastConfig,
-    PowerR2Config,
 )
-from .power_curves import power_surface_2d  # noqa: F401
-from .config import DesignOptions  # noqa: F401
 from .candidate import build_candidate  # noqa: F401
 from .model_matrix import build_model_matrix  # noqa: F401
 from .iopt_search import augment_design  # noqa: F401

@@ -27,8 +27,8 @@ try:
     from iopt_power_design import (
         compare_criteria,
         min_detectable_effect,
+        power_sensitivity,
     )
-    from iopt_power_design.api import power_sensitivity
     from iopt_power_design.config import (
         DesignOptions,
         PowerContrastConfig,
