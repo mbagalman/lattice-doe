@@ -143,7 +143,15 @@ def power_curve_by_n(
     
     # Generate n values (use geometric spacing for better resolution at small n)
     n_values = np.unique(np.geomspace(min_n, max_n, n_points).astype(int))
-    
+
+    # Fail fast if any requested n exceeds the candidate pool size
+    n_cand = len(cand)
+    if max(n_values) > n_cand:
+        raise ValueError(
+            f"Largest requested n ({max(n_values)}) exceeds the candidate set size "
+            f"({n_cand}). Increase candidate_points in DesignOptions or reduce n_range."
+        )
+
     results = []
     target_n = None
     

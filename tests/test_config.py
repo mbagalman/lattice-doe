@@ -299,6 +299,7 @@ class TestValidateConfigKeysContrastType:
     when 'contrast' is present but is not a dict (issue #3)."""
 
     from iopt_power_design.cli import _validate_config_keys as _vcfg
+    _vcfg = staticmethod(_vcfg)  # prevent Python from treating it as an unbound method
 
     _BASE = {
         "formula": "~ 1 + A",

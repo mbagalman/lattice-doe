@@ -770,7 +770,8 @@ def sheets_run(
     try:
         try:
             sh = client.open_by_url(spreadsheet_url_or_id)
-        except Exception:
+        except gspread.exceptions.NoValidUrlKeyFound:
+            # Input is not a URL — treat it as a bare spreadsheet key
             sh = client.open_by_key(spreadsheet_url_or_id)
     except Exception as e:
         raise SheetsError(
