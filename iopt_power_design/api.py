@@ -150,6 +150,12 @@ def i_optimal_powered_design(
     # --- Blocking setup ---
     is_blocked = design_opts.n_blocks is not None and design_opts.n_blocks >= 2
     if is_blocked:
+        # CR-17: Reject block_factor_name that collides with a treatment factor.
+        if design_opts.block_factor_name in factors:
+            raise ValueError(
+                f"block_factor_name={design_opts.block_factor_name!r} collides with "
+                f"an existing treatment factor. Choose a name not in: {list(factors)}."
+            )
         aug_formula = blocked_formula(formula, design_opts.block_factor_name)
     else:
         aug_formula = formula

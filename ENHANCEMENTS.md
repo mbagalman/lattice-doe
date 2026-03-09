@@ -97,7 +97,7 @@ Severity: 🔴 Critical · 🟠 High · 🟡 Medium · 🔵 Low
 | # | File | Line(s) | Issue | Impact |
 |---|---|---|---|---|
 | ~~CR-1~~ | ~~`report.py`~~ | ~~298–308~~ | ~~**Wrong API call to `power_curve_by_n` in `_build_power_curve_figure`**~~ | **Fixed.** `n_min=`/`n_max=` replaced with `n_range=(n_min, n_max)`; intermediate variable renamed to `curve_result` and `["data"]` extracted before DataFrame access. |
-| CR-17 | `iopt_power_design/config.py`, `iopt_power_design/blocked.py` | 567–568; 205 | **`block_factor_name` can collide with an existing factor name and silently overwrite treatment data.** Validation only checks non-empty string, and blocked assembly writes `design_b[block_factor_name] = ...` unconditionally. | Produces silently corrupted designs (e.g., treatment factor `A` replaced by `B1/B2/...` block labels), so downstream power and diagnostics are computed on the wrong model/data. |
+| ~~CR-17~~ | ~~`iopt_power_design/config.py`, `iopt_power_design/blocked.py`~~ | ~~567–568; 205~~ | ~~**`block_factor_name` can collide with an existing factor name and silently overwrite treatment data.**~~ | **Fixed.** Two-layer guard: (1) `api.py` raises `ValueError` when `block_factor_name` is a key in `factors` before any computation begins; (2) `blocked.py::build_blocked_design` raises when `block_factor_name` is already a column in `cand`, protecting direct callers. 5 new tests in `TestCR17BlockFactorNameCollision`; 435 total passing. |
 
 ### 🟠 High
 

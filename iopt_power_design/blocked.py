@@ -170,6 +170,13 @@ def build_blocked_design(
             "Adjust block_sizes so they sum to the total run count."
         )
 
+    # CR-17: Guard against block_factor_name colliding with a treatment column.
+    if block_factor_name in cand.columns:
+        raise ValueError(
+            f"block_factor_name={block_factor_name!r} is already a column in the "
+            f"candidate set. Choose a name not in: {list(cand.columns)}."
+        )
+
     X_cand_treat, _ = build_model_matrix(formula, cand)
     block_labels = [f"B{i + 1}" for i in range(n_blocks)]
 

@@ -547,3 +547,140 @@ class TestIOptimalPoweredDesignBlocked:
         )
         assert "p_treat" in result["report"]
         assert result["report"]["p_treat"] == 3  # intercept, A, B
+
+
+# ---------------------------------------------------------------------------
+# CR-17: block_factor_name collision validation
+# ---------------------------------------------------------------------------
+
+class TestCR17BlockFactorNameCollision:
+    """CR-17: block_factor_name that matches a treatment factor must be rejected."""
+
+    @pytest.fixture
+    def two_factor_setup(self):
+        factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+        formula = "1 + A + B"
+        return factors, formula
+
+    def test_api_raises_when_block_name_collides_with_factor(self, two_factor_setup):
+        """block_factor_name='A' should raise before any search is attempted."""
+        factors, formula = two_factor_setup
+        L = np.array([[0.0, 1.0, 0.0]])
+        delta = np.array([0.5])
+        power_cfg = PowerContrastConfig(
+            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
+            max_n=50, max_iter=10,
+        )
+        design_opts = DesignOptions(
+            n_blocks=3, block_factor_name="A",
+            random_state=1, starts=1, candidate_points=100,
+        )
+        with pytest.raises(ValueError, match="block_factor_name.*collides"):
+            i_optimal_powered_design(
+                formula=formula,
+                factors=factors,
+                power_cfg=power_cfg,
+                design_opts=design_opts,
+            )
+
+    def test_api_raises_for_second_factor_collision(self, two_factor_setup):
+        """block_factor_name='B' should also raise."""
+        factors, formula = two_factor_setup
+        L = np.array([[0.0, 1.0, 0.0]])
+        delta = np.array([0.5])
+        power_cfg = PowerContrastConfig(
+            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
+            max_n=50, max_iter=10,
+        )
+        design_opts = DesignOptions(
+            n_blocks=3, block_factor_name="B",
+            random_state=1, starts=1, candidate_points=100,
+        )
+        with pytest.raises(ValueError, match="block_factor_name.*collides"):
+            i_optimal_powered_design(
+                formula=formula,
+                factors=factors,
+                power_cfg=power_cfg,
+                design_opts=design_opts,
+            )
+
+    def test_api_default_block_name_does_not_collide(self, two_factor_setup):
+        """Default 'Block' name is fine when no factor is named 'Block'."""
+        factors, formula = two_factor_setup
+        power_cfg = PowerR2Config(
+            r2_target=0.3, alpha=0.05, power=0.7, max_n=50, max_iter=10,
+        )
+        design_opts = DesignOptions(
+            n_blocks=2, random_state=1, starts=1, candidate_points=100,
+        )
+        # Should not raise
+        result = i_optimal_powered_design(
+            formula=formula, factors=factors, power_cfg=power_cfg,
+            design_opts=design_opts,
+        )
+        assert "Block" in result["design_df"].columns
+
+    def test_build_blocked_design_raises_when_column_exists(self):
+        """build_blocked_design raises if block_factor_name already in cand.columns."""
+        rng = np.random.default_rng(0)
+        # 'Block' is already a column in the candidate
+        cand = pd.DataFrame({
+            "A": rng.uniform(-1, 1, 100),
+            "Block": ["X"] * 100,  # collision
+        })
+        with pytest.raises(ValueError, match="block_factor_name.*already a column"):
+            build_blocked_design(
+                cand=cand,
+                formula="1 + A",
+                n=6,
+                n_blocks=3,
+                block_sizes=None,
+                block_factor_name="Block",
+                aug_formula="1 + A + C(Block)",
+                criterion="I",
+                n_start=1,
+                algo="fedorov",
+                max_iter=50,
+                random_state=0,
+                workers=None,
+                parallel_seed_stride=10000,
+                jitter=1e-8,
+                preallocate_categorical=False,
+                alloc_min_per_cell=1,
+                alloc_max_per_cell=None,
+                alloc_wynn_max_iter=500,
+                alloc_wynn_tol=1e-6,
+                cat_cells_cap=10000,
+            )
+
+    def test_build_blocked_design_raises_for_arbitrary_collision(self):
+        """Any existing column name — not just 'Block' — triggers the guard."""
+        rng = np.random.default_rng(0)
+        cand = pd.DataFrame({
+            "A": rng.uniform(-1, 1, 100),
+            "Day": rng.uniform(-1, 1, 100),
+        })
+        with pytest.raises(ValueError, match="block_factor_name.*already a column"):
+            build_blocked_design(
+                cand=cand,
+                formula="1 + A",
+                n=4,
+                n_blocks=2,
+                block_sizes=None,
+                block_factor_name="Day",  # collides with 'Day' column
+                aug_formula="1 + A + C(Day)",
+                criterion="I",
+                n_start=1,
+                algo="fedorov",
+                max_iter=50,
+                random_state=0,
+                workers=None,
+                parallel_seed_stride=10000,
+                jitter=1e-8,
+                preallocate_categorical=False,
+                alloc_min_per_cell=1,
+                alloc_max_per_cell=None,
+                alloc_wynn_max_iter=500,
+                alloc_wynn_tol=1e-6,
+                cat_cells_cap=10000,
+            )
