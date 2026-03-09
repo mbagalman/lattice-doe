@@ -220,6 +220,26 @@ def i_optimal_powered_design(
     _ran_phase2: bool = False              # True if at least one Phase 2 iteration executed
     _strategy_parts: List[str] = ["bisection"]  # build search_strategy string incrementally
 
+    # Common kwargs forwarded to every build_i_opt_design_with_idx call
+    _search_kwargs: Dict[str, Any] = dict(
+        cand=cand,
+        formula=formula,
+        criterion=design_opts.criterion,
+        n_start=design_opts.starts,
+        algo=design_opts.algo,
+        max_iter=design_opts.max_iter,
+        random_state=design_opts.random_state,
+        workers=design_opts.workers,
+        parallel_seed_stride=design_opts.parallel_seed_stride,
+        jitter=design_opts.xtx_jitter,
+        preallocate_categorical=design_opts.preallocate_categorical,
+        alloc_min_per_cell=design_opts.alloc_min_per_cell,
+        alloc_max_per_cell=design_opts.alloc_max_per_cell,
+        alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
+        alloc_wynn_tol=design_opts.alloc_wynn_tol,
+        cat_cells_cap=design_opts.cat_cells_cap,
+    )
+
     while lo < hi and it < power_cfg.max_iter:
         n = (lo + hi) // 2
         if n > power_cfg.max_n:
@@ -229,17 +249,7 @@ def i_optimal_powered_design(
 
         # 1) Build I-optimal design at n
         design_df, selected_idx, _ = build_i_opt_design_with_idx(
-            cand=cand,
-            formula=formula,
-            n=n,
-            criterion=design_opts.criterion,
-            n_start=design_opts.starts,
-            algo=design_opts.algo,
-            max_iter=design_opts.max_iter,
-            random_state=design_opts.random_state,
-            workers=design_opts.workers,
-            parallel_seed_stride=design_opts.parallel_seed_stride,
-            jitter=design_opts.xtx_jitter,
+            n=n, **_search_kwargs
         )
         X = X_cand[selected_idx, :]
 
@@ -293,16 +303,10 @@ def i_optimal_powered_design(
             X_cand, _ = build_model_matrix(formula, cand)
             p = X_cand.shape[1]
             it += 1  # count the re-evaluation
+            # Update cand in shared kwargs after candidate growth
+            _search_kwargs["cand"] = cand
             design_df, selected_idx, _ = build_i_opt_design_with_idx(
-                cand=cand, formula=formula, n=n,
-                criterion=design_opts.criterion,
-                n_start=design_opts.starts,
-                algo=design_opts.algo,
-                max_iter=design_opts.max_iter,
-                random_state=design_opts.random_state,
-                workers=design_opts.workers,
-                parallel_seed_stride=design_opts.parallel_seed_stride,
-                jitter=design_opts.xtx_jitter,
+                n=n, **_search_kwargs
             )
             X = X_cand[selected_idx, :]
             if mode == "contrast":
@@ -391,12 +395,7 @@ def i_optimal_powered_design(
             _ran_phase2 = True
             it += 1
             design_df_v, sel_idx_v, _ = build_i_opt_design_with_idx(
-                cand=cand, formula=formula, n=n_check,
-                criterion=design_opts.criterion, n_start=design_opts.starts,
-                algo=design_opts.algo, max_iter=design_opts.max_iter,
-                random_state=design_opts.random_state, workers=design_opts.workers,
-                parallel_seed_stride=design_opts.parallel_seed_stride,
-                jitter=design_opts.xtx_jitter,
+                n=n_check, **_search_kwargs
             )
             X_v = X_cand[sel_idx_v, :]
             if mode == "contrast":

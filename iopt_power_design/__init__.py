@@ -28,6 +28,7 @@ from .analysis import (  # noqa: F401
     compare_criteria,
     robustness_report,
 )
+from .allocation import i_optimal_allocation  # noqa: F401
 from .candidate import build_candidate  # noqa: F401
 from .model_matrix import build_model_matrix  # noqa: F401
 from .iopt_search import augment_design  # noqa: F401
@@ -55,6 +56,7 @@ __all__ = [
     # Power surface
     "power_surface_2d",
     # Low-level utilities
+    "i_optimal_allocation",
     "build_candidate",
     "build_model_matrix",
     # Reports

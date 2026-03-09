@@ -598,6 +598,12 @@ def power_surface_2d(
                 workers=design_opts.workers,
                 parallel_seed_stride=design_opts.parallel_seed_stride,
                 jitter=design_opts.xtx_jitter,
+                preallocate_categorical=design_opts.preallocate_categorical,
+                alloc_min_per_cell=design_opts.alloc_min_per_cell,
+                alloc_max_per_cell=design_opts.alloc_max_per_cell,
+                alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
+                alloc_wynn_tol=design_opts.alloc_wynn_tol,
+                cat_cells_cap=design_opts.cat_cells_cap,
             )
             _x_cache[n_val] = X_cand[sel_idx, :]
         return _x_cache[n_val]

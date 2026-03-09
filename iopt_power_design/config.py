@@ -468,6 +468,13 @@ class DesignOptions:
     max_iter: int = 1000
     xtx_jitter: float = 1e-8
 
+    # Categorical pre-allocation (Enhancement 26)
+    preallocate_categorical: bool = False
+    alloc_min_per_cell: int = 1
+    alloc_max_per_cell: Optional[int] = None
+    alloc_wynn_max_iter: int = 500
+    alloc_wynn_tol: float = 1e-6
+
     # Advanced options
     constraint_func: Optional[Callable[["pd.Series"], bool]] = field(
         default=None, repr=False
@@ -517,6 +524,19 @@ class DesignOptions:
             )
         if self.workers is not None and self.workers <= 0:
             self.workers = None  # Treat 0 or negative as serial
+        if self.alloc_min_per_cell < 0:
+            raise ValueError("alloc_min_per_cell must be >= 0")
+        if self.alloc_max_per_cell is not None and self.alloc_max_per_cell < 1:
+            raise ValueError("alloc_max_per_cell must be >= 1 (or None for unconstrained)")
+        if (
+            self.alloc_max_per_cell is not None
+            and self.alloc_max_per_cell < self.alloc_min_per_cell
+        ):
+            raise ValueError("alloc_max_per_cell must be >= alloc_min_per_cell")
+        if self.alloc_wynn_max_iter < 1:
+            raise ValueError("alloc_wynn_max_iter must be >= 1")
+        if self.alloc_wynn_tol <= 0:
+            raise ValueError("alloc_wynn_tol must be > 0")
 
         # --- Declarative constraint expression ---
         # If constraint_expr is set, compile it to a callable and store in

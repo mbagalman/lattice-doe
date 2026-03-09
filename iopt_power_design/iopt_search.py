@@ -477,6 +477,140 @@ def _one_start_worker(
 # ---------------------------------------------------------------------
 # I-optimal design search (serial + optional parallel starts)
 # ---------------------------------------------------------------------
+def _preallocated_design(
+    cand: pd.DataFrame,
+    formula: str,
+    n: int,
+    *,
+    criterion: str,
+    algo: str,
+    n_start: int,
+    max_iter: int,
+    random_state: Optional[int],
+    jitter: float,
+    alloc_min_per_cell: int,
+    alloc_max_per_cell: Optional[int],
+    alloc_wynn_max_iter: int,
+    alloc_wynn_tol: float,
+    cat_cells_cap: int,
+) -> Tuple[pd.DataFrame, np.ndarray, List[str]]:
+    """Run pre-allocation then per-cell Fedorov exchange.
+
+    Identifies categorical columns (non-numeric dtype) in *cand*, calls
+    ``i_optimal_allocation`` on the candidate set to determine integer run
+    counts per cell, then runs a serial ``_optimal_indices_from_X`` search
+    within each non-empty cell stratum.
+
+    Falls back to the standard single-pool search when no categorical columns
+    are present in *cand*.
+    """
+    # Detect categorical columns (non-numeric dtype)
+    cat_cols = [c for c in cand.columns if not pd.api.types.is_numeric_dtype(cand[c])]
+
+    if not cat_cols:
+        # No categorical columns — fall back to normal search
+        X_cand, p_names = build_model_matrix(formula, cand)
+        selected_idx = _optimal_indices_from_X(
+            X_cand, n,
+            criterion=criterion, algo=algo, n_start=n_start,
+            max_iter=max_iter, random_state=random_state, jitter=jitter,
+        )
+        design_df = cand.iloc[selected_idx].reset_index(drop=True)
+        return design_df, selected_idx, p_names
+
+    # Enumerate unique categorical cells present in the candidate set
+    cell_df = cand[cat_cols].drop_duplicates().reset_index(drop=True)
+    k = len(cell_df)
+
+    if k > cat_cells_cap:
+        raise ValueError(
+            f"Categorical cell count ({k}) in the candidate set exceeds "
+            f"cat_cells_cap ({cat_cells_cap}). Reduce categorical levels or "
+            "raise DesignOptions.cat_cells_cap."
+        )
+
+    # Represent each cell by its centroid (midpoint of any continuous columns)
+    cont_cols = [c for c in cand.columns if pd.api.types.is_numeric_dtype(cand[c])]
+    rep_rows = []
+    for _, row in cell_df.iterrows():
+        rep_row = dict(row)
+        for cc in cont_cols:
+            rep_row[cc] = float(cand[cc].mean())
+        rep_rows.append(rep_row)
+    rep_df = pd.DataFrame(rep_rows, columns=list(cand.columns))
+
+    try:
+        X_cells, _ = build_model_matrix(formula, rep_df)
+    except Exception as e:
+        raise ValueError(
+            f"Pre-allocation: failed to build model matrix for representative "
+            f"cell points. Original error: {e}"
+        ) from e
+
+    # Import allocation helpers here (avoids circular import at module level)
+    from .allocation import _wynn_multiplicative_I, _round_allocation  # noqa: PLC0415
+
+    weights = _wynn_multiplicative_I(
+        X_cells=X_cells,
+        jitter=jitter,
+        max_iter=alloc_wynn_max_iter,
+        tol=alloc_wynn_tol,
+    )
+    counts = _round_allocation(
+        weights=weights,
+        n=n,
+        min_per_cell=alloc_min_per_cell,
+        max_per_cell=alloc_max_per_cell,
+    )
+
+    # Build model matrix for the full candidate set (needed for p_names)
+    X_cand_full, p_names = build_model_matrix(formula, cand)
+
+    # Per-cell Fedorov exchange
+    all_global_idx: List[np.ndarray] = []
+    cell_random_state = int(0 if random_state is None else random_state)
+
+    for ci in range(k):
+        n_cell = int(counts[ci])
+        if n_cell == 0:
+            continue
+
+        # Build boolean mask for this cell
+        mask = np.ones(len(cand), dtype=bool)
+        for col in cat_cols:
+            mask &= (cand[col].values == cell_df.iloc[ci][col])
+        cell_positions = np.where(mask)[0]  # positional indices into cand
+
+        if len(cell_positions) == 0:
+            continue
+
+        if n_cell > len(cell_positions):
+            # Allocated more than available — clamp silently
+            n_cell = len(cell_positions)
+
+        # Extract per-cell model matrix (using positional index slice)
+        X_cell = X_cand_full[cell_positions, :]
+
+        local_idx = _optimal_indices_from_X(
+            X_cell, n_cell,
+            criterion=criterion, algo=algo, n_start=n_start,
+            max_iter=max_iter, random_state=cell_random_state, jitter=jitter,
+        )
+        # Map local indices back to global positional indices in cand
+        all_global_idx.append(cell_positions[local_idx])
+        cell_random_state += 1337  # decorrelate seeds between cells
+
+    if not all_global_idx:
+        raise RuntimeError(
+            "Pre-allocation produced no design points. "
+            "All categorical cells were empty after candidate filtering."
+        )
+
+    selected_idx = np.concatenate(all_global_idx)
+    design_df = cand.iloc[selected_idx].reset_index(drop=True)
+    return design_df, selected_idx, p_names
+
+
 def build_i_opt_design_with_idx(
     cand: pd.DataFrame,
     formula: str,
@@ -490,6 +624,12 @@ def build_i_opt_design_with_idx(
     parallel_seed_stride: int = 10_000,
     memory_limit_gb: float = 1.0,
     jitter: float = 1e-8,
+    preallocate_categorical: bool = False,
+    alloc_min_per_cell: int = 1,
+    alloc_max_per_cell: Optional[int] = None,
+    alloc_wynn_max_iter: int = 500,
+    alloc_wynn_tol: float = 1e-6,
+    cat_cells_cap: int = 10_000,
 ) -> Tuple[pd.DataFrame, np.ndarray, List[str]]:
     """Build an I-optimal design and also return selected row indices.
 
@@ -529,6 +669,21 @@ def build_i_opt_design_with_idx(
     jitter : float, default 1e-8
         Diagonal ridge added to X'X for numerical stability in the Fedorov
         exchange.  Passed through from ``DesignOptions.xtx_jitter``.
+    preallocate_categorical : bool, default False
+        If True and *cand* contains non-numeric (categorical) columns, run the
+        Wynn multiplicative pre-allocation step before the Fedorov exchange.
+        Each categorical cell receives an integer run count, then an
+        independent Fedorov search is run within that cell stratum.
+    alloc_min_per_cell : int, default 1
+        Minimum runs assigned to each occupied categorical cell.
+    alloc_max_per_cell : int or None, default None
+        Maximum runs per cell (``None`` = unconstrained).
+    alloc_wynn_max_iter : int, default 500
+        Maximum iterations for the Wynn multiplicative update.
+    alloc_wynn_tol : float, default 1e-6
+        Convergence tolerance for the Wynn algorithm.
+    cat_cells_cap : int, default 10 000
+        Maximum number of categorical cells; raises if exceeded.
 
     Returns
     -------
@@ -539,6 +694,19 @@ def build_i_opt_design_with_idx(
     """
     if len(cand) == 0:
         raise ValueError("Candidate set 'cand' is empty.")
+
+    # Pre-allocation path — delegates entirely to _preallocated_design
+    if preallocate_categorical:
+        return _preallocated_design(
+            cand=cand, formula=formula, n=n,
+            criterion=criterion, algo=algo, n_start=n_start,
+            max_iter=max_iter, random_state=random_state, jitter=jitter,
+            alloc_min_per_cell=alloc_min_per_cell,
+            alloc_max_per_cell=alloc_max_per_cell,
+            alloc_wynn_max_iter=alloc_wynn_max_iter,
+            alloc_wynn_tol=alloc_wynn_tol,
+            cat_cells_cap=cat_cells_cap,
+        )
 
     p_names: List[str] = []
     try:
