@@ -463,3 +463,77 @@ with st.expander("Advanced design options"):
             st.success("Valid expression syntax.")
         except SyntaxError as exc:
             st.error(f"Syntax error: {exc.msg} (at position {exc.offset})")
+
+    st.markdown("---")
+
+    # D4 — Blocked design
+    st.markdown("**Blocked Design**")
+    st.caption(
+        "Groups runs into blocks to absorb nuisance variation (e.g. day-to-day "
+        "or operator effects). Set *Number of blocks* ≥ 2 to enable; "
+        "leave at 0 for an unblocked design."
+    )
+    col_blk1, col_blk2 = st.columns(2)
+    with col_blk1:
+        st.number_input(
+            "Number of blocks (0 = unblocked)",
+            min_value=0,
+            max_value=100,
+            step=1,
+            key="n_blocks",
+            help=(
+                "0 disables blocking. "
+                "≥ 2 runs independent I-optimal searches within each block and "
+                "adds block dummy columns to the power calculation."
+            ),
+        )
+    with col_blk2:
+        st.text_input(
+            "Block factor name",
+            key="block_factor_name",
+            help=(
+                "Column name for the block assignment in the design table. "
+                "Must not clash with any treatment factor name."
+            ),
+        )
+    if int(st.session_state.get("n_blocks", 0)) == 1:
+        st.warning("Number of blocks must be 0 (unblocked) or ≥ 2.")
+
+    st.markdown("---")
+
+    # D5 — Categorical pre-allocation
+    st.markdown("**Categorical Pre-Allocation**")
+    st.caption(
+        "When your design includes categorical factors, the Wynn multiplicative "
+        "algorithm can pre-allocate runs across factor-level cells before the "
+        "Fedorov point-exchange search, improving balance."
+    )
+    st.checkbox(
+        "Enable categorical pre-allocation (Wynn algorithm)",
+        key="preallocate_categorical",
+        help=(
+            "Applies the Wynn multiplicative I-optimal allocation to distribute "
+            "runs across categorical cells before the exchange search. "
+            "Ignored for purely continuous designs."
+        ),
+    )
+    if st.session_state.get("preallocate_categorical", False):
+        col_alloc1, col_alloc2 = st.columns(2)
+        with col_alloc1:
+            st.number_input(
+                "Min runs per cell",
+                min_value=1,
+                max_value=100,
+                step=1,
+                key="alloc_min_per_cell",
+                help="Minimum number of runs guaranteed in each factor-level cell.",
+            )
+        with col_alloc2:
+            st.number_input(
+                "Max runs per cell (0 = no limit)",
+                min_value=0,
+                max_value=10000,
+                step=1,
+                key="alloc_max_per_cell",
+                help="Upper bound on runs per cell. 0 means no upper limit.",
+            )

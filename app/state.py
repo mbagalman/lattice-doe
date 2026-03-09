@@ -40,6 +40,17 @@ def init_state() -> None:
         "random_state": 42,
         "constraint_expr": "",
 
+        # --- Blocked design options (Enhancement 20) ---
+        # 0 means unblocked; ≥ 2 enables blocking.
+        "n_blocks": 0,
+        "block_factor_name": "Block",
+
+        # --- Categorical pre-allocation options (Enhancement 26) ---
+        "preallocate_categorical": False,
+        "alloc_min_per_cell": 1,
+        # 0 is the sentinel for "no upper limit" (maps to alloc_max_per_cell=None).
+        "alloc_max_per_cell": 0,
+
         # --- Results (populated after a successful run) ---
         "result": None,       # full dict from i_optimal_powered_design
         "run_error": None,    # error string if the last run failed

@@ -119,6 +119,20 @@ def _build_design_opts(ss: dict) -> DesignOptions:
     expr = ss.get("constraint_expr", "").strip()
     if expr:
         kwargs["constraint_expr"] = expr
+    # Blocked design options
+    n_blocks = int(ss.get("n_blocks", 0))
+    if n_blocks >= 2:
+        kwargs["n_blocks"] = n_blocks
+        block_factor_name = ss.get("block_factor_name", "Block").strip()
+        if block_factor_name:
+            kwargs["block_factor_name"] = block_factor_name
+    # Categorical pre-allocation options
+    if ss.get("preallocate_categorical", False):
+        kwargs["preallocate_categorical"] = True
+        kwargs["alloc_min_per_cell"] = int(ss.get("alloc_min_per_cell", 1))
+        alloc_max = int(ss.get("alloc_max_per_cell", 0))
+        if alloc_max > 0:
+            kwargs["alloc_max_per_cell"] = alloc_max
     return DesignOptions(**kwargs)
 
 
@@ -234,6 +248,20 @@ def _build_yaml(ss: dict) -> str:
     expr = ss.get("constraint_expr", "").strip()
     if expr:
         design_block["constraint_expr"] = expr
+    # Blocked design options
+    n_blocks = int(ss.get("n_blocks", 0))
+    if n_blocks >= 2:
+        design_block["n_blocks"] = n_blocks
+        block_factor_name = ss.get("block_factor_name", "Block").strip()
+        if block_factor_name:
+            design_block["block_factor_name"] = block_factor_name
+    # Categorical pre-allocation options
+    if ss.get("preallocate_categorical", False):
+        design_block["preallocate_categorical"] = True
+        design_block["alloc_min_per_cell"] = int(ss.get("alloc_min_per_cell", 1))
+        alloc_max = int(ss.get("alloc_max_per_cell", 0))
+        if alloc_max > 0:
+            design_block["alloc_max_per_cell"] = alloc_max
     cfg["design"] = design_block
 
     return yaml.dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
