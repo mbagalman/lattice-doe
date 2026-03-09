@@ -469,6 +469,7 @@ def _one_start_worker(
         n_start=1,  # force single-start per worker
         max_iter=max_iter,
         random_state=seed,
+        jitter=jitter,  # CR-19: forward jitter to Fedorov exchange
     )
     score = _criterion_score(criterion, X_cand, idx, jitter=jitter)
     return score, np.asarray(idx, dtype=int)

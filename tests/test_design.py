@@ -16,6 +16,8 @@ from iopt_power_design.iopt_search import (
     _d_criterion_for_indices,
     _a_criterion_for_indices,
     _criterion_score,
+    _one_start_worker,
+    _optimal_indices_from_X,
     _score_design,
     augment_design,
 )
@@ -435,3 +437,58 @@ class TestAugmentDesign:
             design_opts=opts_a,
         )
         assert len(aug) == len(seed_design) + 2
+
+
+# ---------------------------------------------------------------------------
+# CR-19: jitter forwarded to Fedorov exchange in parallel worker (_one_start_worker)
+# ---------------------------------------------------------------------------
+
+class TestCR19JitterInParallelWorker:
+    """Verify _one_start_worker forwards jitter to the Fedorov exchange."""
+
+    FORMULA = "1 + A + B"
+    FACTORS = {"A": (0.0, 1.0), "B": (0.0, 1.0)}
+
+    def _make_X_cand(self, seed=0):
+        from iopt_power_design.candidate import build_candidate
+        cand = build_candidate(self.FACTORS, candidate_points=50, seed=seed)
+        X, _ = build_model_matrix(self.FORMULA, cand)
+        return X
+
+    def test_one_start_worker_accepts_custom_jitter(self):
+        """_one_start_worker runs without error for a non-default jitter value."""
+        X_cand = self._make_X_cand()
+        score, idx = _one_start_worker(
+            X_cand, n=8, seed=42,
+            algo="fedorov", criterion="I", max_iter=20,
+            jitter=1e-4,  # non-default
+        )
+        assert np.isfinite(score)
+        assert len(idx) == 8
+
+    def test_one_start_worker_default_jitter_matches_explicit(self):
+        """Default jitter=1e-8 and explicit jitter=1e-8 yield the same result."""
+        X_cand = self._make_X_cand(seed=1)
+        score_default, idx_default = _one_start_worker(
+            X_cand, n=8, seed=7,
+            algo="fedorov", criterion="I", max_iter=20,
+        )
+        score_explicit, idx_explicit = _one_start_worker(
+            X_cand, n=8, seed=7,
+            algo="fedorov", criterion="I", max_iter=20,
+            jitter=1e-8,
+        )
+        assert score_default == pytest.approx(score_explicit)
+        np.testing.assert_array_equal(idx_default, idx_explicit)
+
+    def test_build_i_opt_design_with_idx_parallel_custom_jitter(self):
+        """build_i_opt_design_with_idx with workers=2 and custom jitter runs cleanly."""
+        from iopt_power_design.candidate import build_candidate
+        cand = build_candidate(self.FACTORS, candidate_points=80, seed=3)
+        design_df, sel_idx, _ = build_i_opt_design_with_idx(
+            cand=cand, formula=self.FORMULA, n=10,
+            criterion="I", n_start=4, algo="fedorov", max_iter=30,
+            random_state=0, workers=2, jitter=1e-4,
+        )
+        assert len(design_df) == 10
+        assert len(sel_idx) == 10
