@@ -202,19 +202,29 @@ def i_optimal_powered_design(
                 "p changed after building full candidate set."
             )
 
-    # For blocked designs: compute p_full from augmented formula using a sample
+    # For blocked designs: compute p_full from augmented formula.
+    # CR-18: Use the full candidate set (all categorical treatment levels present)
+    # augmented with cyclic block labels so every block level appears at least once.
+    # The previous approach pinned each categorical treatment factor to a single level,
+    # causing Patsy to omit their dummy columns and undercount p_full relative to
+    # p_treat, triggering a false "no block dummy columns" error.
     if is_blocked:
-        _sample_rows = []
-        for _b in [f"B{i + 1}" for i in range(design_opts.n_blocks)]:
-            _row = {}
-            for _k, _v in factors.items():
-                _row[_k] = _v[0] if isinstance(_v, (list, tuple)) else float(_v)
-            _row[design_opts.block_factor_name] = _b
-            _sample_rows.append(_row)
-        try:
-            _X_aug_sample, _ = build_model_matrix(
-                aug_formula, pd.DataFrame(_sample_rows)
+        _blk_labels = [f"B{i + 1}" for i in range(design_opts.n_blocks)]
+        _cand_aug_tmp = cand.copy()
+        _n_cand_tmp = len(_cand_aug_tmp)
+        # Ensure every block label appears at least once (pad if candidate is tiny)
+        if _n_cand_tmp < design_opts.n_blocks:
+            _pad = pd.concat(
+                [cand.iloc[[0]]] * (design_opts.n_blocks - _n_cand_tmp),
+                ignore_index=True,
             )
+            _cand_aug_tmp = pd.concat([_cand_aug_tmp, _pad], ignore_index=True)
+        _cand_aug_tmp[design_opts.block_factor_name] = [
+            _blk_labels[i % design_opts.n_blocks]
+            for i in range(len(_cand_aug_tmp))
+        ]
+        try:
+            _X_aug_sample, _ = build_model_matrix(aug_formula, _cand_aug_tmp)
             p_full = _X_aug_sample.shape[1]
         except Exception as _e:
             raise ValueError(
@@ -586,6 +596,11 @@ def i_optimal_powered_design(
     # MODIFIED: Reconstruct final X matrix for validation
     if is_blocked:
         final_X = best["_X"]
+        # For blocked designs, p_full was estimated from the full candidate set.
+        # The actual X_full from build_blocked_design is the ground truth for
+        # column count — it can differ when n_b < p_treat within a block, causing
+        # Patsy to omit columns for unseen factor levels.
+        p_full = final_X.shape[1]
     else:
         final_X = best["_X_cand"][best["_selected_idx"], :]
 

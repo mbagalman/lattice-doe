@@ -684,3 +684,93 @@ class TestCR17BlockFactorNameCollision:
                 alloc_wynn_tol=1e-6,
                 cat_cells_cap=10000,
             )
+
+
+# ---------------------------------------------------------------------------
+# CR-18: blocked designs with categorical treatment factors
+# ---------------------------------------------------------------------------
+
+class TestCR18BlockedWithCategoricalTreatment:
+    """CR-18: p_full must account for all categorical treatment levels.
+
+    The old _sample_rows approach pinned treatment categoricals to one level,
+    so Patsy emitted fewer dummy columns and p_full < p_treat, triggering a
+    false 'no block dummy columns' ValueError.
+    """
+
+    def test_blocked_with_categorical_treatment_does_not_raise(self):
+        """Blocked design with a 3-level categorical treatment factor must work."""
+        factors = {
+            "Material": ["Steel", "Aluminum", "Titanium"],
+            "Temp":     (-10.0, 50.0),
+        }
+        formula = "1 + Material + Temp"
+        # p_treat = intercept + 2 Material dummies + Temp = 4
+        L = np.array([[0.0, 1.0, 0.0, 0.0]])  # test Material[Aluminum]
+        delta = np.array([0.5])
+        power_cfg = PowerContrastConfig(
+            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
+            max_n=60, max_iter=15,
+        )
+        design_opts = DesignOptions(
+            n_blocks=3, random_state=42, starts=1, candidate_points=150,
+        )
+        result = i_optimal_powered_design(
+            formula=formula,
+            factors=factors,
+            power_cfg=power_cfg,
+            design_opts=design_opts,
+        )
+        assert "Block" in result["design_df"].columns
+        assert result["report"]["p_treat"] == 4
+        assert result["report"]["block_structure"]["n_blocks"] == 3
+
+    def test_blocked_p_block_cols_equals_n_blocks_minus_one_with_cat(self):
+        """p_block_cols = n_blocks - 1 even when treatment has multiple cat levels."""
+        factors = {
+            "Cat": ["A", "B", "C"],
+            "x":   (0.0, 1.0),
+        }
+        formula = "1 + Cat + x"
+        power_cfg = PowerR2Config(
+            r2_target=0.25, alpha=0.05, power=0.7, max_n=60, max_iter=15,
+        )
+        design_opts = DesignOptions(
+            n_blocks=4, random_state=7, starts=1, candidate_points=120,
+        )
+        result = i_optimal_powered_design(
+            formula=formula,
+            factors=factors,
+            power_cfg=power_cfg,
+            design_opts=design_opts,
+        )
+        # p_treat = 1 (intercept) + 2 (Cat dummies) + 1 (x) = 4
+        assert result["report"]["p_treat"] == 4
+        assert result["design_df"]["Block"].nunique() == 4
+
+    def test_blocked_pure_categorical_treatment_does_not_raise(self):
+        """All-categorical treatment with blocked design must not raise.
+
+        Pure 2×3 categorical → 6-row candidate; cap max_n=6 so bisection
+        never requests more runs than the candidate pool.
+        """
+        factors = {
+            "A": ["Low", "High"],
+            "B": ["X", "Y", "Z"],
+        }
+        formula = "1 + A + B"
+        power_cfg = PowerR2Config(
+            r2_target=0.25, alpha=0.05, power=0.7, max_n=6, max_iter=15,
+        )
+        design_opts = DesignOptions(
+            n_blocks=2, random_state=5, starts=1, candidate_points=100,
+        )
+        result = i_optimal_powered_design(
+            formula=formula,
+            factors=factors,
+            power_cfg=power_cfg,
+            design_opts=design_opts,
+        )
+        assert "Block" in result["design_df"].columns
+        # p_treat: intercept + 1 (A) + 2 (B) = 4
+        assert result["report"]["p_treat"] == 4
