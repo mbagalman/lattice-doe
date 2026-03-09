@@ -39,6 +39,7 @@ from .diag_metrics import compute_design_metrics
 from .diag_export import export_diagnostics
 from .power import contrast_power, global_r2_power, _r2_df_num
 from .utils import validate_factors, initial_n_guess
+from .blocked import blocked_formula, build_blocked_design
 
 
 def _buckets_df(design_df: pd.DataFrame) -> pd.DataFrame:
@@ -146,6 +147,14 @@ def i_optimal_powered_design(
     # ADDED: Early validation of formula, p, and max_n
     p = _validate_api_inputs(formula, factors, power_cfg)
 
+    # --- Blocking setup ---
+    is_blocked = design_opts.n_blocks is not None and design_opts.n_blocks >= 2
+    if is_blocked:
+        aug_formula = blocked_formula(formula, design_opts.block_factor_name)
+    else:
+        aug_formula = formula
+    p_treat = p  # treatment-only parameter count (for L validation)
+
     # --- 2. Decide candidate size ---
     if design_opts.auto_candidate:
         candidate_points = estimate_candidate_size(
@@ -180,11 +189,41 @@ def i_optimal_powered_design(
             "This may happen if some factor levels had 0 candidates."
         )
         p = X_cand.shape[1]
+        p_treat = p  # keep p_treat in sync after candidate set update
         if power_cfg.max_n <= p:
             raise ValueError(
                 f"power_cfg.max_n ({power_cfg.max_n}) must be > p ({p}). "
                 "p changed after building full candidate set."
             )
+
+    # For blocked designs: compute p_full from augmented formula using a sample
+    if is_blocked:
+        _sample_rows = []
+        for _b in [f"B{i + 1}" for i in range(design_opts.n_blocks)]:
+            _row = {}
+            for _k, _v in factors.items():
+                _row[_k] = _v[0] if isinstance(_v, (list, tuple)) else float(_v)
+            _row[design_opts.block_factor_name] = _b
+            _sample_rows.append(_row)
+        try:
+            _X_aug_sample, _ = build_model_matrix(
+                aug_formula, pd.DataFrame(_sample_rows)
+            )
+            p_full = _X_aug_sample.shape[1]
+        except Exception as _e:
+            raise ValueError(
+                f"Failed to build augmented blocked formula {aug_formula!r}: {_e}"
+            ) from _e
+        p_block_cols = p_full - p_treat
+        if p_block_cols < 1:
+            raise ValueError(
+                f"Blocked model has no block dummy columns "
+                f"(p_full={p_full}, p_treat={p_treat}). "
+                "Check that block_factor_name does not conflict with existing factors."
+            )
+    else:
+        p_full = p_treat
+        p_block_cols = 0
 
     # --- 4. Two-phase search for minimum n that meets the power target ---
     # Phase 1 — bisection: narrows the feasible range in O(log max_n) iterations.
@@ -198,15 +237,23 @@ def i_optimal_powered_design(
 
     # Validate mode-specific contrast dimensions up front (before the loop)
     if mode == "contrast":
-        if power_cfg.L.shape[1] != p:
+        if power_cfg.L.shape[1] != p_treat:
             raise ValueError(
-                f"Contrast L has {power_cfg.L.shape[1]} columns but model has p={p} parameters."
+                f"Contrast L has {power_cfg.L.shape[1]} columns but model has "
+                f"p_treat={p_treat} treatment parameters."
             )
         q = power_cfg.L.shape[0]
         if power_cfg.delta.shape != (q,):
             raise ValueError(f"delta must be shape ({q},), got {power_cfg.delta.shape}.")
+        # Pad L with zeros for block dummy columns when blocked
+        if is_blocked and p_block_cols > 0:
+            L_eff = np.hstack([power_cfg.L, np.zeros((q, p_block_cols))])
+        else:
+            L_eff = power_cfg.L
+    else:
+        L_eff = None
 
-    lo = p + 1
+    lo = max(p_full + 1, design_opts.n_blocks if is_blocked else 1)
     hi = power_cfg.max_n + 1  # exclusive sentinel — hi is only updated to evaluated achievers
 
     best: Optional[Dict[str, Any]] = None
@@ -240,6 +287,30 @@ def i_optimal_powered_design(
         cat_cells_cap=design_opts.cat_cells_cap,
     )
 
+    # Kwargs for build_blocked_design (blocked mode only)
+    _blocked_kwargs = dict(
+        cand=cand,
+        formula=formula,
+        n_blocks=design_opts.n_blocks,
+        block_sizes=design_opts.block_sizes,
+        block_factor_name=design_opts.block_factor_name,
+        aug_formula=aug_formula,
+        criterion=design_opts.criterion,
+        n_start=design_opts.starts,
+        algo=design_opts.algo,
+        max_iter=design_opts.max_iter,
+        random_state=design_opts.random_state,
+        workers=design_opts.workers,
+        parallel_seed_stride=design_opts.parallel_seed_stride,
+        jitter=design_opts.xtx_jitter,
+        preallocate_categorical=design_opts.preallocate_categorical,
+        alloc_min_per_cell=design_opts.alloc_min_per_cell,
+        alloc_max_per_cell=design_opts.alloc_max_per_cell,
+        alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
+        alloc_wynn_tol=design_opts.alloc_wynn_tol,
+        cat_cells_cap=design_opts.cat_cells_cap,
+    ) if is_blocked else {}
+
     while lo < hi and it < power_cfg.max_iter:
         n = (lo + hi) // 2
         if n > power_cfg.max_n:
@@ -248,15 +319,19 @@ def i_optimal_powered_design(
         it += 1
 
         # 1) Build I-optimal design at n
-        design_df, selected_idx, _ = build_i_opt_design_with_idx(
-            n=n, **_search_kwargs
-        )
-        X = X_cand[selected_idx, :]
+        if is_blocked:
+            design_df, X = build_blocked_design(n=n, **_blocked_kwargs)
+            selected_idx = None
+        else:
+            design_df, selected_idx, _ = build_i_opt_design_with_idx(
+                n=n, **_search_kwargs
+            )
+            X = X_cand[selected_idx, :]
 
         # 2) Compute power
         if mode == "contrast":
             power, lam = contrast_power(
-                L=power_cfg.L, delta=power_cfg.delta, X=X,
+                L=L_eff, delta=power_cfg.delta, X=X,
                 sigma=power_cfg.sigma, alpha=power_cfg.alpha,
                 jitter=design_opts.xtx_jitter,
             )
@@ -279,11 +354,12 @@ def i_optimal_powered_design(
             continue
 
         df_denom = int(X.shape[0] - np.linalg.matrix_rank(X))
-        diags = compute_design_metrics(X, X_cand=X_cand)
+        diags = compute_design_metrics(X, X_cand=X_cand if not is_blocked else None)
 
         # Optional one-time candidate growth if conditioning is poor; re-evaluate at same n
         if (
             design_opts.allow_candidate_growth
+            and not is_blocked
             and not grew_candidates_once
             and diags.get("condition_number", np.inf) > 1e6
         ):
@@ -311,7 +387,7 @@ def i_optimal_powered_design(
             X = X_cand[selected_idx, :]
             if mode == "contrast":
                 power, lam = contrast_power(
-                    L=power_cfg.L, delta=power_cfg.delta, X=X,
+                    L=L_eff, delta=power_cfg.delta, X=X,
                     sigma=power_cfg.sigma, alpha=power_cfg.alpha,
                     jitter=design_opts.xtx_jitter,
                 )
@@ -329,7 +405,7 @@ def i_optimal_powered_design(
                 lo = n + 1
                 continue
             df_denom = int(X.shape[0] - np.linalg.matrix_rank(X))
-            diags = compute_design_metrics(X, X_cand=X_cand)
+            diags = compute_design_metrics(X, X_cand=X_cand if not is_blocked else None)
 
         buckets = _buckets_df(design_df)
         report = {
@@ -348,6 +424,11 @@ def i_optimal_powered_design(
             "starts": design_opts.starts,
             "workers": design_opts.workers,
             "candidate_points": int(candidate_points),
+            "block_structure": {
+                "n_blocks": design_opts.n_blocks,
+                "block_factor_name": design_opts.block_factor_name,
+            } if is_blocked else None,
+            "p_treat": int(p_treat),
         }
 
         if progress_callback:
@@ -366,6 +447,7 @@ def i_optimal_powered_design(
                     "report": report,
                     "_selected_idx": selected_idx,
                     "_X_cand": X_cand,
+                    "_X": X,
                 }
             hi = n  # search for smaller achiever
         else:
@@ -379,6 +461,7 @@ def i_optimal_powered_design(
                     "report": report,
                     "_selected_idx": selected_idx,
                     "_X_cand": X_cand,
+                    "_X": X,
                 }
             lo = n + 1  # need more runs
 
@@ -394,13 +477,17 @@ def i_optimal_powered_design(
                 break
             _ran_phase2 = True
             it += 1
-            design_df_v, sel_idx_v, _ = build_i_opt_design_with_idx(
-                n=n_check, **_search_kwargs
-            )
-            X_v = X_cand[sel_idx_v, :]
+            if is_blocked:
+                design_df_v, X_v = build_blocked_design(n=n_check, **_blocked_kwargs)
+                sel_idx_v = None
+            else:
+                design_df_v, sel_idx_v, _ = build_i_opt_design_with_idx(
+                    n=n_check, **_search_kwargs
+                )
+                X_v = X_cand[sel_idx_v, :]
             if mode == "contrast":
                 power_v, lam_v = contrast_power(
-                    L=power_cfg.L, delta=power_cfg.delta, X=X_v,
+                    L=L_eff, delta=power_cfg.delta, X=X_v,
                     sigma=power_cfg.sigma, alpha=power_cfg.alpha,
                     jitter=design_opts.xtx_jitter,
                 )
@@ -414,7 +501,7 @@ def i_optimal_powered_design(
             if np.isnan(power_v) or power_v + tol < target:
                 continue  # not feasible; keep scanning
             df_denom_v = int(X_v.shape[0] - np.linalg.matrix_rank(X_v))
-            diags_v = compute_design_metrics(X_v, X_cand=X_cand)
+            diags_v = compute_design_metrics(X_v, X_cand=X_cand if not is_blocked else None)
             report_v = {
                 "iteration": it,
                 "n": int(n_check),
@@ -431,6 +518,11 @@ def i_optimal_powered_design(
                 "starts": design_opts.starts,
                 "workers": design_opts.workers,
                 "candidate_points": int(candidate_points),
+                "block_structure": {
+                    "n_blocks": design_opts.n_blocks,
+                    "block_factor_name": design_opts.block_factor_name,
+                } if is_blocked else None,
+                "p_treat": int(p_treat),
             }
             if progress_callback:
                 try:
@@ -443,6 +535,7 @@ def i_optimal_powered_design(
                 "report": report_v,
                 "_selected_idx": sel_idx_v,
                 "_X_cand": X_cand,
+                "_X": X_v,
             }
             # Found a smaller achiever; keep scanning downward for an even smaller one
 
@@ -485,13 +578,16 @@ def i_optimal_powered_design(
         )
     
     # MODIFIED: Reconstruct final X matrix for validation
-    final_X = best["_X_cand"][best["_selected_idx"], :]
-    
+    if is_blocked:
+        final_X = best["_X"]
+    else:
+        final_X = best["_X_cand"][best["_selected_idx"], :]
+
     # MODIFIED: Add X.shape check per review
-    if final_X.shape != (final_n, final_p):
+    if final_X.shape != (final_n, p_full):
         raise RuntimeError(
             f"Result validation failed: Final design matrix X has shape {final_X.shape}, "
-            f"but report indicates (n, p) = ({final_n}, {final_p})."
+            f"but report indicates (n, p_full) = ({final_n}, {p_full})."
         )
     
     if np.isnan(best["report"]["achieved_power"]):

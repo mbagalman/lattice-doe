@@ -16,7 +16,7 @@ from __future__ import annotations
 import ast as _ast
 import math as _math
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Literal, TYPE_CHECKING
+from typing import Callable, List, Optional, Literal, TYPE_CHECKING
 import numpy as np  # core dependency
 
 if TYPE_CHECKING:
@@ -475,6 +475,11 @@ class DesignOptions:
     alloc_wynn_max_iter: int = 500
     alloc_wynn_tol: float = 1e-6
 
+    # Blocked design options (Enhancement 20)
+    n_blocks: Optional[int] = None
+    block_sizes: Optional[List[int]] = field(default=None, repr=False)
+    block_factor_name: str = "Block"
+
     # Advanced options
     constraint_func: Optional[Callable[["pd.Series"], bool]] = field(
         default=None, repr=False
@@ -537,6 +542,30 @@ class DesignOptions:
             raise ValueError("alloc_wynn_max_iter must be >= 1")
         if self.alloc_wynn_tol <= 0:
             raise ValueError("alloc_wynn_tol must be > 0")
+
+        # --- Blocked design validation ---
+        if self.n_blocks is not None:
+            if not isinstance(self.n_blocks, int) or isinstance(self.n_blocks, bool):
+                raise ValueError("n_blocks must be an integer or None")
+            if self.n_blocks < 2:
+                raise ValueError(
+                    "n_blocks must be >= 2; use None for unblocked designs."
+                )
+            if self.block_sizes is not None:
+                if len(self.block_sizes) != self.n_blocks:
+                    raise ValueError(
+                        f"len(block_sizes)={len(self.block_sizes)} != "
+                        f"n_blocks={self.n_blocks}. Provide one size per block."
+                    )
+                if any(s < 1 for s in self.block_sizes):
+                    raise ValueError("All block_sizes must be >= 1.")
+        elif self.block_sizes is not None:
+            raise ValueError(
+                "block_sizes requires n_blocks to be set. "
+                "Set n_blocks >= 2 or leave block_sizes=None."
+            )
+        if not self.block_factor_name:
+            raise ValueError("block_factor_name must be a non-empty string.")
 
         # --- Declarative constraint expression ---
         # If constraint_expr is set, compile it to a callable and store in
