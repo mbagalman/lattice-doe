@@ -54,7 +54,7 @@ Move an item to **In Progress** or **Completed** when work starts/finishes.
 
 | # | Enhancement | Description | Est. LOE | Value | Key files |
 |---|---|---|---|---|---|
-| 22 | **Split-plot / hard-to-change factors** | Two-stratum variance model (`σ²_whole + σ²_subplot`), two-level design search, and modified power calculations. Substantial architectural change. | 15–25 days | Very High | `design.py`, `power.py`, `api.py`, `config.py` |
+| 22 | **Split-plot / hard-to-change factors** | Two-stratum variance model (`σ²_whole + σ²_subplot`), GLS criterion for design search, GLS power with per-stratum df, two-phase Fedorov exchange. See detailed ticket pack: [`docs/planning/split-plot-ticket-pack.md`](docs/planning/split-plot-ticket-pack.md). | 20–30 days | Very High | `split_plot.py` (new), `config.py`, `power.py`, `iopt_search.py`, `api.py`, `analysis.py`, CLI/Streamlit/Sheets/Excel |
 | 23 | **Multi-response designs** | Joint power across `k` responses; noncentrality becomes a matrix; requires Hotelling T² or Roy's largest-root distribution. | 10–15 days | High | `power.py`, `api.py`, `config.py` |
 | 24 | **Bayesian / robust optimal design** | Support local/Bayesian D-optimality with priors over coefficients and robust objective averaging over parameter uncertainty. | 12–20 days | Medium-High | `design.py`, `config.py`, `api.py`, `README.md` |
 | 25 | **GLM support (logistic/Poisson)** | Extend candidate scoring and power calculations beyond Gaussian linear models for common classification/count use cases. | 10–15 days | High | `design.py`, `power.py`, `api.py`, `config.py` |
