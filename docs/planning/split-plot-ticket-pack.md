@@ -1,7 +1,7 @@
 # Enhancement 22 — Split-Plot / Hard-to-Change Factors
 ## Ticket Pack
 
-**Status:** In Progress — SP-1 ✅ done; SP-2 next
+**Status:** In Progress — SP-1 ✅ SP-2 ✅ done; SP-3 next
 **Backlog entry:** ENHANCEMENTS.md § Enhancement 22
 **Estimated total LOE:** 20–30 developer-days
 **Value:** Very High (split-plot is the most common industrial DOE restriction)
@@ -144,7 +144,7 @@ df = power_curve_by_wp(
 | ID | Title | LOE | Depends On |
 |----|-------|-----|-----------|
 | SP-1 | ~~Config layer — `SplitPlotOptions` and `DesignOptions.split_plot`~~ | ~~1 day~~ | ✅ Done — commit `2cf3e98`; 29 new tests in `TestSplitPlotOptions` + `TestDesignOptionsSplitPlot` |
-| SP-2 | Two-stratum covariance utilities (`split_plot.py`) | 2 days | SP-1 |
+| SP-2 | ~~Two-stratum covariance utilities (`split_plot.py`)~~ | ~~2 days~~ | ✅ Done — commit `89dbf26`; 48 new tests; `split_plot.py` at 100% coverage |
 | SP-3 | Split-plot candidate generation | 2 days | SP-1 |
 | SP-4 | GLS criterion scorers | 2 days | SP-2 |
 | SP-5 | Split-plot Fedorov exchange algorithm | 5 days | SP-3, SP-4 |
@@ -844,7 +844,7 @@ The tickets are designed to be implemented in session-sized chunks:
 
 | Session | Tickets | Deliverable |
 |---------|---------|-------------|
-| 1 | ~~SP-1~~ + SP-2 | ~~Config dataclass~~ ✅ + covariance math (pure, fast to test) |
+| 1 | ~~SP-1 + SP-2~~ | ~~Config dataclass + covariance math~~ ✅ |
 | 2 | SP-3 | Candidate generation for split-plot |
 | 3 | SP-4 | GLS criterion scorers |
 | 4 | SP-5 (init + WP-swap) | First half of exchange algorithm |
