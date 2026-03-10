@@ -36,6 +36,7 @@ from .report import generate_report  # noqa: F401
 from .sheets import SheetsError, sheets_run, create_sheet_template  # noqa: F401
 from .excel_template import ExcelError, excel_run, create_excel_template  # noqa: F401
 from .blocked import balanced_block_sizes, blocked_formula, build_blocked_design  # noqa: F401
+from .widgets import WidgetsError, DesignWidget, design_widget  # noqa: F401
 
 __all__ = [
     "__version__",
@@ -74,4 +75,8 @@ __all__ = [
     "balanced_block_sizes",
     "blocked_formula",
     "build_blocked_design",
+    # Jupyter widgets UI
+    "WidgetsError",
+    "DesignWidget",
+    "design_widget",
 ]
