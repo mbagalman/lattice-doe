@@ -1,7 +1,7 @@
 # Enhancement 22 — Split-Plot / Hard-to-Change Factors
 ## Ticket Pack
 
-**Status:** Planning
+**Status:** In Progress — SP-1 ✅ done; SP-2 next
 **Backlog entry:** ENHANCEMENTS.md § Enhancement 22
 **Estimated total LOE:** 20–30 developer-days
 **Value:** Very High (split-plot is the most common industrial DOE restriction)
@@ -143,7 +143,7 @@ df = power_curve_by_wp(
 
 | ID | Title | LOE | Depends On |
 |----|-------|-----|-----------|
-| SP-1 | Config layer — `SplitPlotOptions` and `DesignOptions.split_plot` | 1 day | — |
+| SP-1 | ~~Config layer — `SplitPlotOptions` and `DesignOptions.split_plot`~~ | ~~1 day~~ | ✅ Done — commit `2cf3e98`; 29 new tests in `TestSplitPlotOptions` + `TestDesignOptionsSplitPlot` |
 | SP-2 | Two-stratum covariance utilities (`split_plot.py`) | 2 days | SP-1 |
 | SP-3 | Split-plot candidate generation | 2 days | SP-1 |
 | SP-4 | GLS criterion scorers | 2 days | SP-2 |
@@ -844,7 +844,7 @@ The tickets are designed to be implemented in session-sized chunks:
 
 | Session | Tickets | Deliverable |
 |---------|---------|-------------|
-| 1 | SP-1 + SP-2 | Config dataclass + covariance math (pure, fast to test) |
+| 1 | ~~SP-1~~ + SP-2 | ~~Config dataclass~~ ✅ + covariance math (pure, fast to test) |
 | 2 | SP-3 | Candidate generation for split-plot |
 | 3 | SP-4 | GLS criterion scorers |
 | 4 | SP-5 (init + WP-swap) | First half of exchange algorithm |
