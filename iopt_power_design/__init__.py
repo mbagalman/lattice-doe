@@ -37,6 +37,11 @@ from .sheets import SheetsError, sheets_run, create_sheet_template  # noqa: F401
 from .excel_template import ExcelError, excel_run, create_excel_template  # noqa: F401
 from .blocked import balanced_block_sizes, blocked_formula, build_blocked_design  # noqa: F401
 from .widgets import WidgetsError, DesignWidget, design_widget  # noqa: F401
+from .split_plot import (  # noqa: F401
+    build_whole_plot_indicator,
+    build_split_plot_covariance_inv,
+    gls_information_matrix,
+)
 
 __all__ = [
     "__version__",
@@ -80,4 +85,8 @@ __all__ = [
     "WidgetsError",
     "DesignWidget",
     "design_widget",
+    # Split-plot covariance utilities
+    "build_whole_plot_indicator",
+    "build_split_plot_covariance_inv",
+    "gls_information_matrix",
 ]
