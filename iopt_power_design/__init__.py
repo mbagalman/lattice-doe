@@ -13,7 +13,7 @@ __version__ = "0.1.0"
 
 # Re-export primary API and configuration types
 from .api import i_optimal_powered_design  # noqa: F401
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions  # noqa: F401
+from .config import PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions  # noqa: F401
 
 # Power surface — canonical implementation in power_curves
 from .power_curves import power_surface_2d  # noqa: F401
@@ -55,6 +55,7 @@ __all__ = [
     "PowerContrastConfig",
     "PowerR2Config",
     "DesignOptions",
+    "SplitPlotOptions",
     # Power surface
     "power_surface_2d",
     # Low-level utilities

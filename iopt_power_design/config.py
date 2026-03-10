@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast as _ast
 import math as _math
+import warnings as _warnings
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Literal, TYPE_CHECKING
 import numpy as np  # core dependency
@@ -333,6 +334,111 @@ class PowerR2Config:
 
 
 # ---------------------------------------------------------------------
+# Split-plot design configuration
+# ---------------------------------------------------------------------
+@dataclass
+class SplitPlotOptions:
+    """Configuration for split-plot (hard-to-change factor) designs.
+
+    A split-plot experiment groups runs into **whole plots** (WPs).  All
+    runs within a whole plot share the same setting of every hard-to-change
+    (HTC) factor; only the easy-to-change (ETC) sub-plot factors vary
+    freely within a WP.
+
+    The variance model is two-stratum::
+
+        y_ij = Xβ + τ_i + ε_ij
+        τ_i ~ N(0, σ²_wp)     (whole-plot error, shared within WP i)
+        ε_ij ~ N(0, σ²_sp)    (sub-plot error, independent)
+        η = σ²_wp / σ²_sp     (variance ratio)
+
+    Parameters
+    ----------
+    htc_factors : list of str
+        Names of the hard-to-change (whole-plot) factors.  Must be a
+        non-empty subset of the factor names passed to the API.
+    n_whole_plots : int
+        Number of whole plots (outer randomisation units).  Must be ≥ 2.
+    eta : float, default 1.0
+        Variance ratio ``σ²_wp / σ²_sp``.  Must be ≥ 0.
+        ``eta=0`` is equivalent to the standard OLS (single-stratum) model.
+    subplots_per_wp : int or None, default None
+        Number of sub-plots per whole plot.  ``None`` lets the API
+        auto-compute a reasonable value: ``max(2, ceil(p / n_whole_plots) + 1)``.
+        Must be ≥ 1 when provided.
+    df_method : {"auto", "conservative", "sp_only"}, default "auto"
+        How to assign denominator degrees of freedom for power calculations.
+
+        * ``"auto"`` — classify each contrast row as whole-plot (WP) or
+          sub-plot (SP) based on which factors it involves; use WP df for
+          pure-WP contrasts and SP df for all others.
+        * ``"conservative"`` — always use WP df (never anti-conservative;
+          recommended when in doubt).
+        * ``"sp_only"`` — always use SP df (may be anti-conservative for
+          pure WP-factor contrasts).
+    criterion_ignore_vr : bool, default False
+        If ``True``, use the standard OLS optimality criterion during
+        design search and ignore the variance ratio.  Useful for
+        comparison studies; not recommended for production use.
+    """
+
+    htc_factors: List[str]
+    n_whole_plots: int
+    eta: float = 1.0
+    subplots_per_wp: Optional[int] = None
+    df_method: Literal["auto", "conservative", "sp_only"] = "auto"
+    criterion_ignore_vr: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.htc_factors:
+            raise ValueError(
+                "SplitPlotOptions.htc_factors must be a non-empty list of factor names."
+            )
+        if not all(isinstance(f, str) and f for f in self.htc_factors):
+            raise ValueError(
+                "SplitPlotOptions.htc_factors must contain non-empty strings."
+            )
+        if len(self.htc_factors) != len(set(self.htc_factors)):
+            raise ValueError(
+                "SplitPlotOptions.htc_factors contains duplicate factor names."
+            )
+        if not isinstance(self.n_whole_plots, int) or isinstance(self.n_whole_plots, bool):
+            raise ValueError("n_whole_plots must be an integer.")
+        if self.n_whole_plots < 2:
+            raise ValueError(
+                f"n_whole_plots must be ≥ 2, got {self.n_whole_plots}."
+            )
+        if self.eta < 0:
+            raise ValueError(
+                f"eta (variance ratio σ²_wp/σ²_sp) must be ≥ 0, got {self.eta}."
+            )
+        if self.subplots_per_wp is not None:
+            if not isinstance(self.subplots_per_wp, int) or isinstance(self.subplots_per_wp, bool):
+                raise ValueError("subplots_per_wp must be an integer or None.")
+            if self.subplots_per_wp < 1:
+                raise ValueError(
+                    f"subplots_per_wp must be ≥ 1, got {self.subplots_per_wp}."
+                )
+        if self.df_method not in ("auto", "conservative", "sp_only"):
+            raise ValueError(
+                f"df_method must be 'auto', 'conservative', or 'sp_only'; "
+                f"got {self.df_method!r}."
+            )
+
+    def __str__(self) -> str:
+        sp = (
+            f"subplots_per_wp={self.subplots_per_wp}"
+            if self.subplots_per_wp is not None
+            else "subplots_per_wp=auto"
+        )
+        return (
+            f"SplitPlotOptions(htc_factors={self.htc_factors}, "
+            f"n_whole_plots={self.n_whole_plots}, eta={self.eta}, "
+            f"{sp}, df_method='{self.df_method}')"
+        )
+
+
+# ---------------------------------------------------------------------
 # Design generation options
 # ---------------------------------------------------------------------
 @dataclass
@@ -480,6 +586,9 @@ class DesignOptions:
     block_sizes: Optional[List[int]] = field(default=None, repr=False)
     block_factor_name: str = "Block"
 
+    # Split-plot design options (Enhancement 22)
+    split_plot: Optional[SplitPlotOptions] = field(default=None, repr=False)
+
     # Advanced options
     constraint_func: Optional[Callable[["pd.Series"], bool]] = field(
         default=None, repr=False
@@ -567,6 +676,16 @@ class DesignOptions:
         if not self.block_factor_name:
             raise ValueError("block_factor_name must be a non-empty string.")
 
+        # --- Split-plot / blocked combination guard ---
+        if self.split_plot is not None and self.n_blocks is not None:
+            _warnings.warn(
+                "Both split_plot and n_blocks are set. Blocked split-plot designs "
+                "(three-stratum variance models) are not yet supported. "
+                "n_blocks will be ignored when split_plot is active.",
+                UserWarning,
+                stacklevel=3,
+            )
+
         # --- Declarative constraint expression ---
         # If constraint_expr is set, compile it to a callable and store in
         # constraint_func.  constraint_expr takes precedence if both are
@@ -587,4 +706,4 @@ class DesignOptions:
         )
 
 
-__all__ = ["PowerContrastConfig", "PowerR2Config", "DesignOptions"]
+__all__ = ["PowerContrastConfig", "PowerR2Config", "DesignOptions", "SplitPlotOptions"]
