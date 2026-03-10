@@ -1,0 +1,48 @@
+# docker-compose.yml — one-command deployment for iopt-power-design REST API
+#
+# Quick start:
+#   docker compose up --build
+#
+# The API is then available at:
+#   http://localhost:8000/docs   (Swagger UI)
+#   http://localhost:8000/redoc  (ReDoc)
+#   http://localhost:8000/health (health check)
+
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      # Override the number of Uvicorn worker processes (default: 2).
+      # Each worker handles requests independently; more workers → higher
+      # throughput for concurrent requests, but more memory.
+      - UVICORN_WORKERS=2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 25s
+
+  # ---------------------------------------------------------------------------
+  # Optional: nginx reverse proxy for TLS termination and rate limiting.
+  # Uncomment and supply a valid nginx.conf and TLS certificates to enable.
+  # ---------------------------------------------------------------------------
+  # nginx:
+  #   image: nginx:1.27-alpine
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+  #     - /etc/letsencrypt:/etc/letsencrypt:ro
+  #   depends_on:
+  #     api:
+  #       condition: service_healthy
+  #   restart: unless-stopped
