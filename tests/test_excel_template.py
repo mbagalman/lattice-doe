@@ -406,3 +406,117 @@ class TestExcelRun:
     def test_missing_file_raises_excel_error(self):
         with pytest.raises(ExcelError, match="not found"):
             excel_run("/nonexistent/path/file.xlsx")
+
+
+# ---------------------------------------------------------------------------
+# CR-22: blocked/pre-allocation fields in Excel parser and template
+# ---------------------------------------------------------------------------
+
+class TestCR22BlockedPreAllocFields:
+    """Verify n_blocks, block_factor_name, preallocate_categorical,
+    alloc_min_per_cell, and alloc_max_per_cell are parsed and propagated."""
+
+    def _base_rows(self, extra_settings):
+        return [
+            ["[SETTINGS]", ""],
+            ["formula", "x1 + x2"],
+            ["power_mode", "r2"],
+            ["r2_target", "0.25"],
+        ] + extra_settings + [
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+        ]
+
+    def test_n_blocks_zero_leaves_unblocked(self):
+        rows = self._base_rows([["n_blocks", "0"]])
+        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        assert design_opts.n_blocks is None
+
+    def test_n_blocks_2_enables_blocking(self):
+        rows = self._base_rows([
+            ["n_blocks", "2"],
+            ["block_factor_name", "Batch"],
+        ])
+        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        assert design_opts.n_blocks == 2
+        assert design_opts.block_factor_name == "Batch"
+
+    def test_block_factor_name_default_is_block(self):
+        rows = self._base_rows([["n_blocks", "3"]])
+        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        assert design_opts.block_factor_name == "Block"
+
+    def test_preallocate_categorical_true(self):
+        rows = self._base_rows([
+            ["preallocate_categorical", "true"],
+            ["alloc_min_per_cell", "2"],
+        ])
+        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        assert design_opts.preallocate_categorical is True
+        assert design_opts.alloc_min_per_cell == 2
+
+    def test_preallocate_categorical_false_by_default(self):
+        rows = self._base_rows([])
+        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        assert design_opts.preallocate_categorical is False
+
+    def test_alloc_max_per_cell_zero_maps_to_none(self):
+        rows = self._base_rows([
+            ["preallocate_categorical", "true"],
+            ["alloc_max_per_cell", "0"],
+        ])
+        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        assert design_opts.alloc_max_per_cell is None
+
+    def test_alloc_max_per_cell_positive_is_forwarded(self):
+        rows = self._base_rows([
+            ["preallocate_categorical", "true"],
+            ["alloc_max_per_cell", "5"],
+        ])
+        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        assert design_opts.alloc_max_per_cell == 5
+
+    def test_excel_numeric_cell_for_n_blocks(self):
+        """Excel numeric cells arrive as '2.0' — int(float()) must handle it."""
+        rows = self._base_rows([["n_blocks", "2.0"]])
+        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        assert design_opts.n_blocks == 2
+
+    def test_invalid_bool_raises(self):
+        rows = self._base_rows([["preallocate_categorical", "maybe"]])
+        with pytest.raises(ExcelError, match="true/false"):
+            _read_config_sheet(_make_ws(rows))
+
+    def test_template_contains_new_keys(self):
+        """create_excel_template() must write all 5 new setting rows."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for example in ("r2", "contrast"):
+                p = Path(tmp) / f"tpl_{example}.xlsx"
+                create_excel_template(p, example=example)
+                import openpyxl
+                wb = openpyxl.load_workbook(p)
+                ws = wb["Config"]
+                col_a_values = [
+                    ws.cell(row=r, column=1).value
+                    for r in range(1, ws.max_row + 1)
+                ]
+                for key in (
+                    "n_blocks", "block_factor_name",
+                    "preallocate_categorical", "alloc_min_per_cell", "alloc_max_per_cell",
+                ):
+                    assert key in col_a_values, (
+                        f"{example!r} template missing '{key}' in Config sheet"
+                    )
+
+    def test_template_still_parseable(self):
+        """Both templates must round-trip through _read_config_sheet cleanly."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for example in ("r2", "contrast"):
+                p = Path(tmp) / f"tpl_{example}.xlsx"
+                create_excel_template(p, example=example)
+                import openpyxl
+                wb = openpyxl.load_workbook(p)
+                formula, factors, power_cfg, design_opts = _read_config_sheet(wb["Config"])
+                assert formula
+                assert factors
