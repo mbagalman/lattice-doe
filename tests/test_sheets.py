@@ -545,3 +545,96 @@ class TestCreateSheetTemplate:
         with patch.object(sheets_module, "_HAS_GSPREAD", True):
             with pytest.raises(ValueError, match="Unknown example"):
                 sheets_module.create_sheet_template(example="excel")
+
+
+# ---------------------------------------------------------------------------
+# CR-21: blocked/pre-allocation fields in parser and template
+# ---------------------------------------------------------------------------
+
+class TestCR21BlockedPreAllocFields:
+    """Verify that n_blocks, block_factor_name, preallocate_categorical,
+    alloc_min_per_cell, and alloc_max_per_cell are parsed and propagated."""
+
+    def _base_rows(self, extra_settings):
+        return [
+            ["[SETTINGS]", ""],
+            ["formula", "x1 + x2"],
+            ["power_mode", "r2"],
+            ["r2_target", "0.25"],
+        ] + extra_settings + [
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+        ]
+
+    def test_n_blocks_zero_leaves_unblocked(self):
+        rows = self._base_rows([["n_blocks", "0"]])
+        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert design_opts.n_blocks is None
+
+    def test_n_blocks_2_enables_blocking(self):
+        rows = self._base_rows([
+            ["n_blocks", "2"],
+            ["block_factor_name", "Batch"],
+        ])
+        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert design_opts.n_blocks == 2
+        assert design_opts.block_factor_name == "Batch"
+
+    def test_block_factor_name_default_is_block(self):
+        rows = self._base_rows([["n_blocks", "3"]])
+        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert design_opts.block_factor_name == "Block"
+
+    def test_preallocate_categorical_true(self):
+        rows = self._base_rows([
+            ["preallocate_categorical", "true"],
+            ["alloc_min_per_cell", "2"],
+        ])
+        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert design_opts.preallocate_categorical is True
+        assert design_opts.alloc_min_per_cell == 2
+
+    def test_preallocate_categorical_false_by_default(self):
+        rows = self._base_rows([])
+        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert design_opts.preallocate_categorical is False
+
+    def test_alloc_max_per_cell_zero_maps_to_none(self):
+        rows = self._base_rows([
+            ["preallocate_categorical", "true"],
+            ["alloc_max_per_cell", "0"],
+        ])
+        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert design_opts.alloc_max_per_cell is None
+
+    def test_alloc_max_per_cell_positive_is_forwarded(self):
+        rows = self._base_rows([
+            ["preallocate_categorical", "true"],
+            ["alloc_max_per_cell", "5"],
+        ])
+        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert design_opts.alloc_max_per_cell == 5
+
+    def test_invalid_bool_raises(self):
+        rows = self._base_rows([["preallocate_categorical", "maybe"]])
+        with pytest.raises(SheetsError, match="true/false"):
+            _parse_config_sheet(_make_mock_worksheet(rows))
+
+    def test_template_rows_contain_new_keys(self):
+        for template_name, template_rows in _TEMPLATE_ROWS.items():
+            keys = [r[0] for r in template_rows]
+            assert "n_blocks" in keys, f"{template_name!r} template missing n_blocks"
+            assert "block_factor_name" in keys, f"{template_name!r} missing block_factor_name"
+            assert "preallocate_categorical" in keys, f"{template_name!r} missing preallocate_categorical"
+            assert "alloc_min_per_cell" in keys, f"{template_name!r} missing alloc_min_per_cell"
+            assert "alloc_max_per_cell" in keys, f"{template_name!r} missing alloc_max_per_cell"
+
+    def test_template_is_still_parseable_after_additions(self):
+        """Both templates must still parse cleanly end-to-end."""
+        for example, rows in _TEMPLATE_ROWS.items():
+            ws = _make_mock_worksheet(rows)
+            # Should not raise
+            formula, factors, power_cfg, design_opts = _parse_config_sheet(ws)
+            assert formula
+            assert factors

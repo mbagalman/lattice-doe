@@ -253,6 +253,18 @@ def _parse_config_sheet(
                 f"Config sheet [SETTINGS] key '{key}' must be an integer; got {raw!r}."
             ) from None
 
+    def _bool(key: str, default: bool) -> bool:
+        raw = settings.get(key, "").strip().lower()
+        if not raw:
+            return default
+        if raw in ("true", "yes", "1"):
+            return True
+        if raw in ("false", "no", "0"):
+            return False
+        raise SheetsError(
+            f"Config sheet [SETTINGS] key '{key}' must be true/false; got {raw!r}."
+        )
+
     alpha        = _float("alpha",        0.05)
     power_target = _float("power",        0.80)
     sigma        = _float("sigma",        1.0)
@@ -262,17 +274,33 @@ def _parse_config_sheet(
     starts       = _int("starts",         5)
     max_iter_do  = _int("max_iter",       1000)
     random_state = _int("random_state",   123)
+    # Blocked design options (Enhancement 20)
+    n_blocks_raw          = _int("n_blocks",          0)
+    block_factor_name_raw = settings.get("block_factor_name", "Block").strip() or "Block"
+    # Categorical pre-allocation options (Enhancement 26)
+    preallocate_categorical = _bool("preallocate_categorical", False)
+    alloc_min_per_cell      = _int("alloc_min_per_cell",  1)
+    alloc_max_per_cell_raw  = _int("alloc_max_per_cell",  0)  # 0 → None (no limit)
 
     # ------------------------------------------------------------------
     # 3. Build DesignOptions
     # ------------------------------------------------------------------
+    do_kwargs: Dict[str, Any] = dict(
+        criterion=criterion,
+        starts=starts,
+        max_iter=max_iter_do,
+        random_state=random_state,
+    )
+    if n_blocks_raw >= 2:
+        do_kwargs["n_blocks"] = n_blocks_raw
+        do_kwargs["block_factor_name"] = block_factor_name_raw
+    if preallocate_categorical:
+        do_kwargs["preallocate_categorical"] = True
+        do_kwargs["alloc_min_per_cell"] = alloc_min_per_cell
+        if alloc_max_per_cell_raw > 0:
+            do_kwargs["alloc_max_per_cell"] = alloc_max_per_cell_raw
     try:
-        design_opts = DesignOptions(
-            criterion=criterion,
-            starts=starts,
-            max_iter=max_iter_do,
-            random_state=random_state,
-        )
+        design_opts = DesignOptions(**do_kwargs)
     except (ValueError, TypeError) as e:
         raise SheetsError(f"Config sheet produced invalid DesignOptions: {e}") from e
 
@@ -563,6 +591,13 @@ _TEMPLATE_ROWS: Dict[str, List[List[str]]] = {
         ["starts",       "5"],
         ["max_iter",     "1000"],
         ["random_state", "123"],
+        # Blocked design: set n_blocks >= 2 to enable; 0 = unblocked (default).
+        ["n_blocks",                "0"],
+        ["block_factor_name",       "Block"],
+        # Categorical pre-allocation: set to true to enable Wynn algorithm.
+        ["preallocate_categorical", "false"],
+        ["alloc_min_per_cell",      "1"],
+        ["alloc_max_per_cell",      "0"],   # 0 = no upper limit
         ["", ""],
         [_SENTINEL_FACTORS, ""],
         ["factor_name", "type",       "value1", "value2"],
@@ -581,6 +616,13 @@ _TEMPLATE_ROWS: Dict[str, List[List[str]]] = {
         ["starts",       "5"],
         ["max_iter",     "1000"],
         ["random_state", "123"],
+        # Blocked design: set n_blocks >= 2 to enable; 0 = unblocked (default).
+        ["n_blocks",                "0"],
+        ["block_factor_name",       "Block"],
+        # Categorical pre-allocation: set to true to enable Wynn algorithm.
+        ["preallocate_categorical", "false"],
+        ["alloc_min_per_cell",      "1"],
+        ["alloc_max_per_cell",      "0"],   # 0 = no upper limit
         ["", ""],
         [_SENTINEL_CONTRAST, ""],
         ["L_row",  "0,1,0"],
