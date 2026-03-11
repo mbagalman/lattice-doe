@@ -51,6 +51,14 @@ def init_state() -> None:
         # 0 is the sentinel for "no upper limit" (maps to alloc_max_per_cell=None).
         "alloc_max_per_cell": 0,
 
+        # --- Split-plot / hard-to-change factor options (Enhancement 22) ---
+        "split_plot_enabled": False,
+        "sp_htc_factors": [],      # list of factor names that are hard-to-change
+        "sp_n_whole_plots": 4,     # number of whole plots (≥ 2)
+        "sp_eta": 1.0,             # variance ratio σ²_wp / σ²_sp
+        "sp_subplots_per_wp": 0,   # 0 = auto-compute
+        "sp_df_method": "auto",    # "auto" | "conservative" | "sp_only"
+
         # --- Results (populated after a successful run) ---
         "result": None,       # full dict from i_optimal_powered_design
         "run_error": None,    # error string if the last run failed

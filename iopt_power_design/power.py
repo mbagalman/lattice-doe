@@ -25,7 +25,7 @@ Notes:
 
 from __future__ import annotations
 
-from typing import Tuple, Literal, NamedTuple
+from typing import List, Literal, NamedTuple, Optional, Tuple
 import numpy as np
 
 try:
@@ -326,4 +326,251 @@ def global_r2_power(
     return GlobalPowerResult(power=power, lam=lam)
 
 
-__all__ = ["contrast_power", "global_r2_power", "ContrastPowerResult", "GlobalPowerResult", "_r2_df_num"]
+
+# ---------------------------------------------------------------------
+# Split-plot (GLS) power functions
+# ---------------------------------------------------------------------
+def contrast_power_sp(
+    L: np.ndarray,
+    delta: np.ndarray,
+    X: np.ndarray,
+    Z: np.ndarray,
+    sigma_sp: float,
+    eta: float,
+    alpha: float,
+    *,
+    df_method: str = "auto",
+    htc_factor_cols: Optional[List[int]] = None,
+    jitter: float = 1e-8,
+) -> ContrastPowerResult:
+    """Power for a linear contrast in a split-plot design.
+
+    Uses GLS information matrix M = X'V⁻¹X where V = σ²_sp (η ZZ' + I).
+    The non-centrality parameter for each contrast row i is:
+        λ_i = δ_i² / (σ²_sp · l_i M⁻¹ l_i')
+
+    Denominator df is assigned per contrast row via df_method:
+    - "auto"         : WP df for pure-WP contrasts, SP df for others.
+    - "conservative" : always WP df.
+    - "sp_only"      : always SP df.
+
+    Overall power = min power across all contrast rows (same convention
+    as the OLS version for multi-row L).
+
+    At eta = 0 the result is identical to ``contrast_power``.
+
+    Parameters
+    ----------
+    L : ndarray (q, p) or (p,)
+        Contrast matrix.
+    delta : ndarray (q,)
+        Effect sizes under H1, one per contrast row.
+    X : ndarray (n, p)
+        Model / design matrix.
+    Z : ndarray (n, n_wp)
+        Whole-plot indicator matrix (from ``build_whole_plot_indicator``).
+    sigma_sp : float
+        Sub-plot residual standard deviation (σ_sp > 0).
+    eta : float
+        Variance ratio σ²_wp / σ²_sp (≥ 0).
+    alpha : float
+        Significance level.
+    df_method : {"auto", "conservative", "sp_only"}
+        How to assign denominator df per contrast row.
+    htc_factor_cols : list of int or None
+        Column indices in X corresponding to HTC (whole-plot) factors.
+        Required for df_method="auto" and "conservative" to classify
+        contrasts as WP vs SP.  When None all contrasts are treated as SP.
+    jitter : float
+        Small ridge added to M for numerical stability.
+
+    Returns
+    -------
+    ContrastPowerResult
+        power : min power across contrast rows, lam : corresponding λ.
+    """
+    _require_scipy()
+
+    if not sigma_sp > 0:
+        raise ValueError(f"sigma_sp must be positive; got {sigma_sp}.")
+    if eta < 0:
+        raise ValueError(f"eta must be ≥ 0; got {eta}.")
+
+    X = np.asarray(X, dtype=float)
+    L = np.asarray(L, dtype=float)
+    delta = np.asarray(delta, dtype=float).reshape(-1)
+    Z = np.asarray(Z, dtype=float)
+
+    if X.ndim != 2:
+        raise ValueError(f"X must be 2D; got {X.ndim}D.")
+
+    # eta=0 shortcut: exact OLS equivalence
+    if eta == 0.0:
+        return contrast_power(L, delta, X, sigma_sp, alpha, jitter=jitter)
+
+    n, p = X.shape
+    if L.ndim == 1:
+        L = L.reshape(1, -1)
+    if L.ndim != 2 or L.shape[1] != p:
+        raise ValueError(
+            f"L has incompatible shape; expected (q, p={p}), got {L.shape}."
+        )
+    q = L.shape[0]
+    if delta.shape[0] != q:
+        raise ValueError(
+            f"delta length {delta.shape[0]} does not match L rows {q}."
+        )
+
+    from .split_plot import (
+        build_split_plot_covariance_inv,
+        gls_information_matrix,
+        classify_contrasts,
+        split_plot_df_denom,
+    )
+
+    V_inv = build_split_plot_covariance_inv(Z, eta)
+    M = gls_information_matrix(X, V_inv, jitter=jitter)
+    M_inv = np.linalg.inv(M)
+
+    htc_cols: List[int] = list(htc_factor_cols) if htc_factor_cols is not None else []
+    is_wp = classify_contrasts(L, htc_cols, p)
+    df_denoms = split_plot_df_denom(X, Z, is_wp, df_method, htc_cols or None)
+
+    powers: List[float] = []
+    lams: List[float] = []
+    for i in range(q):
+        l_i = L[i : i + 1, :]  # (1, p)
+        d_i = float(delta[i])
+        v_i = float((l_i @ M_inv @ l_i.T).item())
+        if v_i <= 0.0:
+            powers.append(0.0)
+            lams.append(0.0)
+            continue
+        lam_i = max(0.0, d_i ** 2 / (sigma_sp ** 2 * v_i))
+        df_d_i = int(df_denoms[i])
+        if df_d_i <= 0:
+            powers.append(0.0)
+            lams.append(float(lam_i))
+            continue
+        Fcrit = f_dist.isf(alpha, 1, df_d_i)
+        power_i = float(np.clip(1.0 - ncf_dist.cdf(Fcrit, 1, df_d_i, lam_i), 0.0, 1.0))
+        powers.append(power_i)
+        lams.append(float(lam_i))
+
+    min_idx = int(np.argmin(powers))
+    return ContrastPowerResult(power=powers[min_idx], lam=lams[min_idx])
+
+
+# ---------------------------------------------------------------------
+def global_r2_power_sp(
+    r2_target: float,
+    X: np.ndarray,
+    Z: np.ndarray,
+    sigma_sp: float,
+    eta: float,
+    alpha: float,
+    *,
+    df_method: str = "auto",
+    lambda_mode: Literal["n", "n_minus_p"] = "n",
+    jitter: float = 1e-8,
+) -> GlobalPowerResult:
+    """Power for the global R² F-test in a split-plot design.
+
+    Uses GLS noncentrality:
+        f² = r2_target / (1 − r2_target)
+        λ = f² · tr(Ṽ⁻¹)           (lambda_mode="n")
+        λ = f² · max(1, tr(Ṽ⁻¹) − df_num)   (lambda_mode="n_minus_p")
+    where Ṽ⁻¹ = (η ZZ' + I)⁻¹ is the scaled inverse covariance.
+
+    Denominator df ≈ n_total − n_wp (SP stratum, used for the global test).
+
+    At eta = 0 the result is identical to ``global_r2_power``.
+
+    Parameters
+    ----------
+    r2_target : float
+        Target population R² (0 < r2_target < 1).
+    X : ndarray (n, p)
+        Model / design matrix.
+    Z : ndarray (n, n_wp)
+        Whole-plot indicator matrix.
+    sigma_sp : float
+        Sub-plot residual standard deviation (not used in λ computation but
+        validated for consistency; must be positive).
+    eta : float
+        Variance ratio σ²_wp / σ²_sp (≥ 0).
+    alpha : float
+        Significance level.
+    df_method : str
+        Kept for API symmetry with contrast_power_sp; currently unused
+        (the global test always uses SP df = n − n_wp).
+    lambda_mode : {"n", "n_minus_p"}
+        Whether λ scales by tr(Ṽ⁻¹) or tr(Ṽ⁻¹) − df_num.
+    jitter : float
+        Ridge for numerical stability.
+
+    Returns
+    -------
+    GlobalPowerResult
+        power : power for the global F-test, lam : noncentrality λ.
+    """
+    _require_scipy()
+
+    if not (0.0 < r2_target < 1.0):
+        raise ValueError(f"r2_target must be in (0, 1); got {r2_target}.")
+    if not sigma_sp > 0:
+        raise ValueError(f"sigma_sp must be positive; got {sigma_sp}.")
+    if eta < 0:
+        raise ValueError(f"eta must be ≥ 0; got {eta}.")
+
+    X = np.asarray(X, dtype=float)
+    Z = np.asarray(Z, dtype=float)
+
+    if X.ndim != 2:
+        raise ValueError(f"X must be 2D; got {X.ndim}D.")
+
+    # eta=0 shortcut: exact OLS equivalence
+    if eta == 0.0:
+        return global_r2_power(r2_target, X, alpha, lambda_mode=lambda_mode)
+
+    n, p = X.shape
+    n_wp = Z.shape[1]
+
+    df_num = _r2_df_num(X)
+    if df_num <= 0:
+        raise ValueError(
+            f"Numerator df must be positive; got {df_num} (rank(X)={np.linalg.matrix_rank(X)})."
+        )
+    df_denom = max(1, n - n_wp)
+    if df_denom <= 0:
+        raise ValueError(
+            f"Denominator df (n − n_wp) must be positive; got {df_denom}."
+        )
+
+    from .split_plot import build_split_plot_covariance_inv
+
+    V_inv = build_split_plot_covariance_inv(Z, eta)
+    eff_n = float(np.trace(V_inv))
+
+    f2 = r2_target / (1.0 - r2_target)
+    if lambda_mode == "n":
+        lam = float(f2 * eff_n)
+    else:
+        lam = float(f2 * max(1.0, eff_n - df_num))
+
+    lam = max(0.0, lam)
+    Fcrit = f_dist.isf(alpha, df_num, df_denom)
+    power = float(np.clip(1.0 - ncf_dist.cdf(Fcrit, df_num, df_denom, lam), 0.0, 1.0))
+
+    return GlobalPowerResult(power=power, lam=lam)
+
+
+__all__ = [
+    "contrast_power",
+    "global_r2_power",
+    "contrast_power_sp",
+    "global_r2_power_sp",
+    "ContrastPowerResult",
+    "GlobalPowerResult",
+    "_r2_df_num",
+]

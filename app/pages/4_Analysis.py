@@ -264,6 +264,21 @@ def _build_yaml(ss: dict) -> str:
             design_block["alloc_max_per_cell"] = alloc_max
     cfg["design"] = design_block
 
+    # Split-plot block (optional)
+    if ss.get("split_plot_enabled", False):
+        htc_names = list(ss.get("sp_htc_factors") or [])
+        if htc_names:
+            sp_block: dict = {
+                "htc_factors": htc_names,
+                "n_whole_plots": int(ss.get("sp_n_whole_plots", 4)),
+                "eta": float(ss.get("sp_eta", 1.0)),
+                "df_method": str(ss.get("sp_df_method", "auto")),
+            }
+            spwp = int(ss.get("sp_subplots_per_wp", 0))
+            if spwp > 0:
+                sp_block["subplots_per_wp"] = spwp
+            cfg["split_plot"] = sp_block
+
     return yaml.dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
@@ -738,3 +753,86 @@ else:
                     mime="text/csv",
                     key=f"dl_crit_{crit}",
                 )
+
+st.markdown("---")
+
+# ===========================================================================
+# F4 — Split-Plot η sensitivity (shown only when the result is a split-plot design)
+# ===========================================================================
+
+_sp_report = result.get("report", {}).get("split_plot") if _HAS_RESULT else None
+
+if _sp_report is not None:
+    st.subheader("F4 \u00b7 Split-Plot \u03b7 Sensitivity")
+    st.markdown(
+        "Evaluate how **achieved power** changes as the variance ratio "
+        "\u03b7\u202f=\u202f\u03c3\u00b2_wp\u202f/\u202f\u03c3\u00b2_sp varies "
+        "on the **fixed split-plot design** from Step 3."
+    )
+
+    col_e1, col_e2, col_e3 = st.columns(3)
+    with col_e1:
+        eta_min = st.number_input(
+            "\u03b7 min", min_value=0.0, value=0.0, format="%.2f", key="sp_eta_min",
+        )
+    with col_e2:
+        eta_max = st.number_input(
+            "\u03b7 max", min_value=0.01, value=5.0, format="%.2f", key="sp_eta_max",
+        )
+    with col_e3:
+        eta_pts = st.slider("Points", 5, 50, 20, key="sp_eta_pts")
+
+    if st.button("Run \u03b7 sweep", key="btn_eta_sweep") and _cfg_ok:
+        try:
+            with st.spinner("Running \u03b7 sensitivity sweep\u2026"):
+                design_df_sp = result["design_df"]
+                sens_sp = power_sensitivity(
+                    formula=formula,
+                    factors=factor_spec,
+                    power_cfg=power_cfg,
+                    design_df=design_df_sp,
+                    design_opts=design_opts,
+                    eta_range=(float(eta_min), float(eta_max)),
+                    eta_points=int(eta_pts),
+                )
+            ss["_sp_eta_result"] = sens_sp
+        except Exception as exc:
+            st.error(f"\u03b7 sweep failed: {exc}")
+
+    sp_sens = ss.get("_sp_eta_result")
+    eta_df = sp_sens.get("eta_sweep") if sp_sens else None
+    if eta_df is not None and not eta_df.empty:
+        if _HAS_PLOTLY:
+            import plotly.graph_objects as go
+
+            fig_eta = go.Figure()
+            fig_eta.add_trace(go.Scatter(
+                x=eta_df["eta"], y=eta_df["power"],
+                mode="lines+markers", name="Power",
+                line=dict(color="#1f77b4", width=2),
+            ))
+            fig_eta.add_hline(
+                y=float(ss.get("power_target", 0.80)),
+                line_dash="dash", line_color="red",
+                annotation_text=f"Target {float(ss.get('power_target', 0.80)):.0%}",
+                annotation_position="top right",
+            )
+            fig_eta.update_layout(
+                xaxis_title="\u03b7 = \u03c3\u00b2_wp / \u03c3\u00b2_sp",
+                yaxis_title="Statistical power",
+                yaxis=dict(range=[0, 1.05]),
+                height=380, margin=dict(t=30, b=40),
+            )
+            st.plotly_chart(fig_eta, use_container_width=True)
+        else:
+            st.dataframe(eta_df)
+        st.caption(
+            f"\u03b7 range [{eta_min:.2g}, {eta_max:.2g}], {eta_pts} points. "
+            "Power evaluated on the fixed design; no new design search performed."
+        )
+    elif sp_sens is not None:
+        st.info(
+            "No eta_sweep data returned. "
+            "Ensure the result design contains a '__wp_id__' column "
+            "(i.e. it was generated as a split-plot design)."
+        )

@@ -26,6 +26,7 @@ Looking for task-oriented examples? See [Recipes](docs/recipes.md).
 - [Sensitivity Analysis & MDE](#sensitivity-analysis)
 - [Comparing Criteria](#comparing-criteria)
 - [Augmenting Designs](#augmenting-an-existing-design)
+- [Split-Plot Designs (Hard-to-Change Factors)](#split-plot-designs-hard-to-change-factors)
 - [Diagnostics](#diagnostics)
 - [Shareable Reports](#shareable-reports)
 - [Candidate Set & Algorithm Details](#candidate-set--algorithm-details)
@@ -359,6 +360,8 @@ Tests H₀: R² = 0 (all slopes are zero) using the omnibus F-test.
 | `parallel_seed_stride` | int | `10000` | Seed offset between parallel workers |
 | `constraint_func` | callable \| None | `None` | Row-level feasibility filter (Python callable) |
 | `constraint_expr` | str \| None | `None` | Row-level feasibility filter as a string expression (YAML/JSON-friendly alternative to `constraint_func`; see [Feasibility constraints](#candidate-set--algorithm-details)) |
+| `n_blocks` | int \| None | `None` | Number of blocks (≥ 2 enables blocking; `None` / `0` = unblocked) |
+| `split_plot` | `SplitPlotOptions` \| None | `None` | Split-plot configuration for hard-to-change factors (see [Split-Plot Designs](#split-plot-designs-hard-to-change-factors)) |
 
 **Parallel starts note:** On macOS and Windows, set `workers > 1` only inside `if __name__ == "__main__":` (standard `multiprocessing` requirement).
 
@@ -633,6 +636,155 @@ print(new_runs)                     # the 5 newly added rows
 ```
 
 `augment_design` uses a greedy one-point-at-a-time exchange that optimises the same criterion (`"I"`, `"D"`, or `"A"`) as the original design search. It is fast but does not guarantee global optimality.
+
+---
+
+## Split-Plot Designs (Hard-to-Change Factors)
+
+When some factors are **hard to change** (HTC) between runs — oven temperature, batch composition, equipment configuration — a split-plot design groups runs into **whole plots** so that HTC factors are reset only once per group, while **easy-to-change (ETC)** sub-plot factors vary freely within each group.
+
+Ignoring this structure and using standard OLS inflates the apparent precision of WP-factor estimates. This package uses a **GLS information matrix** (`X'V⁻¹X` where `V = η·ZZ' + I`) for both design search and power calculations, giving correct Type-I error and power for both WP and SP effects.
+
+### `SplitPlotOptions` reference
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `htc_factors` | `List[str]` | — | Factor names that are hard-to-change (whole-plot factors). Must be a non-empty subset of the factor names passed to the API. |
+| `n_whole_plots` | int | — | Number of whole plots (outer randomization units). Must be ≥ 2. |
+| `eta` | float | `1.0` | Variance ratio σ²_wp / σ²_sp. Must be ≥ 0. `eta=0` degenerates to OLS. |
+| `subplots_per_wp` | int \| None | `None` | Sub-plots per whole plot. `None` → auto-computed as `max(2, ceil(p / n_wp) + 1)`. |
+| `df_method` | `"auto"` \| `"conservative"` \| `"sp_only"` | `"auto"` | Denominator df assignment. `"auto"` classifies each contrast by stratum; `"conservative"` always uses WP df; `"sp_only"` always uses SP df. |
+
+### Python API
+
+```python
+from iopt_power_design import (
+    i_optimal_powered_design,
+    SplitPlotOptions,
+    DesignOptions,
+    PowerContrastConfig,
+    power_curve_by_wp,
+)
+from iopt_power_design.contrasts import contrast_from_scenarios
+
+formula = "~ 1 + A + B + C"
+factors = {
+    "A": (-1.0, 1.0),   # HTC: whole-plot factor
+    "B": (-1.0, 1.0),   # HTC: whole-plot factor
+    "C": (-1.0, 1.0),   # ETC: sub-plot factor
+}
+
+L, delta = contrast_from_scenarios(
+    formula, factors,
+    {"A": -1.0, "B": -1.0, "C": 0.0},
+    {"A":  1.0, "B":  1.0, "C": 0.0},
+    sesoi=1.0,
+)
+power_cfg = PowerContrastConfig(L=L, delta=delta, power=0.80, sigma=1.0, max_n=200)
+
+result = i_optimal_powered_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=DesignOptions(
+        split_plot=SplitPlotOptions(
+            htc_factors=["A", "B"],
+            n_whole_plots=6,
+            eta=1.5,           # σ²_wp / σ²_sp
+            subplots_per_wp=4, # optional; auto-computed if omitted
+            df_method="auto",  # "auto" | "conservative" | "sp_only"
+        ),
+        starts=8,
+        random_state=42,
+    ),
+)
+
+print(f"n = {result['report']['n']},  power = {result['report']['achieved_power']:.3f}")
+print(result["report"]["split_plot"])
+# {'n_whole_plots': 6, 'subplots_per_wp': 4, 'n_total': 24,
+#  'eta': 1.5, 'htc_factors': ['A', 'B'], 'etc_factors': ['C'], 'df_method': 'auto'}
+
+# The design DataFrame includes a __wp_id__ column
+design_df = result["design_df"]
+print(design_df[["__wp_id__", "A", "B", "C"]].head(8))
+```
+
+### Power vs. number of whole plots
+
+```python
+df = power_curve_by_wp(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    subplots_per_wp=4,
+    htc_factors=["A", "B"],
+    eta=1.5,
+    wp_range=(3, 12),   # sweep n_whole_plots from 3 to 12
+    wp_points=10,
+    design_opts=DesignOptions(starts=5, random_state=42),
+)
+print(df)  # columns: n_wp, n_total, power, noncentrality_lambda
+```
+
+### CLI (YAML config)
+
+Add a `split_plot:` block inside the `design:` section:
+
+```yaml
+formula: "~ 1 + A + B + C"
+factors:
+  A: [-1.0, 1.0]
+  B: [-1.0, 1.0]
+  C: [-1.0, 1.0]
+
+contrast:
+  scenario_a: {A: -1.0, B: -1.0, C: 0.0}
+  scenario_b: {A:  1.0, B:  1.0, C: 0.0}
+  sesoi: 1.0
+
+alpha: 0.05
+power: 0.80
+sigma: 1.0
+
+design:
+  starts: 8
+  random_state: 42
+  split_plot:
+    htc_factors: [A, B]
+    n_whole_plots: 6
+    eta: 1.5
+    subplots_per_wp: 4    # omit for auto
+    df_method: auto       # auto | conservative | sp_only
+```
+
+### η-sensitivity sweep
+
+Assess how power degrades as the variance ratio η grows:
+
+```python
+from iopt_power_design import power_sensitivity
+
+result = i_optimal_powered_design(formula, factors, power_cfg,
+    DesignOptions(split_plot=SplitPlotOptions(htc_factors=["A","B"], n_whole_plots=6, eta=1.5),
+                  starts=5, random_state=42))
+
+sens = power_sensitivity(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_df=result["design_df"],
+    eta_range=(0.0, 5.0),  # sweep η from 0 (OLS) to 5
+    eta_points=25,
+)
+print(sens["data"])        # columns: eta, power, noncentrality_lambda
+```
+
+### Notes
+
+- `n_blocks` and `split_plot` cannot both be set (blocked split-plots are not yet supported).
+- `eta=0` degenerates to OLS: the GLS power equals the OLS power for that design.
+- The `"conservative"` df_method never produces anti-conservative power for WP-factor contrasts.
+- Set `criterion_ignore_vr=True` inside `SplitPlotOptions` to use the standard OLS criterion during design search while keeping GLS power calculations (useful for benchmarking only).
 
 ---
 

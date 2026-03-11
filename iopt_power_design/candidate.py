@@ -17,7 +17,7 @@ and are independent of the exchange algorithm and criterion scoring.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import math
 import warnings
 
@@ -357,4 +357,144 @@ def build_candidate(
     return cand.reset_index(drop=True)
 
 
-__all__ = ["estimate_candidate_size", "build_candidate"]
+# ---------------------------------------------------------------------
+# Split-plot candidate set generation
+# ---------------------------------------------------------------------
+def build_split_plot_candidate(
+    factors: Dict[str, Any],
+    htc_factors: List[str],
+    n_whole_plots: int,
+    subplots_per_wp: int,
+    *,
+    random_state: Optional[int] = None,
+    candidate_points: Optional[int] = None,
+    constraint_func: Optional[callable] = None,
+) -> pd.DataFrame:
+    """Build an initial split-plot candidate set.
+
+    Generates a structured candidate set with *n_whole_plots* whole-plot (WP)
+    slots, each containing *subplots_per_wp* sub-plot runs.  Hard-to-change
+    (HTC) factor settings are constant within each WP slot; easy-to-change
+    (ETC) factor settings vary freely across sub-plots.
+
+    Parameters
+    ----------
+    factors : dict
+        All factor specifications.  Continuous factors are tuples ``(low, high)``;
+        categorical factors are lists of level values.
+    htc_factors : list of str
+        Names of hard-to-change (whole-plot) factors.  Every name must be a key
+        in *factors*.
+    n_whole_plots : int
+        Number of whole-plot slots (≥ 2).
+    subplots_per_wp : int
+        Number of sub-plots per whole-plot slot (≥ 1).
+    random_state : int, optional
+        Random seed for reproducibility.
+    candidate_points : int, optional
+        Size of the WP candidate pool from which *n_whole_plots* settings are
+        drawn.  Defaults to ``max(n_whole_plots * 3, 50)``.
+    constraint_func : callable, optional
+        Row-wise filter applied to the combined candidate set.  Must accept a
+        pandas Series and return ``bool``.
+
+    Returns
+    -------
+    DataFrame
+        Exactly ``n_whole_plots * subplots_per_wp`` rows (before constraint
+        filtering).  Columns are all factor names (in original order) followed
+        by ``'__wp_id__'`` (integer, 0-indexed WP slot).  All rows sharing the
+        same ``__wp_id__`` have identical HTC factor values.
+
+    Raises
+    ------
+    ValueError
+        If *n_whole_plots* < 2, *subplots_per_wp* < 1, *htc_factors* is empty,
+        or any name in *htc_factors* is absent from *factors*.
+    """
+    # --- Input validation ---
+    if not isinstance(n_whole_plots, int) or isinstance(n_whole_plots, bool):
+        raise ValueError("n_whole_plots must be a plain integer.")
+    if n_whole_plots < 2:
+        raise ValueError(f"n_whole_plots must be ≥ 2, got {n_whole_plots}.")
+    if not isinstance(subplots_per_wp, int) or isinstance(subplots_per_wp, bool):
+        raise ValueError("subplots_per_wp must be a plain integer.")
+    if subplots_per_wp < 1:
+        raise ValueError(f"subplots_per_wp must be ≥ 1, got {subplots_per_wp}.")
+    if not htc_factors:
+        raise ValueError("htc_factors must be a non-empty list.")
+    missing = set(htc_factors) - set(factors.keys())
+    if missing:
+        raise ValueError(
+            f"htc_factors contains names not found in factors: {sorted(missing)}."
+        )
+
+    # --- Split factor specs into HTC and ETC ---
+    htc_set = set(htc_factors)
+    htc_factor_dict = {k: factors[k] for k in factors if k in htc_set}
+    etc_factor_dict = {k: factors[k] for k in factors if k not in htc_set}
+
+    n_sp_runs = n_whole_plots * subplots_per_wp
+
+    # --- Generate WP settings (one per WP slot) ---
+    wp_pool_size = max(n_whole_plots * 3, candidate_points or 0, 50)
+    wp_pool = build_candidate(htc_factor_dict, candidate_points=wp_pool_size, seed=random_state)
+
+    rng = np.random.default_rng(random_state)
+    if len(wp_pool) >= n_whole_plots:
+        wp_idx = rng.choice(len(wp_pool), size=n_whole_plots, replace=False)
+    else:
+        wp_idx = rng.choice(len(wp_pool), size=n_whole_plots, replace=True)
+    wp_settings = wp_pool.iloc[wp_idx].reset_index(drop=True)
+
+    # --- Generate SP settings (ETC factors, n_sp_runs rows) ---
+    sp_seed = (random_state + 1) if random_state is not None else None
+    if etc_factor_dict:
+        sp_pool_size = max(n_sp_runs * 2, 100)
+        sp_pool = build_candidate(etc_factor_dict, candidate_points=sp_pool_size, seed=sp_seed)
+        if len(sp_pool) >= n_sp_runs:
+            sp_idx = rng.choice(len(sp_pool), size=n_sp_runs, replace=False)
+        else:
+            sp_idx = rng.choice(len(sp_pool), size=n_sp_runs, replace=True)
+        sp_settings = sp_pool.iloc[sp_idx].reset_index(drop=True)
+    else:
+        sp_settings = None
+
+    # --- Build structured candidate set ---
+    frames: List[pd.DataFrame] = []
+    for wp_i in range(n_whole_plots):
+        wp_row = wp_settings.iloc[wp_i]
+        sp_start = wp_i * subplots_per_wp
+        sp_end = sp_start + subplots_per_wp
+
+        block: Dict[str, Any] = {}
+        for col in factors:
+            if col in htc_set:
+                block[col] = [wp_row[col]] * subplots_per_wp
+            else:
+                block[col] = sp_settings[col].iloc[sp_start:sp_end].values
+        block["__wp_id__"] = [wp_i] * subplots_per_wp
+        frames.append(pd.DataFrame(block))
+
+    cand = pd.concat(frames, ignore_index=True)
+    cand["__wp_id__"] = cand["__wp_id__"].astype(int)
+
+    # --- Apply constraint filtering ---
+    if constraint_func is not None:
+        factor_cols = list(factors.keys())
+        mask = cand[factor_cols].apply(constraint_func, axis=1)
+        n_before = len(cand)
+        cand = cand.loc[mask].reset_index(drop=True)
+        n_removed = n_before - len(cand)
+        if n_removed > 0 and len(cand) < n_before * 0.5:
+            warnings.warn(
+                f"Constraints eliminated {n_removed} of {n_before} split-plot candidate "
+                f"rows ({100 * n_removed / n_before:.1f}% removed). "
+                "Consider relaxing constraints or increasing candidate_points.",
+                UserWarning,
+            )
+
+    return cand
+
+
+__all__ = ["estimate_candidate_size", "build_candidate", "build_split_plot_candidate"]

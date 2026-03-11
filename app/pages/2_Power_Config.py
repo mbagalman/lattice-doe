@@ -501,6 +501,89 @@ with st.expander("Advanced design options"):
 
     st.markdown("---")
 
+    # D6 — Split-Plot / Hard-to-Change Factors
+    st.markdown("**Split-Plot / Hard-to-Change Factors**")
+    st.caption(
+        "Use when some factors are expensive or time-consuming to reset between runs. "
+        "Groups runs into whole plots (WPs); HTC factors are constant within each WP. "
+        "Enable the toggle below to activate split-plot mode."
+    )
+    st.checkbox(
+        "Enable split-plot design",
+        key="split_plot_enabled",
+        help=(
+            "Activates the split-plot exchange algorithm and GLS power calculation. "
+            "Mutually exclusive with blocked designs."
+        ),
+    )
+    if st.session_state.get("split_plot_enabled", False):
+        factor_names = [f["name"] for f in factors if f.get("name")]
+        if not factor_names:
+            st.info("Define factors on Page 1 first.")
+        else:
+            col_sp1, col_sp2 = st.columns(2)
+            with col_sp1:
+                st.multiselect(
+                    "Hard-to-change (WP) factors",
+                    options=factor_names,
+                    key="sp_htc_factors",
+                    help=(
+                        "Factors whose settings are fixed for all runs within a whole plot. "
+                        "Easy-to-change factors vary freely within each WP."
+                    ),
+                )
+                st.number_input(
+                    "Number of whole plots (≥ 2)",
+                    min_value=2,
+                    max_value=200,
+                    step=1,
+                    key="sp_n_whole_plots",
+                    help="How many whole plots (outer randomisation units) to generate.",
+                )
+            with col_sp2:
+                st.slider(
+                    "Variance ratio η = σ²_wp / σ²_sp",
+                    min_value=0.0,
+                    max_value=10.0,
+                    step=0.1,
+                    key="sp_eta",
+                    help=(
+                        "Ratio of whole-plot to sub-plot variance. "
+                        "η = 0 reduces to OLS (no WP random effect). "
+                        "Typical values: 0.5–5. Higher η → lower WP-factor power."
+                    ),
+                )
+                st.number_input(
+                    "Sub-plots per WP (0 = auto)",
+                    min_value=0,
+                    max_value=100,
+                    step=1,
+                    key="sp_subplots_per_wp",
+                    help=(
+                        "Number of runs within each whole plot. "
+                        "0 = auto-compute from model size and number of WPs."
+                    ),
+                )
+            st.selectbox(
+                "Denominator df method",
+                options=["auto", "conservative", "sp_only"],
+                key="sp_df_method",
+                help=(
+                    "**auto**: classifies each contrast as WP or SP and uses the appropriate df.\n\n"
+                    "**conservative**: always uses WP df (safest; never anti-conservative).\n\n"
+                    "**sp_only**: always uses SP df (may be anti-conservative for WP effects)."
+                ),
+            )
+        _n_blocks = int(st.session_state.get("n_blocks", 0))
+        if _n_blocks >= 2:
+            st.warning(
+                "Split-plot and blocked design are both enabled. "
+                "They cannot be used together — the run will fail. "
+                "Set **Number of blocks** to 0 or disable split-plot."
+            )
+
+    st.markdown("---")
+
     # D5 — Categorical pre-allocation
     st.markdown("**Categorical Pre-Allocation**")
     st.caption(

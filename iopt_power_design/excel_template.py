@@ -40,7 +40,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions
+from .config import PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions
 
 # ---------------------------------------------------------------------------
 # Soft dependency guard
@@ -239,6 +239,12 @@ def _read_config_sheet(
     preallocate_categorical = _bool("preallocate_categorical", False)
     alloc_min_per_cell      = _int("alloc_min_per_cell",  1)
     alloc_max_per_cell_raw  = _int("alloc_max_per_cell",  0)  # 0 → None (no limit)
+    # Split-plot options (Enhancement 22)
+    htc_factors_raw    = str(settings.get("htc_factors", "") or "").strip()
+    n_whole_plots_raw  = _int("n_whole_plots", 0)
+    sp_eta             = _float("eta",            1.0)
+    subplots_per_wp_raw = _int("subplots_per_wp", 0)   # 0 → auto
+    df_method_sp       = str(settings.get("df_method", "auto") or "auto").strip() or "auto"
 
     do_kwargs: Dict[str, Any] = dict(
         criterion=criterion,
@@ -254,6 +260,20 @@ def _read_config_sheet(
         do_kwargs["alloc_min_per_cell"] = alloc_min_per_cell
         if alloc_max_per_cell_raw > 0:
             do_kwargs["alloc_max_per_cell"] = alloc_max_per_cell_raw
+    # Split-plot (Enhancement 22)
+    if htc_factors_raw and n_whole_plots_raw >= 2:
+        htc_list = [f.strip() for f in htc_factors_raw.split(",") if f.strip()]
+        if htc_list:
+            try:
+                do_kwargs["split_plot"] = SplitPlotOptions(
+                    htc_factors=htc_list,
+                    n_whole_plots=n_whole_plots_raw,
+                    eta=sp_eta,
+                    subplots_per_wp=subplots_per_wp_raw if subplots_per_wp_raw > 0 else None,
+                    df_method=df_method_sp,
+                )
+            except (ValueError, TypeError) as e:
+                raise ExcelError(f"Config sheet produced invalid SplitPlotOptions: {e}") from e
     try:
         design_opts = DesignOptions(**do_kwargs)
     except (ValueError, TypeError) as e:
@@ -512,6 +532,13 @@ def create_excel_template(
     _add_dropdown(ws, '"true,false"', row=r - 1)
     _key_cell(ws, r, "alloc_min_per_cell",      1);       r += 1
     _key_cell(ws, r, "alloc_max_per_cell",      0);       r += 1  # 0 = no upper limit
+    # Split-plot: set htc_factors and n_whole_plots >= 2 to enable.
+    _key_cell(ws, r, "htc_factors",             "");      r += 1  # comma-separated HTC factor names
+    _key_cell(ws, r, "n_whole_plots",           0);       r += 1  # 0 = disabled; >= 2 to enable
+    _key_cell(ws, r, "eta",                     1.0);     r += 1  # variance ratio sigma2_wp/sigma2_sp
+    _key_cell(ws, r, "subplots_per_wp",         0);       r += 1  # 0 = auto
+    _key_cell(ws, r, "df_method",               "auto");  r += 1
+    _add_dropdown(ws, '"auto,conservative,sp_only"', row=r - 1)
 
     r += 1  # blank separator
 

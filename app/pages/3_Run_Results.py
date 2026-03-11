@@ -135,6 +135,19 @@ def _build_design_opts(ss: dict) -> DesignOptions:
         alloc_max = int(ss.get("alloc_max_per_cell", 0))
         if alloc_max > 0:
             kwargs["alloc_max_per_cell"] = alloc_max
+    # Split-plot options
+    if ss.get("split_plot_enabled", False):
+        from iopt_power_design.config import SplitPlotOptions  # noqa: PLC0415
+        htc_names = ss.get("sp_htc_factors") or []
+        if htc_names:
+            spwp = int(ss.get("sp_subplots_per_wp", 0))
+            kwargs["split_plot"] = SplitPlotOptions(
+                htc_factors=list(htc_names),
+                n_whole_plots=int(ss.get("sp_n_whole_plots", 4)),
+                eta=float(ss.get("sp_eta", 1.0)),
+                subplots_per_wp=spwp if spwp > 0 else None,
+                df_method=str(ss.get("sp_df_method", "auto")),
+            )
     return DesignOptions(**kwargs)
 
 
@@ -365,6 +378,18 @@ m6.metric("Strategy", report.get("search_strategy", "\u2014"))
 
 with st.expander("Full report (JSON)"):
     st.json(_jsonify(report))
+
+if "split_plot" in report:
+    sp = report["split_plot"]
+    with st.expander("Split-plot summary", expanded=True):
+        spc1, spc2, spc3, spc4 = st.columns(4)
+        spc1.metric("Whole plots", sp.get("n_whole_plots", "—"))
+        spc2.metric("Sub-plots / WP", sp.get("subplots_per_wp", "—"))
+        spc3.metric("η (variance ratio)", f"{sp.get('eta', 0.0):.2f}")
+        spc4.metric("df method", sp.get("df_method", "—"))
+        htc = ", ".join(sp.get("htc_factors", []))
+        etc = ", ".join(sp.get("etc_factors", []))
+        st.caption(f"HTC factors: {htc or '—'}  |  ETC factors: {etc or '—'}")
 
 st.markdown("---")
 

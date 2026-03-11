@@ -25,6 +25,7 @@ compare_criteria) live in ``analysis.py`` and are re-exported via
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Union, Any, Literal, Tuple, Callable
+import math
 import time
 import numpy as np
 import pandas as pd
@@ -32,12 +33,16 @@ import warnings
 
 from patsy import dmatrix
 from .config import PowerContrastConfig, PowerR2Config, DesignOptions
-from .candidate import estimate_candidate_size, build_candidate
+from .candidate import estimate_candidate_size, build_candidate, build_split_plot_candidate
 from .model_matrix import build_model_matrix
-from .iopt_search import build_i_opt_design_with_idx
+from .iopt_search import build_i_opt_design_with_idx, build_split_plot_design
+from .split_plot import build_whole_plot_indicator
 from .diag_metrics import compute_design_metrics
 from .diag_export import export_diagnostics
-from .power import contrast_power, global_r2_power, _r2_df_num
+from .power import (
+    contrast_power, global_r2_power, _r2_df_num,
+    contrast_power_sp, global_r2_power_sp,
+)
 from .utils import validate_factors, initial_n_guess
 from .blocked import blocked_formula, build_blocked_design
 
@@ -97,6 +102,26 @@ def _validate_api_inputs(
     return p
 
 
+def _validate_htc_factors(htc_factors: List[str], factors: Dict[str, Any]) -> None:
+    """Raise ValueError if any HTC factor name is not a key in factors."""
+    bad = [f for f in htc_factors if f not in factors]
+    if bad:
+        raise ValueError(
+            f"htc_factors {bad} not found in factors dict. "
+            f"Valid factor names: {list(factors)}."
+        )
+
+
+def _auto_subplots_per_wp(p: int, n_wp: int) -> int:
+    """Default subplots per whole plot: max(2, ceil(p / n_wp) + 1)."""
+    return max(2, math.ceil(p / n_wp) + 1)
+
+
+def _is_split_plot(design_opts: Optional[DesignOptions]) -> bool:
+    """True if split-plot options are configured."""
+    return design_opts is not None and design_opts.split_plot is not None
+
+
 def i_optimal_powered_design(
     formula: str,
     factors: Dict[str, Any],
@@ -149,6 +174,12 @@ def i_optimal_powered_design(
 
     # --- Blocking setup ---
     is_blocked = design_opts.n_blocks is not None and design_opts.n_blocks >= 2
+    is_sp = _is_split_plot(design_opts)
+    if is_sp and is_blocked:
+        raise ValueError(
+            "n_blocks and split_plot cannot both be set. "
+            "Blocked split-plot (three-stratum) designs are not yet supported."
+        )
     if is_blocked:
         # CR-17: Reject block_factor_name that collides with a treatment factor.
         if design_opts.block_factor_name in factors:
@@ -268,6 +299,214 @@ def i_optimal_powered_design(
             L_eff = power_cfg.L
     else:
         L_eff = None
+
+    # =========================================================================
+    # Split-plot path — bisection over n_whole_plots, then Phase 2 scan
+    # =========================================================================
+    if is_sp:
+        sp_opts = design_opts.split_plot
+        _validate_htc_factors(sp_opts.htc_factors, factors)
+        subplots_per_wp = (
+            sp_opts.subplots_per_wp
+            if sp_opts.subplots_per_wp is not None
+            else _auto_subplots_per_wp(p, sp_opts.n_whole_plots)
+        )
+        etc_factors = [f for f in factors if f not in sp_opts.htc_factors]
+        sigma_sp = power_cfg.sigma if mode == "contrast" else 1.0
+
+        max_n_wp = power_cfg.max_n // subplots_per_wp
+        lo_wp = sp_opts.n_whole_plots   # user's minimum
+        hi_wp = max_n_wp + 1           # exclusive sentinel
+
+        best: Optional[Dict[str, Any]] = None
+        it = 0
+        _run_warnings: List[str] = []
+        _strategy_parts: List[str] = ["bisection"]
+        _ran_phase2 = False
+        _verify_window = 0
+        t_start = time.perf_counter()
+
+        def _sp_eval(n_wp_: int) -> Optional[Dict[str, Any]]:
+            """Build SP design at n_wp_, compute power; return result dict or None."""
+            n_total_ = n_wp_ * subplots_per_wp
+            sp_cand_ = build_split_plot_candidate(
+                factors, sp_opts.htc_factors, n_wp_, subplots_per_wp,
+                random_state=design_opts.random_state,
+                candidate_points=candidate_points,
+            )
+            design_df_, X_ = build_split_plot_design(
+                sp_cand_, formula, n_wp_, subplots_per_wp,
+                sp_opts.htc_factors, sp_opts.eta,
+                factors=factors,
+                criterion=design_opts.criterion,
+                starts=design_opts.starts,
+                max_iter=design_opts.max_iter,
+                random_state=design_opts.random_state,
+                jitter=design_opts.xtx_jitter,
+            )
+            Z_ = build_whole_plot_indicator(n_total_, n_wp_, subplots_per_wp)
+            if mode == "contrast":
+                pr_ = contrast_power_sp(
+                    L_eff, power_cfg.delta, X_, Z_,
+                    sigma_sp=sigma_sp, eta=sp_opts.eta, alpha=power_cfg.alpha,
+                    df_method=sp_opts.df_method, jitter=design_opts.xtx_jitter,
+                )
+                df_num_ = int(np.linalg.matrix_rank(power_cfg.L))
+            else:
+                pr_ = global_r2_power_sp(
+                    power_cfg.r2_target, X_, Z_, sigma_sp=sigma_sp,
+                    eta=sp_opts.eta, alpha=power_cfg.alpha,
+                    df_method=sp_opts.df_method,
+                    lambda_mode=power_cfg.lambda_mode,
+                    jitter=design_opts.xtx_jitter,
+                )
+                df_num_ = _r2_df_num(X_)
+            if np.isnan(pr_.power):
+                return None
+            return {
+                "design_df": design_df_,
+                "buckets_df": _buckets_df(design_df_),
+                "_X": X_,
+                "_n_wp": n_wp_,
+                "report": {
+                    "n": int(n_total_),
+                    "p": int(p),
+                    "df_num": int(df_num_),
+                    "df_denom": int(n_total_ - n_wp_),
+                    "alpha": float(power_cfg.alpha),
+                    "target_power": float(target),
+                    "achieved_power": float(pr_.power),
+                    "noncentrality_lambda": float(pr_.lam),
+                    "diagnostics": compute_design_metrics(X_),
+                    "criterion": design_opts.criterion,
+                    "algo": design_opts.algo,
+                    "starts": design_opts.starts,
+                    "workers": design_opts.workers,
+                    "candidate_points": int(candidate_points),
+                    "block_structure": None,
+                    "p_treat": int(p_treat),
+                    "split_plot": {
+                        "n_whole_plots": int(n_wp_),
+                        "subplots_per_wp": int(subplots_per_wp),
+                        "n_total": int(n_total_),
+                        "eta": float(sp_opts.eta),
+                        "htc_factors": list(sp_opts.htc_factors),
+                        "etc_factors": list(etc_factors),
+                        "df_method": str(sp_opts.df_method),
+                    },
+                },
+            }
+
+        # Phase 1 — bisection over n_whole_plots
+        while lo_wp < hi_wp and it < power_cfg.max_iter:
+            n_wp = (lo_wp + hi_wp) // 2
+            it += 1
+            ev = _sp_eval(n_wp)
+            if ev is None:
+                _run_warnings.append(f"Power is NaN at n_wp={n_wp}. Searching higher.")
+                lo_wp = n_wp + 1
+                continue
+            ev["report"]["iteration"] = it
+            if progress_callback:
+                try:
+                    progress_callback(ev["report"])
+                except Exception as e:
+                    warnings.warn(f"Progress callback failed: {e}", RuntimeWarning)
+            if ev["report"]["achieved_power"] + tol >= target:
+                if best is None or n_wp <= best["_n_wp"]:
+                    best = ev
+                hi_wp = n_wp
+            else:
+                if best is None or (
+                    best["report"]["achieved_power"] + tol < target
+                    and ev["report"]["achieved_power"] > best["report"]["achieved_power"]
+                ):
+                    best = ev
+                lo_wp = n_wp + 1
+
+        # Phase 2 — linear scan downward
+        if best is not None and best["report"]["achieved_power"] + tol >= target:
+            n_wp_star = best["_n_wp"]
+            verify_window = min(max(3, n_wp_star // 5), max(0, power_cfg.max_iter - it))
+            _verify_window = verify_window
+            for n_wp_chk in range(
+                n_wp_star - 1,
+                max(max(2, sp_opts.n_whole_plots), n_wp_star - verify_window - 1),
+                -1,
+            ):
+                if it >= power_cfg.max_iter:
+                    break
+                _ran_phase2 = True
+                it += 1
+                ev = _sp_eval(n_wp_chk)
+                if ev is None or ev["report"]["achieved_power"] + tol < target:
+                    continue
+                ev["report"]["iteration"] = it
+                if progress_callback:
+                    try:
+                        progress_callback(ev["report"])
+                    except Exception as e:
+                        warnings.warn(f"Progress callback failed: {e}", RuntimeWarning)
+                best = ev
+
+        if _ran_phase2:
+            _strategy_parts.append("verification")
+        elapsed_sec = time.perf_counter() - t_start
+
+        if best is None:
+            raise RuntimeError(
+                "Failed to generate any valid split-plot design. "
+                "Try increasing power_cfg.max_n or max_iter."
+            )
+
+        final_power = best["report"]["achieved_power"]
+        if final_power + power_cfg.tol_power < target:
+            _msg = (
+                f"Split-plot design finished without converging to target power. "
+                f"max_iter ({power_cfg.max_iter}) or max_n ({power_cfg.max_n}) reached. "
+                f"Final power: {final_power:.4f} (Target: {target:.4f})."
+            )
+            warnings.warn(_msg, RuntimeWarning)
+            _run_warnings.append(_msg)
+
+        best["report"].update({
+            "iteration": it,
+            "elapsed_sec": round(float(elapsed_sec), 4),
+            "search_strategy": "+".join(_strategy_parts),
+            "verify_window": int(_verify_window),
+            "random_state": int(design_opts.random_state) if design_opts.random_state is not None else None,
+            "warnings": list(_run_warnings),
+        })
+
+        if export_diagnostics_to:
+            try:
+                export_paths = export_diagnostics(
+                    X=best["_X"], design_df=best["design_df"],
+                    output_path=export_diagnostics_to,
+                    feature_names=None, formats=["html", "csv"], include_data=True,
+                )
+                best["report"]["diagnostic_exports"] = {k: str(v) for k, v in export_paths.items()}
+            except Exception as e:
+                best["report"]["diagnostic_exports_error"] = str(e)
+
+        if export_report_to is not None:
+            try:
+                from .report import generate_report
+                report_path = generate_report(
+                    result=best, formula=formula, factors=factors,
+                    power_cfg=power_cfg, output_path=export_report_to,
+                    include_power_curve=False,
+                )
+                best["report"]["report_path"] = str(report_path)
+            except Exception as e:
+                best["report"]["report_path_error"] = str(e)
+
+        best.pop("_n_wp", None)
+        best.pop("_X", None)
+        return best
+    # =========================================================================
+    # End split-plot path
+    # =========================================================================
 
     lo = max(p_full + 1, design_opts.n_blocks if is_blocked else 1)
     hi = power_cfg.max_n + 1  # exclusive sentinel — hi is only updated to evaluated achievers

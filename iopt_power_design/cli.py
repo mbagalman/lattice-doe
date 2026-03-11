@@ -62,7 +62,7 @@ except Exception:  # pragma: no cover - optional dep
 import pandas as pd
 
 from .api import i_optimal_powered_design
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions
+from .config import PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions
 from .contrasts import contrast_from_scenarios
 
 logger = logging.getLogger("iopt-design")
@@ -216,6 +216,31 @@ def _make_design_opts(cfg: Dict[str, Any]) -> DesignOptions:
     # workers: None means serial; YAML can specify an int or omit/null it
     raw_workers = d.get("workers", None)
     workers = int(raw_workers) if raw_workers is not None else None
+
+    # Split-plot options (optional `split_plot:` block in YAML)
+    split_plot: Optional[SplitPlotOptions] = None
+    sp_block = cfg.get("split_plot")
+    if sp_block and isinstance(sp_block, dict):
+        htc_raw = sp_block.get("htc_factors", [])
+        if isinstance(htc_raw, str):
+            htc_factors = [f.strip() for f in htc_raw.split(",") if f.strip()]
+        else:
+            htc_factors = [str(f) for f in htc_raw]
+        n_whole_plots = int(sp_block.get("n_whole_plots", 4))
+        eta = float(sp_block.get("eta", 1.0))
+        spwp_raw = sp_block.get("subplots_per_wp")
+        spwp_int = int(spwp_raw) if spwp_raw is not None else 0
+        subplots_per_wp = spwp_int if spwp_int > 0 else None
+        df_method = str(sp_block.get("df_method", "auto"))
+        if htc_factors and n_whole_plots >= 2:
+            split_plot = SplitPlotOptions(
+                htc_factors=htc_factors,
+                n_whole_plots=n_whole_plots,
+                eta=eta,
+                subplots_per_wp=subplots_per_wp,
+                df_method=df_method,
+            )
+
     return DesignOptions(
         # Candidate generation
         candidate_points=int(d.get("candidate_points", 2000)),
@@ -241,6 +266,8 @@ def _make_design_opts(cfg: Dict[str, Any]) -> DesignOptions:
         # Parallel options
         workers=workers,
         parallel_seed_stride=int(d.get("parallel_seed_stride", 10000)),
+        # Split-plot
+        split_plot=split_plot,
     )
 
 
@@ -291,6 +318,15 @@ design:
 output:
   basename: design               # output file prefix
   excel: false                   # also write an .xlsx workbook
+
+# Split-plot / hard-to-change factors (optional)
+# Uncomment and edit to activate split-plot mode.
+# split_plot:
+#   htc_factors: [A]             # factor names that are hard-to-change (whole-plot factors)
+#   n_whole_plots: 6             # number of whole plots (≥ 2)
+#   eta: 1.0                     # variance ratio σ²_wp / σ²_sp (≥ 0; 0 = OLS)
+#   subplots_per_wp: 4           # sub-plots per WP; omit for auto
+#   df_method: auto              # auto | conservative | sp_only
 """
 
 _TEMPLATE_R2 = """\
@@ -319,6 +355,15 @@ design:
 output:
   basename: design
   excel: false
+
+# Split-plot / hard-to-change factors (optional)
+# Uncomment and edit to activate split-plot mode.
+# split_plot:
+#   htc_factors: [A]             # factor names that are hard-to-change (whole-plot factors)
+#   n_whole_plots: 6             # number of whole plots (≥ 2)
+#   eta: 1.0                     # variance ratio σ²_wp / σ²_sp (≥ 0; 0 = OLS)
+#   subplots_per_wp: 4           # sub-plots per WP; omit for auto
+#   df_method: auto              # auto | conservative | sp_only
 """
 
 
@@ -421,6 +466,56 @@ def main(argv: Optional[List[str]] = None) -> int:
             "After running the design search, print a compact robustness summary "
             "showing how power changes across ranges of sigma, effect size, and alpha. "
             "No additional dependencies required."
+        ),
+    )
+    # Split-plot / hard-to-change factor flags (override YAML split_plot: block)
+    parser.add_argument(
+        "--htc-factors",
+        metavar="A,B,...",
+        default=None,
+        help=(
+            "Comma-separated list of hard-to-change (whole-plot) factor names. "
+            "Activates split-plot mode. Overrides 'split_plot.htc_factors' in the config."
+        ),
+    )
+    parser.add_argument(
+        "--n-whole-plots",
+        type=int,
+        metavar="N",
+        default=None,
+        help=(
+            "Number of whole plots (outer randomisation units). "
+            "Required when --htc-factors is given. Overrides 'split_plot.n_whole_plots'."
+        ),
+    )
+    parser.add_argument(
+        "--eta",
+        type=float,
+        metavar="ETA",
+        default=None,
+        help=(
+            "Variance ratio σ²_wp / σ²_sp (≥ 0). Default 1.0. "
+            "Overrides 'split_plot.eta'."
+        ),
+    )
+    parser.add_argument(
+        "--subplots-per-wp",
+        type=int,
+        metavar="S",
+        default=None,
+        help=(
+            "Sub-plots per whole plot (0 or omit = auto). "
+            "Overrides 'split_plot.subplots_per_wp'."
+        ),
+    )
+    parser.add_argument(
+        "--df-method",
+        choices=["auto", "conservative", "sp_only"],
+        default=None,
+        metavar="METHOD",
+        help=(
+            "Denominator df method for power: auto | conservative | sp_only. "
+            "Overrides 'split_plot.df_method'."
         ),
     )
     args = parser.parse_args(argv)
@@ -549,6 +644,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         formula = str(cfg["formula"])
         factors = _as_factors(cfg["factors"])
         power_cfg = _make_power_cfg(cfg, formula, factors)
+
+        # Merge CLI split-plot flags into cfg["split_plot"] (CLI takes priority over YAML)
+        if args.htc_factors is not None or args.n_whole_plots is not None:
+            sp_block = dict(cfg.get("split_plot") or {})
+            if args.htc_factors is not None:
+                sp_block["htc_factors"] = [f.strip() for f in args.htc_factors.split(",") if f.strip()]
+            if args.n_whole_plots is not None:
+                sp_block["n_whole_plots"] = args.n_whole_plots
+            if args.eta is not None:
+                sp_block["eta"] = args.eta
+            if args.subplots_per_wp is not None:
+                sp_block["subplots_per_wp"] = args.subplots_per_wp if args.subplots_per_wp > 0 else None
+            if args.df_method is not None:
+                sp_block["df_method"] = args.df_method
+            cfg = dict(cfg)  # shallow copy so original isn't mutated
+            cfg["split_plot"] = sp_block
+
         design_opts = _make_design_opts(cfg)
 
         # 4. Validate Output Path
@@ -700,6 +812,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"{'strategy':>15}: {report['search_strategy']}")
         if "random_state" in report:
             print(f"{'random_state':>15}: {report['random_state']}")
+        if "split_plot" in report:
+            sp = report["split_plot"]
+            print(f"{'split_plot':>15}:")
+            print(f"{'  n_whole_plots':>15}: {sp.get('n_whole_plots')}")
+            print(f"{'  subplots_per_wp':>15}: {sp.get('subplots_per_wp')}")
+            print(f"{'  eta':>15}: {sp.get('eta')}")
+            htc = ", ".join(sp.get("htc_factors", []))
+            print(f"{'  htc_factors':>15}: {htc}")
+            print(f"{'  df_method':>15}: {sp.get('df_method')}")
         _warns = report.get("warnings", [])
         if _warns:
             print(f"{'warnings':>15}: {len(_warns)} issue(s)")

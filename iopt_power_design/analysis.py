@@ -35,7 +35,8 @@ import pandas as pd
 
 from .config import PowerContrastConfig, PowerR2Config, DesignOptions
 from .model_matrix import build_model_matrix
-from .power import contrast_power, global_r2_power
+from .power import contrast_power, global_r2_power, contrast_power_sp, global_r2_power_sp
+from .split_plot import build_whole_plot_indicator
 from .power_curves import (
     power_curve_by_n as _power_curve_by_n_impl,
     power_curve_by_effect as _power_curve_by_effect_impl,
@@ -191,6 +192,8 @@ def power_sensitivity(
     plot: bool = False,
     figsize: Tuple[float, float] = (8, 5),
     plot_backend: str = "matplotlib",
+    eta_range: Optional[Tuple[float, float]] = None,
+    eta_points: int = 20,
 ) -> Dict[str, Any]:
     """Assess how achieved power changes when a key assumption varies.
 
@@ -257,6 +260,41 @@ def power_sensitivity(
     X, _ = build_model_matrix(formula, design_df)
     n = int(X.shape[0])
     jitter = design_opts.xtx_jitter
+
+    # --- Eta sweep (split-plot designs only) ---
+    # When design_df has __wp_id__ and eta_range is supplied, sweep eta on the
+    # fixed X/Z structure.  Z is inferred from __wp_id__ (balanced assumption).
+    _eta_sweep_df: Optional[pd.DataFrame] = None
+    if eta_range is not None and "__wp_id__" in design_df.columns:
+        _n_wp = int(design_df["__wp_id__"].nunique())
+        _s_per_wp = n // _n_wp
+        Z_sp = build_whole_plot_indicator(n, _n_wp, _s_per_wp)
+        _df_method = (
+            design_opts.split_plot.df_method
+            if design_opts.split_plot is not None
+            else "sp_only"
+        )
+        _sigma_sp = power_cfg.sigma if isinstance(power_cfg, PowerContrastConfig) else 1.0
+        _eta_rows = []
+        for _eta in np.linspace(eta_range[0], eta_range[1], max(2, eta_points)):
+            if isinstance(power_cfg, PowerContrastConfig):
+                _pr = contrast_power_sp(
+                    power_cfg.L, power_cfg.delta, X, Z_sp,
+                    sigma_sp=_sigma_sp, eta=float(_eta),
+                    alpha=power_cfg.alpha, df_method=_df_method, jitter=jitter,
+                )
+            else:
+                _pr = global_r2_power_sp(
+                    power_cfg.r2_target, X, Z_sp, sigma_sp=_sigma_sp,
+                    eta=float(_eta), alpha=power_cfg.alpha,
+                    lambda_mode=power_cfg.lambda_mode, jitter=jitter,
+                )
+            _eta_rows.append({
+                "eta": float(_eta),
+                "power": float(_pr.power),
+                "noncentrality_lambda": float(_pr.lam),
+            })
+        _eta_sweep_df = pd.DataFrame(_eta_rows)
 
     # ------------------------------------------------------------------ #
     # R² mode: sweep r2_target                                            #
@@ -333,6 +371,7 @@ def power_sensitivity(
             "nominal_power": float(nominal_pwr),
             "r2_nominal": float(power_cfg.r2_target),
             "figure": fig,
+            "eta_sweep": _eta_sweep_df,
         }
 
     # ------------------------------------------------------------------ #
@@ -411,6 +450,7 @@ def power_sensitivity(
         "nominal_power": float(nominal_pwr),
         "sigma_nominal": float(power_cfg.sigma),
         "figure": fig,
+        "eta_sweep": _eta_sweep_df,
     }
 
 
@@ -1215,6 +1255,134 @@ def robustness_report(
     }
 
 
+# ---------------------------------------------------------------------------
+# power_curve_by_wp — power vs n_whole_plots for split-plot designs
+# ---------------------------------------------------------------------------
+
+def power_curve_by_wp(
+    formula: str,
+    factors: Dict[str, Any],
+    power_cfg: Union[PowerContrastConfig, PowerR2Config],
+    subplots_per_wp: int,
+    htc_factors: List[str],
+    eta: float,
+    *,
+    wp_range: Optional[Tuple[int, int]] = None,
+    wp_points: int = 10,
+    design_opts: Optional[DesignOptions] = None,
+    plot_backend: str = "matplotlib",
+    figsize: Optional[Tuple[float, float]] = None,
+) -> pd.DataFrame:
+    """Power vs number of whole plots curve for a split-plot design.
+
+    Sweeps ``n_whole_plots`` from ``wp_range[0]`` to ``wp_range[1]``,
+    builds a new split-plot design at each size, evaluates GLS power, and
+    returns a DataFrame with columns: ``n_wp``, ``n_total``, ``power``,
+    ``noncentrality_lambda``.
+
+    Parameters
+    ----------
+    formula : str
+        Patsy model formula.
+    factors : dict
+        Factor specifications (continuous tuples or categorical lists).
+    power_cfg : PowerContrastConfig or PowerR2Config
+        Power target configuration.
+    subplots_per_wp : int
+        Fixed number of sub-plots per whole plot.
+    htc_factors : list of str
+        Names of the hard-to-change (whole-plot) factors.
+    eta : float
+        Variance ratio σ²_wp / σ²_sp.
+    wp_range : (int, int), optional
+        ``(min_n_wp, max_n_wp)`` sweep bounds.  Defaults to
+        ``(2, 2 + wp_points)``.
+    wp_points : int, default 10
+        Number of evenly-spaced n_whole_plots values to evaluate.
+    design_opts : DesignOptions, optional
+        Controls design-build settings (starts, random_state, etc.).
+    plot_backend : str, default "matplotlib"
+        Ignored (reserved for future plot support).
+    figsize : tuple, optional
+        Ignored (reserved for future plot support).
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``n_wp``, ``n_total``, ``power``, ``noncentrality_lambda``.
+        Has exactly ``wp_points`` rows (one per evaluated n_wp value).
+    """
+    # Deferred imports to avoid circular dependencies
+    from .candidate import build_split_plot_candidate
+    from .iopt_search import build_split_plot_design
+
+    if design_opts is None:
+        design_opts = DesignOptions()
+
+    if wp_range is None:
+        wp_range = (2, max(3, 2 + wp_points - 1))
+
+    n_wp_vals = np.round(
+        np.linspace(wp_range[0], wp_range[1], max(1, wp_points))
+    ).astype(int)
+
+    sigma_sp = power_cfg.sigma if isinstance(power_cfg, PowerContrastConfig) else 1.0
+    df_method = (
+        design_opts.split_plot.df_method
+        if design_opts.split_plot is not None
+        else "sp_only"
+    )
+
+    rows = []
+    for n_wp in n_wp_vals:
+        n_wp = int(n_wp)
+        n_total = n_wp * subplots_per_wp
+        try:
+            sp_cand = build_split_plot_candidate(
+                factors, htc_factors, n_wp, subplots_per_wp,
+                random_state=design_opts.random_state,
+            )
+            design_df_, X_ = build_split_plot_design(
+                sp_cand, formula, n_wp, subplots_per_wp,
+                htc_factors, eta,
+                factors=factors,
+                criterion=design_opts.criterion,
+                starts=design_opts.starts,
+                max_iter=design_opts.max_iter,
+                random_state=design_opts.random_state,
+                jitter=design_opts.xtx_jitter,
+            )
+            Z_ = build_whole_plot_indicator(n_total, n_wp, subplots_per_wp)
+            if isinstance(power_cfg, PowerContrastConfig):
+                pr = contrast_power_sp(
+                    power_cfg.L, power_cfg.delta, X_, Z_,
+                    sigma_sp=sigma_sp, eta=eta, alpha=power_cfg.alpha,
+                    df_method=df_method, jitter=design_opts.xtx_jitter,
+                )
+            else:
+                pr = global_r2_power_sp(
+                    power_cfg.r2_target, X_, Z_, sigma_sp=sigma_sp,
+                    eta=eta, alpha=power_cfg.alpha,
+                    lambda_mode=power_cfg.lambda_mode,
+                    jitter=design_opts.xtx_jitter,
+                )
+            rows.append({
+                "n_wp": n_wp,
+                "n_total": n_total,
+                "power": float(pr.power),
+                "noncentrality_lambda": float(pr.lam),
+            })
+        except Exception:
+            rows.append({
+                "n_wp": n_wp,
+                "n_total": n_total,
+                "power": float("nan"),
+                "noncentrality_lambda": float("nan"),
+            })
+
+    return pd.DataFrame(rows)
+
+
 __all__ = [
     "power_curve_by_n",
     "power_curve_by_effect",
@@ -1223,4 +1391,5 @@ __all__ = [
     "min_detectable_effect",
     "compare_criteria",
     "robustness_report",
+    "power_curve_by_wp",
 ]

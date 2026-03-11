@@ -252,3 +252,72 @@ For Streamlit, pass the figure directly to `st.plotly_chart`:
 import streamlit as st
 st.plotly_chart(result["figure"], use_container_width=True)
 ```
+
+## 9) Split-plot design for hard-to-change factors
+
+Use this when some factors are expensive or slow to reset between runs (whole-plot factors) and others vary freely within each whole-plot group (sub-plot factors).
+
+```python
+from iopt_power_design import (
+    i_optimal_powered_design,
+    SplitPlotOptions,
+    DesignOptions,
+    PowerContrastConfig,
+    power_curve_by_wp,
+)
+from iopt_power_design.contrasts import contrast_from_scenarios
+
+formula = "~ 1 + Temperature + Catalyst + Time"
+factors = {
+    "Temperature": (150.0, 250.0),  # HTC: oven temperature, slow to change
+    "Catalyst":    ["A", "B", "C"], # HTC: batch material, slow to change
+    "Time":        (10.0, 60.0),    # ETC: reaction time, easy to change
+}
+
+L, delta = contrast_from_scenarios(
+    formula, factors,
+    {"Temperature": 150.0, "Catalyst": "A", "Time": 10.0},
+    {"Temperature": 250.0, "Catalyst": "B", "Time": 60.0},
+    sesoi=1.0,
+)
+power_cfg = PowerContrastConfig(L=L, delta=delta, power=0.80, sigma=1.0, max_n=200)
+
+result = i_optimal_powered_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=DesignOptions(
+        split_plot=SplitPlotOptions(
+            htc_factors=["Temperature", "Catalyst"],
+            n_whole_plots=8,
+            eta=2.0,           # assume WP variance is 2× SP variance
+            df_method="auto",
+        ),
+        starts=8,
+        random_state=42,
+    ),
+)
+
+print(f"n = {result['report']['n']},  achieved power = {result['report']['achieved_power']:.3f}")
+sp = result["report"]["split_plot"]
+print(f"WPs: {sp['n_whole_plots']}, sub-plots/WP: {sp['subplots_per_wp']}, η: {sp['eta']}")
+```
+
+### How many whole plots do you need?
+
+```python
+df = power_curve_by_wp(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    subplots_per_wp=4,
+    htc_factors=["Temperature", "Catalyst"],
+    eta=2.0,
+    wp_range=(4, 14),
+    wp_points=8,
+    design_opts=DesignOptions(starts=5, random_state=42),
+)
+print(df)  # n_wp, n_total, power, noncentrality_lambda
+```
+
+Use this to present a cost/power tradeoff to stakeholders: each additional whole plot requires resetting all HTC factors, so the curve reveals the minimum number of resets needed to hit your power target.

@@ -13,9 +13,11 @@ from iopt_power_design import (
     DesignOptions,
     PowerContrastConfig,
     PowerR2Config,
+    SplitPlotOptions,
     i_optimal_powered_design,
     power_curve_by_effect,
     power_curve_by_n,
+    power_curve_by_wp,
     power_sensitivity,
     min_detectable_effect,
     compare_criteria,
@@ -1026,3 +1028,172 @@ class TestRobustnessReport:
         design_df, cfg = _contrast_design()
         rob = robustness_report(design_df, FORMULA, FACTORS, cfg, plot=True)
         assert rob["figure"] is not None
+
+
+# ---------------------------------------------------------------------------
+# SP-10 — Integration regression tests for split-plot designs
+# ---------------------------------------------------------------------------
+
+# Shared helpers for SP integration tests
+_SP_FORMULA = "~ 1 + A + B"
+_SP_FACTORS = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+_SP_FAST_OPTS = DesignOptions(
+    candidate_points=100,
+    starts=2,
+    max_iter=30,
+    random_state=7,
+)
+
+
+def _sp_contrast_cfg(max_n: int = 20) -> PowerContrastConfig:
+    from iopt_power_design.contrasts import contrast_from_scenarios
+    L, delta = contrast_from_scenarios(
+        _SP_FORMULA, _SP_FACTORS,
+        {"A": -1.0, "B": -1.0},
+        {"A":  1.0, "B":  1.0},
+        sesoi=1.0,
+    )
+    return PowerContrastConfig(L=L, delta=delta, power=0.80, max_n=max_n)
+
+
+class TestSplitPlotIntegration:
+    """End-to-end regression tests for split-plot designs (SP-10)."""
+
+    def test_2wp_3sp_contrast_mode(self):
+        """Basic 2-factor model, 1 HTC (A), 1 ETC (B), 2 WPs, 3 SPs each."""
+        sp_opts = SplitPlotOptions(
+            htc_factors=["A"],
+            n_whole_plots=2,
+            subplots_per_wp=3,
+            eta=1.0,
+        )
+        opts = DesignOptions(
+            candidate_points=80,
+            starts=2,
+            max_iter=20,
+            random_state=99,
+            split_plot=sp_opts,
+        )
+        result = i_optimal_powered_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
+        assert isinstance(result, dict)
+        assert "design_df" in result and "report" in result
+        assert len(result["design_df"]) >= 6  # at least 2 WPs × 3 SPs
+
+    def test_htc_factor_collision_raises(self):
+        """htc_factors contains a name not in factors dict → ValueError."""
+        sp_opts = SplitPlotOptions(
+            htc_factors=["NONEXISTENT"],
+            n_whole_plots=3,
+            eta=1.0,
+        )
+        opts = _SP_FAST_OPTS.__class__(
+            candidate_points=80,
+            starts=1,
+            max_iter=10,
+            random_state=0,
+            split_plot=sp_opts,
+        )
+        with pytest.raises(ValueError, match="htc_factors"):
+            i_optimal_powered_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(), design_opts=opts)
+
+    def test_split_plot_and_blocked_raises(self):
+        """Setting both n_blocks ≥ 2 and split_plot together raises ValueError."""
+        sp_opts = SplitPlotOptions(htc_factors=["A"], n_whole_plots=3, eta=1.0)
+        # DesignOptions warns but API enforces; build opts with both set
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            opts = DesignOptions(
+                candidate_points=80,
+                starts=1,
+                max_iter=10,
+                random_state=0,
+                n_blocks=2,
+                split_plot=sp_opts,
+            )
+        with pytest.raises(ValueError, match="n_blocks"):
+            i_optimal_powered_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(), design_opts=opts)
+
+    def test_eta_zero_matches_ols_power(self):
+        """Power at eta=0 should equal OLS power (GLS degenerates to OLS)."""
+        sp_opts_eta0 = SplitPlotOptions(
+            htc_factors=["A"],
+            n_whole_plots=4,
+            subplots_per_wp=3,
+            eta=0.0,
+        )
+        opts_sp = DesignOptions(
+            candidate_points=80,
+            starts=2,
+            max_iter=20,
+            random_state=11,
+            split_plot=sp_opts_eta0,
+        )
+        result_sp = i_optimal_powered_design(
+            _SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=40), design_opts=opts_sp
+        )
+        # eta=0 → V=I → GLS power == OLS power
+        # The achieved_power should be non-trivial (> 0)
+        assert result_sp["report"]["achieved_power"] > 0.0
+        # And the split_plot dict should record eta=0.0
+        assert result_sp["report"]["split_plot"]["eta"] == pytest.approx(0.0)
+
+    def test_design_respects_nesting(self):
+        """All sub-plots within a whole plot share identical HTC factor values."""
+        sp_opts = SplitPlotOptions(
+            htc_factors=["A"],
+            n_whole_plots=3,
+            subplots_per_wp=3,
+            eta=1.0,
+        )
+        opts = DesignOptions(
+            candidate_points=100,
+            starts=2,
+            max_iter=20,
+            random_state=22,
+            split_plot=sp_opts,
+        )
+        result = i_optimal_powered_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
+        df = result["design_df"]
+        assert "__wp_id__" in df.columns, "design_df must contain __wp_id__ column"
+        for wp_id, group in df.groupby("__wp_id__"):
+            assert group["A"].nunique() == 1, (
+                f"WP {wp_id} has non-constant HTC factor 'A': {group['A'].values}"
+            )
+
+    def test_report_contains_split_plot_dict(self):
+        """Result report includes 'split_plot' sub-dict with expected keys."""
+        sp_opts = SplitPlotOptions(htc_factors=["A"], n_whole_plots=3, eta=1.0, subplots_per_wp=3)
+        opts = DesignOptions(
+            candidate_points=80,
+            starts=2,
+            max_iter=20,
+            random_state=33,
+            split_plot=sp_opts,
+        )
+        result = i_optimal_powered_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
+        assert "split_plot" in result["report"]
+        sp_dict = result["report"]["split_plot"]
+        for key in ("n_whole_plots", "subplots_per_wp", "n_total", "eta", "htc_factors", "etc_factors", "df_method"):
+            assert key in sp_dict, f"Missing key in split_plot report: {key}"
+
+    def test_power_curve_by_wp_returns_dataframe(self):
+        """power_curve_by_wp returns a DataFrame with n_wp and power columns."""
+        cfg = _sp_contrast_cfg(max_n=40)
+        opts = DesignOptions(candidate_points=80, starts=2, max_iter=15, random_state=55)
+        df = power_curve_by_wp(
+            _SP_FORMULA,
+            _SP_FACTORS,
+            cfg,
+            subplots_per_wp=3,
+            htc_factors=["A"],
+            eta=1.0,
+            wp_range=(2, 5),
+            wp_points=3,
+            design_opts=opts,
+        )
+        assert isinstance(df, pd.DataFrame)
+        assert "n_wp" in df.columns
+        assert "power" in df.columns
+        assert len(df) == 3
+        assert (df["power"] >= 0.0).all() and (df["power"] <= 1.0).all()

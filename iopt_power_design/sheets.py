@@ -53,7 +53,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions
+from .config import PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions
 
 # ---------------------------------------------------------------------------
 # Soft dependency guard — same pattern as plot_backends.py (Plotly)
@@ -281,6 +281,12 @@ def _parse_config_sheet(
     preallocate_categorical = _bool("preallocate_categorical", False)
     alloc_min_per_cell      = _int("alloc_min_per_cell",  1)
     alloc_max_per_cell_raw  = _int("alloc_max_per_cell",  0)  # 0 → None (no limit)
+    # Split-plot options (Enhancement 22)
+    htc_factors_raw    = settings.get("htc_factors", "").strip()
+    n_whole_plots_raw  = _int("n_whole_plots", 0)
+    sp_eta             = _float("eta",            1.0)
+    subplots_per_wp_raw = _int("subplots_per_wp", 0)   # 0 → auto
+    df_method_sp       = settings.get("df_method", "auto").strip() or "auto"
 
     # ------------------------------------------------------------------
     # 3. Build DesignOptions
@@ -299,6 +305,20 @@ def _parse_config_sheet(
         do_kwargs["alloc_min_per_cell"] = alloc_min_per_cell
         if alloc_max_per_cell_raw > 0:
             do_kwargs["alloc_max_per_cell"] = alloc_max_per_cell_raw
+    # Split-plot (Enhancement 22)
+    if htc_factors_raw and n_whole_plots_raw >= 2:
+        htc_list = [f.strip() for f in htc_factors_raw.split(",") if f.strip()]
+        if htc_list:
+            try:
+                do_kwargs["split_plot"] = SplitPlotOptions(
+                    htc_factors=htc_list,
+                    n_whole_plots=n_whole_plots_raw,
+                    eta=sp_eta,
+                    subplots_per_wp=subplots_per_wp_raw if subplots_per_wp_raw > 0 else None,
+                    df_method=df_method_sp,
+                )
+            except (ValueError, TypeError) as e:
+                raise SheetsError(f"Config sheet produced invalid SplitPlotOptions: {e}") from e
     try:
         design_opts = DesignOptions(**do_kwargs)
     except (ValueError, TypeError) as e:
@@ -598,6 +618,12 @@ _TEMPLATE_ROWS: Dict[str, List[List[str]]] = {
         ["preallocate_categorical", "false"],
         ["alloc_min_per_cell",      "1"],
         ["alloc_max_per_cell",      "0"],   # 0 = no upper limit
+        # Split-plot: set htc_factors and n_whole_plots >= 2 to enable.
+        ["htc_factors",             ""],    # comma-separated HTC factor names (leave blank = disabled)
+        ["n_whole_plots",           "0"],   # 0 = disabled; >= 2 to enable split-plot
+        ["eta",                     "1.0"], # variance ratio sigma2_wp / sigma2_sp
+        ["subplots_per_wp",         "0"],   # 0 = auto
+        ["df_method",               "auto"],# auto | conservative | sp_only
         ["", ""],
         [_SENTINEL_FACTORS, ""],
         ["factor_name", "type",       "value1", "value2"],
@@ -623,6 +649,12 @@ _TEMPLATE_ROWS: Dict[str, List[List[str]]] = {
         ["preallocate_categorical", "false"],
         ["alloc_min_per_cell",      "1"],
         ["alloc_max_per_cell",      "0"],   # 0 = no upper limit
+        # Split-plot: set htc_factors and n_whole_plots >= 2 to enable.
+        ["htc_factors",             ""],    # comma-separated HTC factor names (leave blank = disabled)
+        ["n_whole_plots",           "0"],   # 0 = disabled; >= 2 to enable split-plot
+        ["eta",                     "1.0"], # variance ratio sigma2_wp / sigma2_sp
+        ["subplots_per_wp",         "0"],   # 0 = auto
+        ["df_method",               "auto"],# auto | conservative | sp_only
         ["", ""],
         [_SENTINEL_CONTRAST, ""],
         ["L_row",  "0,1,0"],

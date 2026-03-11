@@ -32,6 +32,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from .candidate import estimate_candidate_size, build_candidate
 from .model_matrix import build_model_matrix
 from .config import DesignOptions
+from .split_plot import (
+    gls_information_matrix,
+    build_whole_plot_indicator,
+    build_split_plot_covariance_inv,
+)
 
 
 # ---------------------------------------------------------------------
@@ -330,11 +335,183 @@ def _a_criterion_for_indices(X_cand: np.ndarray, idx: np.ndarray, jitter: float 
         return float("inf")
 
 
+# ---------------------------------------------------------------------
+# GLS criterion scorers (split-plot / two-stratum variance model)
+# ---------------------------------------------------------------------
+
+def _gls_i_criterion(
+    X: np.ndarray,
+    V_inv: np.ndarray,
+    Mcand: Optional[np.ndarray] = None,
+    N_cand: int = 1,
+    jitter: float = 1e-8,
+) -> float:
+    """GLS I-criterion: tr[(X'V⁻¹X + jitter·I)⁻¹ Mcand] / N_cand.
+
+    Lower is better.  When *Mcand* is ``None``, the design's own moment
+    matrix ``X'X`` is used with ``N_cand = n`` (treats the design as its own
+    candidate pool).  The preferred usage is to pass ``Mcand = X_cand'X_cand``
+    and ``N_cand = n_cand``.
+
+    At V_inv = I the result equals the OLS I-criterion.
+
+    Parameters
+    ----------
+    X : ndarray (n, p)
+        Selected design matrix.
+    V_inv : ndarray (n, n)
+        Scaled inverse covariance ``(η Z Z' + I_n)⁻¹``.
+    Mcand : ndarray (p, p), optional
+        Candidate moment matrix ``X_cand'X_cand``.
+    N_cand : int
+        Number of candidate rows (denominator for normalisation).
+    jitter : float
+        Small ridge added to ``X'V⁻¹X`` for numerical stability.
+
+    Returns
+    -------
+    float
+        GLS I-criterion score; lower is better.  Returns ``float('inf')``
+        for singular or near-singular designs.
+    """
+    M = gls_information_matrix(X, V_inv, jitter=jitter)   # p × p, PD
+    try:
+        M_inv = np.linalg.inv(M)
+    except np.linalg.LinAlgError:
+        return float("inf")
+
+    if Mcand is None:
+        Mcand = X.T @ X
+        N_cand = max(X.shape[0], 1)
+
+    score = float(np.trace(M_inv @ Mcand)) / max(N_cand, 1)
+    return score if np.isfinite(score) else float("inf")
+
+
+def _gls_d_criterion(
+    X: np.ndarray,
+    V_inv: np.ndarray,
+    jitter: float = 1e-8,
+) -> float:
+    """GLS D-criterion: -log det(X'V⁻¹X + jitter·I).
+
+    Lower is better (maximises GLS determinant).  At V_inv = I the result
+    equals the OLS D-criterion.
+
+    Parameters
+    ----------
+    X : ndarray (n, p)
+        Selected design matrix.
+    V_inv : ndarray (n, n)
+        Scaled inverse covariance.
+    jitter : float
+        Small ridge added for numerical stability.
+
+    Returns
+    -------
+    float
+        Negative log-determinant; lower is better.  Returns ``float('inf')``
+        for singular designs.
+    """
+    M = gls_information_matrix(X, V_inv, jitter=jitter)
+    sign, logdet = np.linalg.slogdet(M)
+    if sign <= 0:
+        return float("inf")
+    return float(-logdet)
+
+
+def _gls_a_criterion(
+    X: np.ndarray,
+    V_inv: np.ndarray,
+    jitter: float = 1e-8,
+) -> float:
+    """GLS A-criterion: tr[(X'V⁻¹X + jitter·I)⁻¹].
+
+    Lower is better.  At V_inv = I the result equals the OLS A-criterion.
+
+    Parameters
+    ----------
+    X : ndarray (n, p)
+        Selected design matrix.
+    V_inv : ndarray (n, n)
+        Scaled inverse covariance.
+    jitter : float
+        Small ridge added for numerical stability.
+
+    Returns
+    -------
+    float
+        Trace of inverse GLS information matrix; lower is better.  Returns
+        ``float('inf')`` for singular designs.
+    """
+    M = gls_information_matrix(X, V_inv, jitter=jitter)
+    try:
+        M_inv = np.linalg.inv(M)
+        score = float(np.trace(M_inv))
+        return score if np.isfinite(score) else float("inf")
+    except np.linalg.LinAlgError:
+        return float("inf")
+
+
+def _score_design_gls(
+    criterion: str,
+    X: np.ndarray,
+    V_inv: np.ndarray,
+    Mcand: Optional[np.ndarray] = None,
+    N_cand: int = 1,
+    jitter: float = 1e-8,
+) -> float:
+    """Score a design matrix X under a GLS criterion.
+
+    GLS analogue of ``_score_design``.  Used by the split-plot Fedorov
+    exchange to evaluate candidate designs during each swap proposal.
+
+    Parameters
+    ----------
+    criterion : {"I", "D", "A"}
+        Optimality criterion; lower is better.
+    X : ndarray (n, p)
+        Current design matrix.
+    V_inv : ndarray (n, n)
+        Scaled inverse covariance ``(η Z Z' + I_n)⁻¹``.
+    Mcand : ndarray (p, p), optional
+        Candidate moment matrix ``X_cand'X_cand``.  Required for
+        ``criterion="I"``; ignored for ``"D"`` and ``"A"``.
+    N_cand : int, default 1
+        Number of candidate rows (denominator for I-criterion).
+    jitter : float
+        Diagonal regularisation.
+
+    Returns
+    -------
+    float
+        GLS criterion score; lower is better.
+
+    Raises
+    ------
+    ValueError
+        If *criterion* is not ``"I"``, ``"D"``, or ``"A"``.
+    """
+    if criterion == "I":
+        return _gls_i_criterion(X, V_inv, Mcand=Mcand, N_cand=N_cand, jitter=jitter)
+    elif criterion == "D":
+        return _gls_d_criterion(X, V_inv, jitter=jitter)
+    elif criterion == "A":
+        return _gls_a_criterion(X, V_inv, jitter=jitter)
+    else:
+        raise ValueError(
+            f"Unknown optimality criterion {criterion!r}. "
+            "Supported values are 'I' (I-optimal), 'D' (D-optimal), and 'A' (A-optimal)."
+        )
+
+
 def _criterion_score(
     criterion: str,
     X_cand: np.ndarray,
     idx: np.ndarray,
     jitter: float = 1e-8,
+    *,
+    V_inv: Optional[np.ndarray] = None,
 ) -> float:
     """Dispatch to the appropriate criterion scoring function.
 
@@ -361,6 +538,10 @@ def _criterion_score(
         Selected row indices into X_cand.
     jitter : float
         Small ridge for numerical stability passed to the underlying scorer.
+    V_inv : ndarray (n_sel, n_sel), optional
+        Scaled inverse covariance for the selected rows ``X_cand[idx]``.
+        When provided, the GLS criterion path is used (split-plot).
+        When ``None`` (default), the standard OLS path is used.
 
     Returns
     -------
@@ -372,6 +553,23 @@ def _criterion_score(
     ValueError
         If *criterion* is not ``"I"``, ``"D"``, or ``"A"``.
     """
+    if V_inv is not None:
+        # GLS path — split-plot / two-stratum variance model
+        X_sel = X_cand[idx]
+        n_cand = X_cand.shape[0]
+        if criterion == "I":
+            Mcand = X_cand.T @ X_cand
+            return _gls_i_criterion(X_sel, V_inv, Mcand=Mcand, N_cand=n_cand, jitter=jitter)
+        elif criterion == "D":
+            return _gls_d_criterion(X_sel, V_inv, jitter=jitter)
+        elif criterion == "A":
+            return _gls_a_criterion(X_sel, V_inv, jitter=jitter)
+        else:
+            raise ValueError(
+                f"Unknown optimality criterion {criterion!r}. "
+                "Supported values are 'I' (I-optimal), 'D' (D-optimal), and 'A' (A-optimal)."
+            )
+    # OLS path — existing behaviour unchanged
     if criterion == "I":
         return _i_criterion_for_indices(X_cand, idx, jitter=jitter)
     elif criterion == "D":
@@ -1022,9 +1220,273 @@ def augment_design(
     return augmented_df, new_runs_df
 
 
+# ---------------------------------------------------------------------
+# Split-plot Fedorov exchange algorithm (SP-5)
+# ---------------------------------------------------------------------
+
+def build_split_plot_design(
+    cand: pd.DataFrame,
+    formula: str,
+    n_wp: int,
+    subplots_per_wp: int,
+    htc_factors: List[str],
+    eta: float,
+    *,
+    factors: Optional[Dict[str, Any]] = None,
+    criterion: str = "I",
+    starts: int = 5,
+    max_iter: int = 100,
+    random_state: Optional[int] = None,
+    jitter: float = 1e-8,
+    criterion_ignore_vr: bool = False,
+    n_wp_cand: int = 30,
+    n_sp_cand: int = 50,
+) -> Tuple[pd.DataFrame, np.ndarray]:
+    """Build a split-plot optimal design using a two-phase Fedorov exchange.
+
+    Implements a modified Fedorov point-exchange that respects the whole-plot
+    nesting constraint.  HTC (hard-to-change) factor settings are constant
+    within each whole plot; ETC (easy-to-change) settings vary across sub-plots.
+    The GLS information matrix ``M = X'V⁻¹X`` is used for the criterion, with
+    ``V_inv`` computed once from the balanced layout and reused throughout.
+
+    Parameters
+    ----------
+    cand : DataFrame
+        Initial candidate structure (e.g. from ``build_split_plot_candidate``).
+        Must include all factor columns and a ``__wp_id__`` column.  Used to
+        determine factor names and column ordering.
+    formula : str
+        Patsy formula for the model (references HTC and/or ETC factors).
+    n_wp : int
+        Number of whole plots (≥ 2).
+    subplots_per_wp : int
+        Sub-plots per whole plot (balanced layout assumed).
+    htc_factors : list of str
+        Names of the hard-to-change (whole-plot) factors.
+    eta : float
+        Variance ratio σ²_wp / σ²_sp.  ``eta=0`` is equivalent to OLS.
+    factors : dict, optional
+        Full factor specifications ``{name: (low, high) or [levels]}``.
+        When provided, WP and SP candidate pools are generated from this dict
+        (sizes controlled by *n_wp_cand* and *n_sp_cand*).  When ``None``,
+        candidate pools are derived from the unique rows in *cand*.
+    criterion : {"I", "D", "A"}, default "I"
+        GLS optimality criterion; lower is better in all cases.
+    starts : int, default 5
+        Number of independent random starts.  The start with the best
+        criterion score is returned.
+    max_iter : int, default 100
+        Maximum exchange iterations per start.  Each iteration runs one
+        complete WP-swap phase followed by one SP-swap phase.
+    random_state : int, optional
+        Base random seed for reproducibility.
+    jitter : float, default 1e-8
+        Diagonal ridge added to ``X'V⁻¹X`` for numerical stability.
+    criterion_ignore_vr : bool, default False
+        If ``True``, set ``V_inv = I`` (OLS criterion) regardless of *eta*.
+        Useful for comparing GLS and OLS on the same nested structure.
+    n_wp_cand : int, default 30
+        WP candidate pool size when *factors* is provided.
+    n_sp_cand : int, default 50
+        SP candidate pool size when *factors* is provided.
+
+    Returns
+    -------
+    design_df : DataFrame
+        Optimal split-plot design with ``n_wp * subplots_per_wp`` rows.
+        All factor columns and ``__wp_id__`` are present.  All rows sharing
+        the same ``__wp_id__`` have identical HTC factor values.
+    X : ndarray, shape (n_total, p)
+        Ordinary (unweighted) model matrix for the returned design.
+    """
+    n_total = n_wp * subplots_per_wp
+    htc_set = set(htc_factors)
+
+    # Factor columns in original order (excludes __wp_id__)
+    factor_cols = [c for c in cand.columns if c != "__wp_id__"]
+    etc_factors = [c for c in factor_cols if c not in htc_set]
+
+    # V_inv: computed once — depends only on layout and eta, not factor values
+    Z = build_whole_plot_indicator(n_total, n_wp, subplots_per_wp)
+    if criterion_ignore_vr or eta == 0.0:
+        V_inv = np.eye(n_total, dtype=np.float64)
+    else:
+        V_inv = build_split_plot_covariance_inv(Z, eta)
+
+    # Balanced layout: run r belongs to WP slot r // subplots_per_wp
+    wp_slot_of_run = np.repeat(np.arange(n_wp), subplots_per_wp)
+
+    # --- Candidate pools ---
+    seed_base = int(random_state) if random_state is not None else 0
+    if factors is not None:
+        htc_factor_dict = {k: v for k, v in factors.items() if k in htc_set}
+        etc_factor_dict = {k: v for k, v in factors.items() if k not in htc_set}
+        wp_pool_df = build_candidate(
+            htc_factor_dict, candidate_points=n_wp_cand, seed=seed_base
+        )
+        sp_pool_df = (
+            build_candidate(etc_factor_dict, candidate_points=n_sp_cand, seed=seed_base + 1)
+            if etc_factor_dict
+            else pd.DataFrame()
+        )
+    else:
+        wp_pool_df = cand[htc_factors].drop_duplicates().reset_index(drop=True)
+        sp_pool_df = (
+            cand[etc_factors].drop_duplicates().reset_index(drop=True)
+            if etc_factors
+            else pd.DataFrame()
+        )
+
+    has_etc = bool(etc_factors and len(sp_pool_df) > 0)
+    n_wp_pool = len(wp_pool_df)
+    n_sp_pool = len(sp_pool_df) if has_etc else 1
+
+    if n_wp_pool == 0:
+        raise ValueError(
+            "WP candidate pool is empty.  Provide a non-empty factors dict or "
+            "a cand DataFrame with at least one distinct HTC factor setting."
+        )
+
+    # --- Pre-build model matrix for all (WP_cand × SP_cand) combinations ---
+    # X_combo_3d[k, m] = model matrix row for (wp_pool[k], sp_pool[m])
+    # We compute all n_wp_pool × n_sp_pool rows in ONE patsy call.
+    combo_rows: List[Dict] = []
+    for k in range(n_wp_pool):
+        wp_row = wp_pool_df.iloc[k]
+        for m in range(n_sp_pool):
+            row: Dict[str, Any] = dict(wp_row)
+            if has_etc:
+                row.update(dict(sp_pool_df.iloc[m]))
+            combo_rows.append(row)
+
+    combo_df = pd.DataFrame(combo_rows, columns=factor_cols)
+    X_combo, p_names = build_model_matrix(formula, combo_df)
+    p = X_combo.shape[1]
+    # Reshape: C-order → X_combo_3d[k, m] == X_combo[k * n_sp_pool + m]
+    X_combo_3d = X_combo.reshape(n_wp_pool, n_sp_pool, p)
+
+    # Candidate moment matrix for I-criterion (fixed throughout)
+    Mcand = X_combo.T @ X_combo
+    N_cand_total = n_wp_pool * n_sp_pool
+
+    # --- Multi-start two-phase exchange ---
+    rng = np.random.default_rng(random_state)
+    best_score = np.inf
+    best_design_df: Optional[pd.DataFrame] = None
+    best_X: Optional[np.ndarray] = None
+
+    for _start in range(max(1, starts)):
+        # Random initialisation: draw WP and SP pool indices
+        wp_slots = rng.integers(0, n_wp_pool, size=n_wp)
+        sp_runs = (
+            rng.integers(0, n_sp_pool, size=n_total)
+            if has_etc
+            else np.zeros(n_total, dtype=np.intp)
+        )
+
+        # Initial model matrix from pool indices
+        X_current = np.vstack([
+            X_combo_3d[wp_slots[wp_slot_of_run[r]], sp_runs[r]]
+            for r in range(n_total)
+        ])
+        current_score = _score_design_gls(
+            criterion, X_current, V_inv,
+            Mcand=Mcand, N_cand=N_cand_total, jitter=jitter,
+        )
+
+        # Alternating WP / SP exchange until convergence or max_iter
+        for _iter in range(max_iter):
+            improved = False
+
+            # --- Phase 1: WP swaps ---
+            # For each WP slot, find the best WP candidate and accept if improving.
+            for i in range(n_wp):
+                wp_rows = np.where(wp_slot_of_run == i)[0]
+                best_k = int(wp_slots[i])
+                best_k_score = current_score
+
+                for k in range(n_wp_pool):
+                    if k == wp_slots[i]:
+                        continue
+                    # Propose: replace all sub-plots in WP i with WP candidate k
+                    X_prop = X_current.copy()
+                    for r in wp_rows:
+                        X_prop[r] = X_combo_3d[k, sp_runs[r]]
+                    score_prop = _score_design_gls(
+                        criterion, X_prop, V_inv,
+                        Mcand=Mcand, N_cand=N_cand_total, jitter=jitter,
+                    )
+                    if score_prop < best_k_score - 1e-10:
+                        best_k = k
+                        best_k_score = score_prop
+
+                if best_k != wp_slots[i]:
+                    for r in wp_rows:
+                        X_current[r] = X_combo_3d[best_k, sp_runs[r]]
+                    wp_slots[i] = best_k
+                    current_score = best_k_score
+                    improved = True
+
+            # --- Phase 2: SP swaps ---
+            # For each run, find the best SP candidate and accept if improving.
+            if has_etc:
+                for r in range(n_total):
+                    wp_i = int(wp_slot_of_run[r])
+                    best_m = int(sp_runs[r])
+                    best_m_score = current_score
+
+                    for m in range(n_sp_pool):
+                        if m == sp_runs[r]:
+                            continue
+                        X_prop = X_current.copy()
+                        X_prop[r] = X_combo_3d[wp_slots[wp_i], m]
+                        score_prop = _score_design_gls(
+                            criterion, X_prop, V_inv,
+                            Mcand=Mcand, N_cand=N_cand_total, jitter=jitter,
+                        )
+                        if score_prop < best_m_score - 1e-10:
+                            best_m = m
+                            best_m_score = score_prop
+
+                    if best_m != sp_runs[r]:
+                        X_current[r] = X_combo_3d[wp_slots[wp_i], best_m]
+                        sp_runs[r] = best_m
+                        current_score = best_m_score
+                        improved = True
+
+            if not improved:
+                break  # local optimum reached — converged
+
+        # Record best across all starts
+        if current_score < best_score:
+            best_score = current_score
+            best_X = X_current.copy()
+            # Reconstruct design DataFrame from pool indices
+            design_rows: List[Dict] = []
+            for r in range(n_total):
+                i = int(wp_slot_of_run[r])
+                row = dict(wp_pool_df.iloc[wp_slots[i]])
+                if has_etc:
+                    row.update(dict(sp_pool_df.iloc[sp_runs[r]]))
+                row["__wp_id__"] = i
+                design_rows.append(row)
+            best_design_df = pd.DataFrame(design_rows, columns=list(cand.columns))
+
+    if best_design_df is None or best_X is None:  # pragma: no cover
+        raise RuntimeError("build_split_plot_design: no valid design found.")
+
+    return best_design_df.reset_index(drop=True), best_X
+
+
 __all__ = [
     "build_i_opt_design",
     "build_i_opt_design_with_idx",
+    "build_split_plot_design",
     "_score_design",
+    "_score_design_gls",
+    "_gls_i_criterion",
+    "_gls_d_criterion",
+    "_gls_a_criterion",
     "augment_design",
 ]

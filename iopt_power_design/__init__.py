@@ -27,11 +27,13 @@ from .analysis import (  # noqa: F401
     min_detectable_effect,
     compare_criteria,
     robustness_report,
+    power_curve_by_wp,
 )
+from .power import contrast_power_sp, global_r2_power_sp  # noqa: F401
 from .allocation import i_optimal_allocation  # noqa: F401
-from .candidate import build_candidate  # noqa: F401
+from .candidate import build_candidate, build_split_plot_candidate  # noqa: F401
 from .model_matrix import build_model_matrix  # noqa: F401
-from .iopt_search import augment_design  # noqa: F401
+from .iopt_search import augment_design, build_split_plot_design  # noqa: F401
 from .report import generate_report  # noqa: F401
 from .sheets import SheetsError, sheets_run, create_sheet_template  # noqa: F401
 from .excel_template import ExcelError, excel_run, create_excel_template  # noqa: F401
@@ -54,8 +56,10 @@ __all__ = [
     "min_detectable_effect",
     "compare_criteria",
     "robustness_report",
+    "power_curve_by_wp",
     # Design utilities
     "augment_design",
+    "build_split_plot_design",
     # Config / options
     "PowerContrastConfig",
     "PowerR2Config",
@@ -66,6 +70,7 @@ __all__ = [
     # Low-level utilities
     "i_optimal_allocation",
     "build_candidate",
+    "build_split_plot_candidate",
     "build_model_matrix",
     # Reports
     "generate_report",
@@ -89,4 +94,7 @@ __all__ = [
     "build_whole_plot_indicator",
     "build_split_plot_covariance_inv",
     "gls_information_matrix",
+    # Split-plot power functions
+    "contrast_power_sp",
+    "global_r2_power_sp",
 ]

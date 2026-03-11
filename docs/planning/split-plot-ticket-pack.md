@@ -1,7 +1,7 @@
 # Enhancement 22 — Split-Plot / Hard-to-Change Factors
 ## Ticket Pack
 
-**Status:** In Progress — SP-1 ✅ SP-2 ✅ done; SP-3 next
+**Status:** Complete ✅ — SP-1 ✅ SP-2 ✅ SP-3 ✅ SP-4 ✅ SP-5 ✅ SP-6 ✅ SP-7 ✅ SP-8 ✅ SP-9 ✅ SP-10 ✅ done
 **Backlog entry:** ENHANCEMENTS.md § Enhancement 22
 **Estimated total LOE:** 20–30 developer-days
 **Value:** Very High (split-plot is the most common industrial DOE restriction)
@@ -152,7 +152,7 @@ df = power_curve_by_wp(
 | SP-7 | Top-level API integration | 3 days | SP-5, SP-6 |
 | SP-8 | Analysis functions (`power_curve_by_wp`, sensitivity) | 2 days | SP-7 |
 | SP-9 | CLI / Streamlit / Sheets / Excel integration | 3 days | SP-7 |
-| SP-10 | Tests (per-ticket unit + integration regression) | 4 days | SP-1 through SP-9 |
+| SP-10 | ~~Tests (per-ticket unit + integration regression)~~ | ~~4 days~~ | ✅ Done — 7 integration tests in `TestSplitPlotIntegration` (test_api.py); 19 property-based parametrized tests in `TestSP10PropertyBased` (test_split_plot.py); 814 passed, 37 skipped |
 
 ---
 
