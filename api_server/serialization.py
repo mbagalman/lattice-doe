@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 
-from iopt_power_design.config import DesignOptions, PowerContrastConfig, PowerR2Config
+from iopt_power_design.config import DesignOptions, PowerContrastConfig, PowerR2Config, SplitPlotOptions
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +136,15 @@ def pydantic_design_opts_to_dataclass(model: Optional[Any]) -> DesignOptions:
         kwargs["alloc_max_per_cell"] = model.alloc_max_per_cell
     if model.constraint_expr:
         kwargs["constraint_expr"] = model.constraint_expr
+    if model.split_plot is not None:
+        sp = model.split_plot
+        kwargs["split_plot"] = SplitPlotOptions(
+            htc_factors=list(sp.htc_factors),
+            n_whole_plots=sp.n_whole_plots,
+            eta=sp.eta,
+            subplots_per_wp=sp.subplots_per_wp,
+            df_method=sp.df_method,
+        )
     return DesignOptions(**kwargs)
 
 

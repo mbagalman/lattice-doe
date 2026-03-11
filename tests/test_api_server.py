@@ -218,6 +218,78 @@ class TestPydanticDesignOptsToDataclass:
         # Should use DesignOptions default (None)
         assert opts.alloc_max_per_cell is None
 
+    # ------------------------------------------------------------------ #
+    # CR-28 regression: split_plot field round-trips through serialization #
+    # ------------------------------------------------------------------ #
+
+    def test_split_plot_none_by_default(self):
+        """CR-28: split_plot defaults to None — no split-plot mode unless set."""
+        from api_server.models.common import DesignOptionsModel
+        model = DesignOptionsModel()
+        opts = pydantic_design_opts_to_dataclass(model)
+        assert opts.split_plot is None
+
+    def test_split_plot_fields_forwarded(self):
+        """CR-28: all SplitPlotOptionsModel fields are mapped to SplitPlotOptions."""
+        from api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
+        from iopt_power_design.config import SplitPlotOptions
+        sp_model = SplitPlotOptionsModel(
+            htc_factors=["Temp", "Press"],
+            n_whole_plots=6,
+            eta=2.5,
+            subplots_per_wp=4,
+            df_method="conservative",
+        )
+        model = DesignOptionsModel(split_plot=sp_model)
+        opts = pydantic_design_opts_to_dataclass(model)
+        assert opts.split_plot is not None
+        assert isinstance(opts.split_plot, SplitPlotOptions)
+        sp = opts.split_plot
+        assert sp.htc_factors == ["Temp", "Press"]
+        assert sp.n_whole_plots == 6
+        assert sp.eta == pytest.approx(2.5)
+        assert sp.subplots_per_wp == 4
+        assert sp.df_method == "conservative"
+
+    def test_split_plot_subplots_per_wp_none(self):
+        """CR-28: omitting subplots_per_wp passes None to SplitPlotOptions (auto)."""
+        from api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
+        sp_model = SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=3)
+        model = DesignOptionsModel(split_plot=sp_model)
+        opts = pydantic_design_opts_to_dataclass(model)
+        assert opts.split_plot is not None
+        assert opts.split_plot.subplots_per_wp is None
+
+    def test_split_plot_defaults_eta_and_df_method(self):
+        """CR-28: SplitPlotOptionsModel defaults (eta=1.0, df_method='auto') are preserved."""
+        from api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
+        sp_model = SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=4)
+        model = DesignOptionsModel(split_plot=sp_model)
+        opts = pydantic_design_opts_to_dataclass(model)
+        assert opts.split_plot.eta == pytest.approx(1.0)
+        assert opts.split_plot.df_method == "auto"
+
+    def test_split_plot_validation_n_whole_plots_lt2_raises(self):
+        """CR-28: n_whole_plots < 2 is rejected by Pydantic validation."""
+        from api_server.models.common import SplitPlotOptionsModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError):
+            SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=1)
+
+    def test_split_plot_validation_empty_htc_factors_raises(self):
+        """CR-28: empty htc_factors list is rejected by Pydantic validation."""
+        from api_server.models.common import SplitPlotOptionsModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError):
+            SplitPlotOptionsModel(htc_factors=[], n_whole_plots=3)
+
+    def test_split_plot_validation_negative_eta_raises(self):
+        """CR-28: eta < 0 is rejected by Pydantic validation."""
+        from api_server.models.common import SplitPlotOptionsModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError):
+            SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=3, eta=-0.1)
+
 
 class TestSerializeDesignResult:
     def _make_result(self):

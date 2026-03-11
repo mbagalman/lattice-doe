@@ -91,6 +91,53 @@ PowerCfgModel = Annotated[
 
 
 # ---------------------------------------------------------------------------
+# Split-plot options model
+# ---------------------------------------------------------------------------
+
+class SplitPlotOptionsModel(BaseModel):
+    """Options for split-plot (hard-to-change factor) designs.
+
+    Mirrors ``iopt_power_design.config.SplitPlotOptions``.  Set this field
+    on ``DesignOptionsModel.split_plot`` to run a split-plot search.
+    """
+
+    htc_factors: List[str] = Field(
+        ...,
+        min_length=1,
+        description="Names of the hard-to-change (whole-plot) factors.",
+        examples=[["Temperature"]],
+    )
+    n_whole_plots: int = Field(
+        ...,
+        ge=2,
+        description="Number of whole plots (outer randomisation units, ≥ 2).",
+        examples=[4],
+    )
+    eta: float = Field(
+        1.0,
+        ge=0.0,
+        description="Variance ratio σ²_wp / σ²_sp. 0 = OLS (no WP random effect).",
+    )
+    subplots_per_wp: Optional[int] = Field(
+        None,
+        ge=1,
+        description=(
+            "Sub-plots per whole plot. None lets the API choose automatically: "
+            "max(2, ceil(p / n_whole_plots) + 1)."
+        ),
+    )
+    df_method: Literal["auto", "conservative", "sp_only"] = Field(
+        "auto",
+        description=(
+            "Denominator-df assignment for contrast power: "
+            "'auto' classifies WP vs SP contrasts; "
+            "'conservative' always uses WP df; "
+            "'sp_only' always uses SP df."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Design options model
 # ---------------------------------------------------------------------------
 
@@ -146,3 +193,12 @@ class DesignOptionsModel(BaseModel):
     preallocate_categorical: bool = False
     alloc_min_per_cell: int = Field(1, ge=1)
     alloc_max_per_cell: Optional[int] = Field(None, ge=1)
+    # Split-plot (hard-to-change factor) designs
+    split_plot: Optional[SplitPlotOptionsModel] = Field(
+        None,
+        description=(
+            "Split-plot configuration. When set, the design search uses a "
+            "two-stratum GLS model with whole-plot and sub-plot error terms. "
+            "Cannot be combined with n_blocks."
+        ),
+    )
