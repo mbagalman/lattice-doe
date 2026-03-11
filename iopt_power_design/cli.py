@@ -211,6 +211,40 @@ def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
     return PowerR2Config(r2_target=float(cfg["r2_target"]), alpha=alpha, power=power, sigma=sigma)
 
 
+def _apply_sp_cli_args(cfg: Dict[str, Any], args) -> Dict[str, Any]:
+    """Merge CLI split-plot flags into *cfg*'s ``split_plot`` block.
+
+    Any of the five SP flags (``--htc-factors``, ``--n-whole-plots``,
+    ``--eta``, ``--subplots-per-wp``, ``--df-method``) triggers the merge when
+    provided.  Previously only ``--htc-factors`` / ``--n-whole-plots`` did,
+    so ``--eta`` / ``--subplots-per-wp`` / ``--df-method`` were silently
+    ignored when given alone (CR-26).
+
+    Returns a shallow copy of *cfg* with the updated ``split_plot`` key;
+    the original dict is never mutated.
+    """
+    if not any(x is not None for x in (
+        args.htc_factors, args.n_whole_plots, args.eta,
+        args.subplots_per_wp, args.df_method,
+    )):
+        return cfg  # nothing to do
+
+    cfg = dict(cfg)  # shallow copy so original isn't mutated
+    sp_block = dict(cfg.get("split_plot") or {})
+    if args.htc_factors is not None:
+        sp_block["htc_factors"] = [f.strip() for f in args.htc_factors.split(",") if f.strip()]
+    if args.n_whole_plots is not None:
+        sp_block["n_whole_plots"] = args.n_whole_plots
+    if args.eta is not None:
+        sp_block["eta"] = args.eta
+    if args.subplots_per_wp is not None:
+        sp_block["subplots_per_wp"] = args.subplots_per_wp if args.subplots_per_wp > 0 else None
+    if args.df_method is not None:
+        sp_block["df_method"] = args.df_method
+    cfg["split_plot"] = sp_block
+    return cfg
+
+
 def _make_design_opts(cfg: Dict[str, Any]) -> DesignOptions:
     d = cfg.get("design", {})
     # workers: None means serial; YAML can specify an int or omit/null it
@@ -646,20 +680,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         power_cfg = _make_power_cfg(cfg, formula, factors)
 
         # Merge CLI split-plot flags into cfg["split_plot"] (CLI takes priority over YAML)
-        if args.htc_factors is not None or args.n_whole_plots is not None:
-            sp_block = dict(cfg.get("split_plot") or {})
-            if args.htc_factors is not None:
-                sp_block["htc_factors"] = [f.strip() for f in args.htc_factors.split(",") if f.strip()]
-            if args.n_whole_plots is not None:
-                sp_block["n_whole_plots"] = args.n_whole_plots
-            if args.eta is not None:
-                sp_block["eta"] = args.eta
-            if args.subplots_per_wp is not None:
-                sp_block["subplots_per_wp"] = args.subplots_per_wp if args.subplots_per_wp > 0 else None
-            if args.df_method is not None:
-                sp_block["df_method"] = args.df_method
-            cfg = dict(cfg)  # shallow copy so original isn't mutated
-            cfg["split_plot"] = sp_block
+        cfg = _apply_sp_cli_args(cfg, args)
 
         design_opts = _make_design_opts(cfg)
 

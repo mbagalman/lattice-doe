@@ -2167,6 +2167,105 @@ class TestSplitPlotCLI:
         ])
         assert ret == 0
 
+    # ------------------------------------------------------------------ #
+    # CR-26 regression: standalone SP flags (no --htc-factors/            #
+    # --n-whole-plots) must still override YAML values                    #
+    # ------------------------------------------------------------------ #
+
+    def test_apply_sp_cli_args_eta_standalone(self):
+        """CR-26: --eta alone overrides YAML split_plot.eta."""
+        from types import SimpleNamespace
+        from iopt_power_design.cli import _apply_sp_cli_args, _make_design_opts
+
+        yaml_cfg = {
+            "split_plot": {"htc_factors": ["A"], "n_whole_plots": 3, "eta": 1.0}
+        }
+        args = SimpleNamespace(
+            htc_factors=None, n_whole_plots=None,
+            eta=5.0, subplots_per_wp=None, df_method=None,
+        )
+        merged = _apply_sp_cli_args(yaml_cfg, args)
+        opts = _make_design_opts(merged)
+        assert opts.split_plot is not None
+        assert opts.split_plot.eta == pytest.approx(5.0), (
+            "CR-26: --eta standalone did not override YAML split_plot.eta"
+        )
+
+    def test_apply_sp_cli_args_subplots_standalone(self):
+        """CR-26: --subplots-per-wp alone overrides YAML split_plot.subplots_per_wp."""
+        from types import SimpleNamespace
+        from iopt_power_design.cli import _apply_sp_cli_args, _make_design_opts
+
+        yaml_cfg = {
+            "split_plot": {
+                "htc_factors": ["A"], "n_whole_plots": 4,
+                "eta": 1.0, "subplots_per_wp": 2,
+            }
+        }
+        args = SimpleNamespace(
+            htc_factors=None, n_whole_plots=None,
+            eta=None, subplots_per_wp=5, df_method=None,
+        )
+        merged = _apply_sp_cli_args(yaml_cfg, args)
+        opts = _make_design_opts(merged)
+        assert opts.split_plot is not None
+        assert opts.split_plot.subplots_per_wp == 5, (
+            "CR-26: --subplots-per-wp standalone did not override YAML value"
+        )
+
+    def test_apply_sp_cli_args_df_method_standalone(self):
+        """CR-26: --df-method alone overrides YAML split_plot.df_method."""
+        from types import SimpleNamespace
+        from iopt_power_design.cli import _apply_sp_cli_args, _make_design_opts
+
+        yaml_cfg = {
+            "split_plot": {
+                "htc_factors": ["A"], "n_whole_plots": 3,
+                "eta": 1.0, "df_method": "auto",
+            }
+        }
+        args = SimpleNamespace(
+            htc_factors=None, n_whole_plots=None,
+            eta=None, subplots_per_wp=None, df_method="conservative",
+        )
+        merged = _apply_sp_cli_args(yaml_cfg, args)
+        opts = _make_design_opts(merged)
+        assert opts.split_plot is not None
+        assert opts.split_plot.df_method == "conservative", (
+            "CR-26: --df-method standalone did not override YAML value"
+        )
+
+    def test_apply_sp_cli_args_no_flags_leaves_cfg_unchanged(self):
+        """CR-26: when no SP flags are provided, cfg is returned as-is."""
+        from types import SimpleNamespace
+        from iopt_power_design.cli import _apply_sp_cli_args
+
+        yaml_cfg = {
+            "split_plot": {"htc_factors": ["A"], "n_whole_plots": 3, "eta": 2.0}
+        }
+        args = SimpleNamespace(
+            htc_factors=None, n_whole_plots=None,
+            eta=None, subplots_per_wp=None, df_method=None,
+        )
+        result = _apply_sp_cli_args(yaml_cfg, args)
+        assert result is yaml_cfg  # same object — no copy made
+
+    def test_apply_sp_cli_args_original_cfg_not_mutated(self):
+        """CR-26: _apply_sp_cli_args does not mutate the input cfg."""
+        from types import SimpleNamespace
+        from iopt_power_design.cli import _apply_sp_cli_args
+
+        yaml_cfg = {
+            "split_plot": {"htc_factors": ["A"], "n_whole_plots": 3, "eta": 1.0}
+        }
+        original_eta = yaml_cfg["split_plot"]["eta"]
+        args = SimpleNamespace(
+            htc_factors=None, n_whole_plots=None,
+            eta=9.0, subplots_per_wp=None, df_method=None,
+        )
+        _apply_sp_cli_args(yaml_cfg, args)
+        assert yaml_cfg["split_plot"]["eta"] == original_eta  # original untouched
+
 
 # ---------------------------------------------------------------------------
 # TestSplitPlotSheets
