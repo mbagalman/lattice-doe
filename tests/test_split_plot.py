@@ -1667,6 +1667,131 @@ class TestSplitPlotAPI:
 
 
 # ===========================================================================
+# TestCR25HtcColMapping — WP df correctly applied to WP contrasts in auto mode
+# ===========================================================================
+
+class TestCR25HtcColMapping:
+    """CR-25 regression: contrast_power_sp receives htc_factor_cols so that
+    classify_contrasts() sees the correct HTC column set and assigns WP df to
+    pure-WP contrasts under df_method="auto"."""
+
+    # ------------------------------------------------------------------ #
+    # Unit test: htc_factor_cols_from_names helper                        #
+    # ------------------------------------------------------------------ #
+
+    def test_htc_factor_cols_from_names_classifies_correctly(self):
+        """htc_factor_cols_from_names correctly identifies WP vs SP columns."""
+        from iopt_power_design.split_plot import htc_factor_cols_from_names
+
+        p_names = ["Intercept", "A", "B", "C", "A:B", "A:C", "B:C"]
+        htc_factors = ["A"]
+        all_factors = ["A", "B", "C"]
+
+        cols = htc_factor_cols_from_names(p_names, htc_factors, all_factors)
+        # Intercept (0), A (1), and A:B (4) are the only WP-pure columns
+        # (A:B involves only A which is HTC; B alone is ETC)
+        # Wait: A:B involves B (ETC), so A:B is SP.
+        # Pure WP: Intercept (0), A (1) only.
+        assert 0 in cols, "Intercept must be in htc_factor_cols"
+        assert 1 in cols, "A must be in htc_factor_cols"
+        for idx in (2, 3, 4, 5, 6):  # B, C, A:B, A:C, B:C — all involve ETC
+            assert idx not in cols, f"Column {p_names[idx]!r} should NOT be in htc_factor_cols"
+
+    def test_htc_factor_cols_empty_when_no_htc(self):
+        from iopt_power_design.split_plot import htc_factor_cols_from_names
+
+        cols = htc_factor_cols_from_names(
+            ["Intercept", "A", "B"], htc_factors=[], all_factor_names=["A", "B"],
+        )
+        assert cols == []
+
+    # ------------------------------------------------------------------ #
+    # Integration: WP contrast uses WP df under df_method="auto"          #
+    # ------------------------------------------------------------------ #
+
+    def test_wp_contrast_auto_equals_conservative(self):
+        """CR-25: WP contrast power under 'auto' must equal 'conservative'
+        (both use WP df), not 'sp_only' (which uses SP df).
+
+        Before the fix, 'auto' collapsed to 'sp_only' because htc_factor_cols
+        was never passed, so classify_contrasts() treated every contrast as SP.
+        """
+        # L targets A (the HTC factor) — pure WP contrast
+        L_wp = np.array([[0.0, 1.0, 0.0, 0.0]])
+
+        cfg_auto = PowerContrastConfig(
+            L=L_wp, delta=np.array([1.0]),
+            sigma=1.0, power=0.5, alpha=0.10, max_n=60, max_iter=5,
+        )
+        cfg_conservative = PowerContrastConfig(
+            L=L_wp, delta=np.array([1.0]),
+            sigma=1.0, power=0.5, alpha=0.10, max_n=60, max_iter=5,
+        )
+        cfg_sp_only = PowerContrastConfig(
+            L=L_wp, delta=np.array([1.0]),
+            sigma=1.0, power=0.5, alpha=0.10, max_n=60, max_iter=5,
+        )
+
+        result_auto = i_optimal_powered_design(
+            _SP7_FORMULA, _SP7_FACTORS, cfg_auto,
+            design_opts=_sp7_opts(df_method="auto"),
+        )
+        result_conservative = i_optimal_powered_design(
+            _SP7_FORMULA, _SP7_FACTORS, cfg_conservative,
+            design_opts=_sp7_opts(df_method="conservative"),
+        )
+        result_sp_only = i_optimal_powered_design(
+            _SP7_FORMULA, _SP7_FACTORS, cfg_sp_only,
+            design_opts=_sp7_opts(df_method="sp_only"),
+        )
+
+        power_auto = result_auto["report"]["achieved_power"]
+        power_conservative = result_conservative["report"]["achieved_power"]
+        power_sp_only = result_sp_only["report"]["achieved_power"]
+
+        # "auto" for a WP contrast must use WP df (= conservative), not SP df.
+        # WP df <= SP df in general, so conservative power <= sp_only power.
+        # After the fix, auto == conservative for a pure WP contrast.
+        assert abs(power_auto - power_conservative) < 0.05, (
+            f"CR-25: 'auto' ({power_auto:.4f}) should match 'conservative' "
+            f"({power_conservative:.4f}) for a WP contrast, not 'sp_only' ({power_sp_only:.4f})"
+        )
+
+    def test_sp_contrast_auto_equals_sp_only(self):
+        """CR-25: SP contrast power under 'auto' must equal 'sp_only'
+        (both use SP df).  A pure-SP contrast is unaffected by the fix.
+        """
+        # L targets C (an ETC factor) — pure SP contrast
+        L_sp = np.array([[0.0, 0.0, 0.0, 1.0]])
+
+        cfg_auto = PowerContrastConfig(
+            L=L_sp, delta=np.array([0.5]),
+            sigma=1.0, power=0.5, alpha=0.10, max_n=60, max_iter=5,
+        )
+        cfg_sp_only = PowerContrastConfig(
+            L=L_sp, delta=np.array([0.5]),
+            sigma=1.0, power=0.5, alpha=0.10, max_n=60, max_iter=5,
+        )
+
+        result_auto = i_optimal_powered_design(
+            _SP7_FORMULA, _SP7_FACTORS, cfg_auto,
+            design_opts=_sp7_opts(df_method="auto"),
+        )
+        result_sp_only = i_optimal_powered_design(
+            _SP7_FORMULA, _SP7_FACTORS, cfg_sp_only,
+            design_opts=_sp7_opts(df_method="sp_only"),
+        )
+
+        power_auto = result_auto["report"]["achieved_power"]
+        power_sp_only = result_sp_only["report"]["achieved_power"]
+
+        assert abs(power_auto - power_sp_only) < 0.05, (
+            f"CR-25: SP contrast 'auto' ({power_auto:.4f}) should match "
+            f"'sp_only' ({power_sp_only:.4f})"
+        )
+
+
+# ===========================================================================
 # TestSplitPlotAnalysis  (SP-8)
 # ===========================================================================
 

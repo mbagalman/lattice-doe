@@ -36,7 +36,7 @@ from .config import PowerContrastConfig, PowerR2Config, DesignOptions
 from .candidate import estimate_candidate_size, build_candidate, build_split_plot_candidate
 from .model_matrix import build_model_matrix
 from .iopt_search import build_i_opt_design_with_idx, build_split_plot_design
-from .split_plot import build_whole_plot_indicator
+from .split_plot import build_whole_plot_indicator, htc_factor_cols_from_names
 from .diag_metrics import compute_design_metrics
 from .diag_export import export_diagnostics
 from .power import (
@@ -348,10 +348,16 @@ def i_optimal_powered_design(
             )
             Z_ = build_whole_plot_indicator(n_total_, n_wp_, subplots_per_wp)
             if mode == "contrast":
+                _, _p_names = build_model_matrix(formula, design_df_)
+                _all_fcols = [c for c in design_df_.columns if c != "__wp_id__"]
+                _htc_cols = htc_factor_cols_from_names(
+                    _p_names, sp_opts.htc_factors, _all_fcols,
+                )
                 pr_ = contrast_power_sp(
                     L_eff, power_cfg.delta, X_, Z_,
                     sigma_sp=sigma_sp, eta=sp_opts.eta, alpha=power_cfg.alpha,
                     df_method=sp_opts.df_method, jitter=design_opts.xtx_jitter,
+                    htc_factor_cols=_htc_cols,
                 )
                 df_num_ = int(np.linalg.matrix_rank(power_cfg.L))
             else:

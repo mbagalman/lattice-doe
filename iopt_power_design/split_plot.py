@@ -29,6 +29,7 @@ so that σ²_sp cancels when the caller computes e.g. M = X' Ṽ⁻¹ X / σ²_s
 """
 from __future__ import annotations
 
+import re
 from typing import List, Optional
 import numpy as np
 
@@ -170,6 +171,55 @@ def gls_information_matrix(
 
 
 # ---------------------------------------------------------------------------
+# Map HTC factor names → model-matrix column indices
+# ---------------------------------------------------------------------------
+
+def htc_factor_cols_from_names(
+    p_names: List[str],
+    htc_factors: List[str],
+    all_factor_names: List[str],
+) -> List[int]:
+    """Return model-matrix column indices that involve only HTC (whole-plot) factors.
+
+    A column is classified as WP-pure when its Patsy/dmatrix label contains no
+    ETC (sub-plot) factor name as a word token.  The ``"Intercept"`` column is
+    always classified as WP.
+
+    Parameters
+    ----------
+    p_names : list of str
+        Column names returned by ``build_model_matrix`` (length p).
+    htc_factors : list of str
+        Names of the hard-to-change (whole-plot) factors.
+    all_factor_names : list of str
+        All factor names present in the design (HTC + ETC).  Used to derive
+        which identifier tokens in column labels are ETC factors.
+
+    Returns
+    -------
+    list of int
+        Zero-based column indices of WP-pure model-matrix columns.
+    """
+    if not htc_factors:
+        return []
+
+    htc_set = set(htc_factors)
+    etc_set = {f for f in all_factor_names if f not in htc_set}
+
+    result: List[int] = []
+    for i, name in enumerate(p_names):
+        if name == "Intercept":
+            result.append(i)
+            continue
+        # Extract all Python-identifier tokens from the column label.
+        tokens = set(re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", name))
+        # A column is WP-pure when none of its tokens match an ETC factor name.
+        if not tokens.intersection(etc_set):
+            result.append(i)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Contrast classification (WP vs SP)
 # ---------------------------------------------------------------------------
 
@@ -306,4 +356,5 @@ __all__ = [
     "gls_information_matrix",
     "classify_contrasts",
     "split_plot_df_denom",
+    "htc_factor_cols_from_names",
 ]

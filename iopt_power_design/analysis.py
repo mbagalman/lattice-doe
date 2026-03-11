@@ -36,7 +36,7 @@ import pandas as pd
 from .config import PowerContrastConfig, PowerR2Config, DesignOptions
 from .model_matrix import build_model_matrix
 from .power import contrast_power, global_r2_power, contrast_power_sp, global_r2_power_sp
-from .split_plot import build_whole_plot_indicator
+from .split_plot import build_whole_plot_indicator, htc_factor_cols_from_names
 from .power_curves import (
     power_curve_by_n as _power_curve_by_n_impl,
     power_curve_by_effect as _power_curve_by_effect_impl,
@@ -257,7 +257,7 @@ def power_sensitivity(
         design_opts = DesignOptions()
 
     # Rebuild X from the fixed design (no new DOE search needed)
-    X, _ = build_model_matrix(formula, design_df)
+    X, _p_names = build_model_matrix(formula, design_df)
     n = int(X.shape[0])
     jitter = design_opts.xtx_jitter
 
@@ -274,6 +274,15 @@ def power_sensitivity(
             if design_opts.split_plot is not None
             else "sp_only"
         )
+        _htc_factors_eta = (
+            design_opts.split_plot.htc_factors
+            if design_opts.split_plot is not None
+            else []
+        )
+        _all_fcols_eta = [c for c in design_df.columns if c != "__wp_id__"]
+        _htc_cols_eta = htc_factor_cols_from_names(
+            _p_names, _htc_factors_eta, _all_fcols_eta,
+        )
         _sigma_sp = power_cfg.sigma if isinstance(power_cfg, PowerContrastConfig) else 1.0
         _eta_rows = []
         for _eta in np.linspace(eta_range[0], eta_range[1], max(2, eta_points)):
@@ -282,6 +291,7 @@ def power_sensitivity(
                     power_cfg.L, power_cfg.delta, X, Z_sp,
                     sigma_sp=_sigma_sp, eta=float(_eta),
                     alpha=power_cfg.alpha, df_method=_df_method, jitter=jitter,
+                    htc_factor_cols=_htc_cols_eta,
                 )
             else:
                 _pr = global_r2_power_sp(
@@ -1354,10 +1364,16 @@ def power_curve_by_wp(
             )
             Z_ = build_whole_plot_indicator(n_total, n_wp, subplots_per_wp)
             if isinstance(power_cfg, PowerContrastConfig):
+                _, _p_names_ = build_model_matrix(formula, design_df_)
+                _all_fcols_ = [c for c in design_df_.columns if c != "__wp_id__"]
+                _htc_cols_ = htc_factor_cols_from_names(
+                    _p_names_, htc_factors, _all_fcols_,
+                )
                 pr = contrast_power_sp(
                     power_cfg.L, power_cfg.delta, X_, Z_,
                     sigma_sp=sigma_sp, eta=eta, alpha=power_cfg.alpha,
                     df_method=df_method, jitter=design_opts.xtx_jitter,
+                    htc_factor_cols=_htc_cols_,
                 )
             else:
                 pr = global_r2_power_sp(
