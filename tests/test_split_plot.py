@@ -1607,6 +1607,64 @@ class TestSplitPlotAPI:
         )
         assert 0.0 <= result["report"]["achieved_power"] <= 1.0
 
+    # ------------------------------------------------------------------ #
+    # CR-24 regression: feasibility constraints respected in split-plot    #
+    # ------------------------------------------------------------------ #
+
+    def test_htc_constraint_expr_respected(self):
+        """CR-24: constraint_expr on HTC factors is applied to split-plot design."""
+        opts = DesignOptions(
+            split_plot=SplitPlotOptions(
+                htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0,
+            ),
+            starts=2, max_iter=10, random_state=42, candidate_points=200,
+            constraint_expr="A <= -0.3",
+        )
+        result = i_optimal_powered_design(
+            _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(), design_opts=opts,
+        )
+        df = result["design_df"]
+        assert df["A"].max() <= -0.3 + 1e-9, (
+            f"CR-24: constraint 'A <= -0.3' violated in design: max A = {df['A'].max():.4f}"
+        )
+
+    def test_etc_constraint_expr_respected(self):
+        """CR-24: constraint_expr on ETC factors is applied to split-plot design."""
+        opts = DesignOptions(
+            split_plot=SplitPlotOptions(
+                htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0,
+            ),
+            starts=2, max_iter=10, random_state=42, candidate_points=200,
+            constraint_expr="C <= 0.5",
+        )
+        result = i_optimal_powered_design(
+            _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(), design_opts=opts,
+        )
+        df = result["design_df"]
+        assert df["C"].max() <= 0.5 + 1e-9, (
+            f"CR-24: constraint 'C <= 0.5' violated in design: max C = {df['C'].max():.4f}"
+        )
+
+    def test_constraint_func_respected(self):
+        """CR-24: constraint_func callable is also forwarded into split-plot path."""
+        def htc_constraint(row):
+            return row["A"] <= -0.2
+
+        opts = DesignOptions(
+            split_plot=SplitPlotOptions(
+                htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0,
+            ),
+            starts=2, max_iter=10, random_state=42, candidate_points=200,
+            constraint_func=htc_constraint,
+        )
+        result = i_optimal_powered_design(
+            _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(), design_opts=opts,
+        )
+        df = result["design_df"]
+        assert df["A"].max() <= -0.2 + 1e-9, (
+            f"CR-24: constraint_func violated in design: max A = {df['A'].max():.4f}"
+        )
+
 
 # ===========================================================================
 # TestSplitPlotAnalysis  (SP-8)

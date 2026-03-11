@@ -333,6 +333,7 @@ def i_optimal_powered_design(
                 factors, sp_opts.htc_factors, n_wp_, subplots_per_wp,
                 random_state=design_opts.random_state,
                 candidate_points=candidate_points,
+                constraint_func=design_opts.constraint_func,
             )
             design_df_, X_ = build_split_plot_design(
                 sp_cand_, formula, n_wp_, subplots_per_wp,
@@ -343,6 +344,7 @@ def i_optimal_powered_design(
                 max_iter=design_opts.max_iter,
                 random_state=design_opts.random_state,
                 jitter=design_opts.xtx_jitter,
+                constraint_func=design_opts.constraint_func,
             )
             Z_ = build_whole_plot_indicator(n_total_, n_wp_, subplots_per_wp)
             if mode == "contrast":

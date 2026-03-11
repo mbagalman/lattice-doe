@@ -1241,6 +1241,7 @@ def build_split_plot_design(
     criterion_ignore_vr: bool = False,
     n_wp_cand: int = 30,
     n_sp_cand: int = 50,
+    constraint_func: Optional[callable] = None,
 ) -> Tuple[pd.DataFrame, np.ndarray]:
     """Build a split-plot optimal design using a two-phase Fedorov exchange.
 
@@ -1319,14 +1320,35 @@ def build_split_plot_design(
 
     # --- Candidate pools ---
     seed_base = int(random_state) if random_state is not None else 0
+
+    # Wrap constraint_func to gracefully skip evaluation when a row is missing
+    # columns referenced by the constraint (e.g. a cross-stratum constraint
+    # evaluated on an HTC-only or ETC-only pool row).  Missing columns produce
+    # a KeyError inside the user function; we treat those rows as feasible so
+    # the full-row check at build_split_plot_candidate time remains authoritative.
+    def _pool_constraint(row: "pd.Series") -> bool:
+        try:
+            return bool(constraint_func(row))
+        except (KeyError, TypeError, ValueError, NameError):
+            # Cross-stratum constraints reference columns absent from this pool;
+            # treat as feasible — the full-row check in build_split_plot_candidate
+            # is the authoritative gate.
+            return True
+
+    pool_cfunc = _pool_constraint if constraint_func is not None else None
+
     if factors is not None:
         htc_factor_dict = {k: v for k, v in factors.items() if k in htc_set}
         etc_factor_dict = {k: v for k, v in factors.items() if k not in htc_set}
         wp_pool_df = build_candidate(
-            htc_factor_dict, candidate_points=n_wp_cand, seed=seed_base
+            htc_factor_dict, candidate_points=n_wp_cand, seed=seed_base,
+            constraint_func=pool_cfunc,
         )
         sp_pool_df = (
-            build_candidate(etc_factor_dict, candidate_points=n_sp_cand, seed=seed_base + 1)
+            build_candidate(
+                etc_factor_dict, candidate_points=n_sp_cand, seed=seed_base + 1,
+                constraint_func=pool_cfunc,
+            )
             if etc_factor_dict
             else pd.DataFrame()
         )
