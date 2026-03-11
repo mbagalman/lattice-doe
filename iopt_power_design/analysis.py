@@ -1343,6 +1343,16 @@ def power_curve_by_wp(
         else "sp_only"
     )
 
+    # Compute candidate pool sizes from DesignOptions.candidate_points.
+    _htc_set = set(htc_factors)
+    _etc_factors_wp = [f for f in factors if f not in _htc_set]
+    _n_htc_wp = len(htc_factors)
+    _n_etc_wp = len(_etc_factors_wp)
+    _n_all_wp = max(1, _n_htc_wp + _n_etc_wp)
+    _cand_pts = int(design_opts.candidate_points)
+    _n_wp_cand = max(10, int(_cand_pts * _n_htc_wp / _n_all_wp))
+    _n_sp_cand = max(10, int(_cand_pts * _n_etc_wp / _n_all_wp)) if _n_etc_wp > 0 else 1
+
     rows = []
     for n_wp in n_wp_vals:
         n_wp = int(n_wp)
@@ -1361,6 +1371,8 @@ def power_curve_by_wp(
                 max_iter=design_opts.max_iter,
                 random_state=design_opts.random_state,
                 jitter=design_opts.xtx_jitter,
+                n_wp_cand=_n_wp_cand,
+                n_sp_cand=_n_sp_cand,
             )
             Z_ = build_whole_plot_indicator(n_total, n_wp, subplots_per_wp)
             if isinstance(power_cfg, PowerContrastConfig):

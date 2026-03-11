@@ -1828,6 +1828,117 @@ def _sp8_design_opts():
     return DesignOptions(starts=2, max_iter=5, random_state=7)
 
 
+# ===========================================================================
+# TestCR27CandidateSizing — candidate_points respected in split-plot mode
+# ===========================================================================
+
+class TestCR27CandidateSizing:
+    """CR-27 regression: build_split_plot_design must use candidate_points
+    from DesignOptions rather than the hard-coded defaults (n_wp_cand=30,
+    n_sp_cand=50)."""
+
+    def test_large_candidate_points_runs_without_error(self):
+        """CR-27: candidate_points=500 is forwarded to the WP/SP pools."""
+        opts = DesignOptions(
+            split_plot=SplitPlotOptions(
+                htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0,
+            ),
+            starts=1, max_iter=5, random_state=0,
+            candidate_points=500,
+        )
+        result = i_optimal_powered_design(
+            _SP7_FORMULA, _SP7_FACTORS, _sp7_r2_cfg(), design_opts=opts,
+        )
+        assert "design_df" in result
+
+    def test_small_candidate_points_runs_without_error(self):
+        """CR-27: candidate_points=50 still produces a valid design."""
+        opts = DesignOptions(
+            split_plot=SplitPlotOptions(
+                htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0,
+            ),
+            starts=1, max_iter=5, random_state=1,
+            candidate_points=50,
+        )
+        result = i_optimal_powered_design(
+            _SP7_FORMULA, _SP7_FACTORS, _sp7_r2_cfg(), design_opts=opts,
+        )
+        assert "design_df" in result
+
+    def test_pool_sizes_proportional_to_factor_count(self):
+        """CR-27: n_wp_cand and n_sp_cand are proportional to HTC/ETC factor count.
+
+        With 1 HTC factor and 2 ETC factors (n_all=3), candidate_points=300:
+          n_wp_cand = max(10, int(300 * 1/3)) = 100
+          n_sp_cand = max(10, int(300 * 2/3)) = 200
+        build_split_plot_design is called with these values via the mock.
+        """
+        from unittest.mock import patch, call
+        from iopt_power_design.iopt_search import build_split_plot_design as _bsd
+
+        captured_kwargs: list = []
+
+        def _mock_bsd(*args, **kwargs):
+            captured_kwargs.append(kwargs)
+            return _bsd(*args, **kwargs)
+
+        opts = DesignOptions(
+            split_plot=SplitPlotOptions(
+                htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0,
+            ),
+            starts=1, max_iter=3, random_state=42,
+            candidate_points=300,
+        )
+
+        with patch("iopt_power_design.api.build_split_plot_design", side_effect=_mock_bsd):
+            i_optimal_powered_design(
+                _SP7_FORMULA, _SP7_FACTORS, _sp7_r2_cfg(), design_opts=opts,
+            )
+
+        assert len(captured_kwargs) >= 1
+        kw = captured_kwargs[0]
+        # 1 HTC (A), 2 ETC (B, C) → n_wp_cand=100, n_sp_cand=200
+        assert kw.get("n_wp_cand") == 100, (
+            f"CR-27: n_wp_cand={kw.get('n_wp_cand')!r}, expected 100"
+        )
+        assert kw.get("n_sp_cand") == 200, (
+            f"CR-27: n_sp_cand={kw.get('n_sp_cand')!r}, expected 200"
+        )
+
+    def test_power_curve_by_wp_uses_candidate_points(self):
+        """CR-27: power_curve_by_wp also forwards candidate_points to pool sizes."""
+        from unittest.mock import patch
+        from iopt_power_design.iopt_search import build_split_plot_design as _bsd
+
+        captured_kwargs: list = []
+
+        def _mock_bsd(*args, **kwargs):
+            captured_kwargs.append(kwargs)
+            return _bsd(*args, **kwargs)
+
+        opts = DesignOptions(starts=1, max_iter=3, random_state=0, candidate_points=300)
+
+        # power_curve_by_wp uses a deferred `from .iopt_search import ...`
+        # inside the function body, so we patch at the source module.
+        with patch("iopt_power_design.iopt_search.build_split_plot_design", side_effect=_mock_bsd):
+            power_curve_by_wp(
+                _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
+                subplots_per_wp=3, htc_factors=_SP7_HTC, eta=1.0,
+                wp_range=(2, 3), wp_points=2,
+                design_opts=opts,
+            )
+
+        assert len(captured_kwargs) >= 1
+        kw = captured_kwargs[0]
+        # 1 HTC (A), 2 ETC (B, C), candidate_points=300 → n_wp_cand=100, n_sp_cand=200
+        assert kw.get("n_wp_cand") == 100, (
+            f"CR-27: power_curve_by_wp n_wp_cand={kw.get('n_wp_cand')!r}, expected 100"
+        )
+        assert kw.get("n_sp_cand") == 200, (
+            f"CR-27: power_curve_by_wp n_sp_cand={kw.get('n_sp_cand')!r}, expected 200"
+        )
+
+
 class TestSplitPlotAnalysis:
 
     # ------------------------------------------------------------------ #

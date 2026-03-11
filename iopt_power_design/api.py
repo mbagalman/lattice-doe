@@ -314,6 +314,13 @@ def i_optimal_powered_design(
         etc_factors = [f for f in factors if f not in sp_opts.htc_factors]
         sigma_sp = power_cfg.sigma if mode == "contrast" else 1.0
 
+        # Split candidate budget proportionally across WP and SP strata.
+        _n_htc = len(sp_opts.htc_factors)
+        _n_etc = len(etc_factors)
+        _n_all = max(1, _n_htc + _n_etc)
+        _n_wp_cand = max(10, int(candidate_points * _n_htc / _n_all))
+        _n_sp_cand = max(10, int(candidate_points * _n_etc / _n_all)) if _n_etc > 0 else 1
+
         max_n_wp = power_cfg.max_n // subplots_per_wp
         lo_wp = sp_opts.n_whole_plots   # user's minimum
         hi_wp = max_n_wp + 1           # exclusive sentinel
@@ -345,6 +352,8 @@ def i_optimal_powered_design(
                 random_state=design_opts.random_state,
                 jitter=design_opts.xtx_jitter,
                 constraint_func=design_opts.constraint_func,
+                n_wp_cand=_n_wp_cand,
+                n_sp_cand=_n_sp_cand,
             )
             Z_ = build_whole_plot_indicator(n_total_, n_wp_, subplots_per_wp)
             if mode == "contrast":
