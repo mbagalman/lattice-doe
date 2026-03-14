@@ -24,11 +24,14 @@ from typing import Dict, List, Optional, Union, Literal, Tuple
 import numpy as np
 import pandas as pd
 
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions
+import copy
+
+from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions
+from .config import glm_fisher_weight
 from .candidate import build_candidate, estimate_candidate_size
 from .model_matrix import build_model_matrix
 from .iopt_search import build_i_opt_design, build_i_opt_design_with_idx
-from .power import contrast_power, global_r2_power
+from .power import contrast_power, global_r2_power, glm_contrast_power
 from .diag_metrics import compute_design_metrics
 
 # Optional plotting support
@@ -128,7 +131,13 @@ def power_curve_by_n(
         # Heuristic: start from p+1, go up to where we expect >0.99 power
         min_n = p + 1
         # Rough estimate for max_n (this could be refined)
-        if isinstance(power_cfg, PowerContrastConfig):
+        if isinstance(power_cfg, PowerGLMContrastConfig):
+            # GLM: use effective sigma = 1/sqrt(w) to estimate range
+            w = glm_fisher_weight(power_cfg)
+            sigma_eff = 1.0 / max(np.sqrt(w), 1e-12)
+            effect_magnitude = np.linalg.norm(power_cfg.delta) / sigma_eff
+            max_n = min(int(100 / max(effect_magnitude ** 2, 1e-12)), 500)
+        elif isinstance(power_cfg, PowerContrastConfig):
             # Conservative estimate based on effect size
             effect_magnitude = np.linalg.norm(power_cfg.delta) / power_cfg.sigma
             max_n = min(int(100 / (effect_magnitude ** 2)), 500)
@@ -173,7 +182,10 @@ def power_curve_by_n(
         X, _ = build_model_matrix(formula, design_df)
         
         # Compute power
-        if isinstance(power_cfg, PowerContrastConfig):
+        if isinstance(power_cfg, PowerGLMContrastConfig):
+            _res = glm_contrast_power(power_cfg, X, jitter=design_opts.xtx_jitter)
+            power, lam = _res.power, _res.lam
+        elif isinstance(power_cfg, PowerContrastConfig):
             power, lam = contrast_power(
                 L=power_cfg.L,
                 delta=power_cfg.delta,
@@ -370,14 +382,38 @@ def power_curve_by_effect(
     results = []
     min_detectable = None
     
-    if isinstance(power_cfg, PowerContrastConfig):
+    if isinstance(power_cfg, PowerGLMContrastConfig):
+        # GLM: sweep delta scale multiplier on LP scale (log-odds / log-rate)
+        if effect_range is None:
+            effect_range = (0.1, 2.5)
+
+        effect_multipliers = np.linspace(effect_range[0], effect_range[1], effect_points)
+        base_delta = power_cfg.delta
+
+        for mult in effect_multipliers:
+            scaled_delta = base_delta * float(mult)
+            _tmp = copy.copy(power_cfg)
+            object.__setattr__(_tmp, "delta", scaled_delta)
+            _res = glm_contrast_power(_tmp, X, jitter=design_opts.xtx_jitter)
+
+            results.append({
+                "effect_size": float(mult),
+                "power": float(_res.power),
+                "lambda": float(_res.lam),
+                "actual_delta_norm": float(np.linalg.norm(scaled_delta)),
+            })
+
+            if min_detectable is None and _res.power >= 0.80:
+                min_detectable = float(mult)
+
+    elif isinstance(power_cfg, PowerContrastConfig):
         # Vary delta magnitude
         if effect_range is None:
             effect_range = (0.1, 2.5)  # multipliers on base delta
-        
+
         effect_multipliers = np.linspace(effect_range[0], effect_range[1], effect_points)
         base_delta = power_cfg.delta
-        
+
         for mult in effect_multipliers:
             scaled_delta = base_delta * mult
             power, lam = contrast_power(
@@ -387,17 +423,17 @@ def power_curve_by_effect(
                 sigma=power_cfg.sigma,
                 alpha=power_cfg.alpha,
             )
-            
+
             results.append({
                 'effect_size': float(mult),
                 'power': float(power),
                 'lambda': float(lam),
                 'actual_delta_norm': float(np.linalg.norm(scaled_delta)),
             })
-            
+
             if min_detectable is None and power >= 0.80:
                 min_detectable = float(mult)
-    
+
     else:  # R² mode
         if effect_range is None:
             effect_range = (0.01, 0.5)

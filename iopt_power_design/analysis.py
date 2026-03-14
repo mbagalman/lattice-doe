@@ -33,9 +33,12 @@ import dataclasses
 import numpy as np
 import pandas as pd
 
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions
+import copy
+
+from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions
+from .config import glm_fisher_weight
 from .model_matrix import build_model_matrix
-from .power import contrast_power, global_r2_power, contrast_power_sp, global_r2_power_sp
+from .power import contrast_power, global_r2_power, contrast_power_sp, global_r2_power_sp, glm_contrast_power
 from .split_plot import build_whole_plot_indicator, htc_factor_cols_from_names
 from .power_curves import (
     power_curve_by_n as _power_curve_by_n_impl,
@@ -50,7 +53,7 @@ from .power_curves import (
 def power_curve_by_n(
     formula: str,
     factors: Dict[str, Any],
-    power_cfg: Union[PowerContrastConfig, PowerR2Config],
+    power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     design_opts: Optional[DesignOptions] = None,
     n_range: Optional[tuple] = None,
     n_points: int = 20,
@@ -95,7 +98,7 @@ def power_curve_by_effect(
     formula: str,
     factors: Dict[str, Any],
     n: int,
-    power_cfg: Union[PowerContrastConfig, PowerR2Config],
+    power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     design_opts: Optional[DesignOptions] = None,
     plot: bool = False,
     plot_backend: str = "matplotlib",
@@ -123,7 +126,7 @@ def power_curve_by_effect(
     )
     df = out["data"].copy()
     if "effect_size" in df.columns:
-        if isinstance(power_cfg, PowerContrastConfig):
+        if isinstance(power_cfg, (PowerContrastConfig, PowerGLMContrastConfig)):
             df = df.rename(columns={"effect_size": "effect_scale"})
         else:
             df = df.rename(columns={"effect_size": "r2_target"})
@@ -462,6 +465,84 @@ def power_sensitivity(
         "figure": fig,
         "eta_sweep": _eta_sweep_df,
     }
+
+
+# ---------------------------------------------------------------------------
+# power_curve_by_baseline — GLM-specific: sweep baseline mean/probability
+# ---------------------------------------------------------------------------
+
+def power_curve_by_baseline(
+    formula: str,
+    factors: Dict[str, Any],
+    design_df: pd.DataFrame,
+    cfg: "PowerGLMContrastConfig",
+    baseline_range: Tuple[float, float] = (0.05, 0.95),
+    baseline_points: int = 30,
+    design_opts: Optional["DesignOptions"] = None,
+) -> pd.DataFrame:
+    """Power as a function of GLM baseline event probability or rate.
+
+    Holds the design fixed and sweeps the baseline mean (p₀ for binomial,
+    μ₀ for Poisson), recomputing GLM power at each point.  Useful for
+    sensitivity analysis: "if my true baseline rate differs from my
+    assumption, how does power change?"
+
+    For binomial models, p₀ = 0.5 maximises the Fisher information weight
+    w = p₀(1−p₀), so power peaks near 0.5 and declines toward 0 or 1.
+    For Poisson models, power increases monotonically with μ₀ because
+    w = μ₀.
+
+    Parameters
+    ----------
+    formula : str
+        Patsy formula used when generating *design_df*.
+    factors : dict
+        Factor specifications matching the original design.
+    design_df : DataFrame
+        Fixed design to evaluate (no new search is performed).
+    cfg : PowerGLMContrastConfig
+        GLM power configuration.  ``baseline`` is swept; all other fields
+        are held fixed.
+    baseline_range : tuple of (lo, hi), default (0.05, 0.95)
+        Range of baseline values to sweep.  For binomial, both endpoints
+        must be in (0, 1).  For Poisson, both must be > 0.
+    baseline_points : int, default 30
+        Number of evenly-spaced baseline values.
+    design_opts : DesignOptions, optional
+        Used only for ``xtx_jitter``.  Defaults to ``DesignOptions()``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``baseline``, ``power``, ``lam``, ``family``, ``link``.
+    """
+    if design_opts is None:
+        design_opts = DesignOptions()
+
+    lo, hi = float(baseline_range[0]), float(baseline_range[1])
+    if lo > hi:
+        raise ValueError("baseline_range[0] must be <= baseline_range[1].")
+    if baseline_points < 1:
+        raise ValueError("baseline_points must be >= 1.")
+
+    X, _ = build_model_matrix(formula, design_df)
+    jitter = design_opts.xtx_jitter
+
+    baseline_vals = np.linspace(lo, hi, max(1, baseline_points))
+    rows = []
+    for b in baseline_vals:
+        _tmp = copy.copy(cfg)
+        object.__setattr__(_tmp, "baseline", float(b))
+        res = glm_contrast_power(_tmp, X, jitter=jitter)
+        rows.append({
+            "baseline": float(b),
+            "power": float(res.power),
+            "lam": float(res.lam),
+            "family": cfg.family,
+            "link": cfg.link,
+        })
+
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -1784,6 +1865,7 @@ __all__ = [
     "power_curve_by_effect",
     "generate_power_curves",
     "power_sensitivity",
+    "power_curve_by_baseline",
     "min_detectable_effect",
     "compare_criteria",
     "robustness_report",

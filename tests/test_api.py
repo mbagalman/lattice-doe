@@ -29,6 +29,7 @@ from iopt_power_design import (
     robustness_report,
     power_curve_by_n_multiresponse,
     multiresponse_sensitivity,
+    power_curve_by_baseline,
 )
 from iopt_power_design.contrasts import contrast_from_scenarios
 
@@ -2485,3 +2486,239 @@ class TestGLMDesignAPI:
             _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
         )
         assert set(["design_df", "buckets_df", "report"]).issubset(result.keys())
+
+
+# ---------------------------------------------------------------------------
+# GL-4 — GLM Power Curves and Baseline Sweep
+# ---------------------------------------------------------------------------
+
+_PC_FORMULA = "~ 1 + A + B"
+_PC_FACTORS = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+_PC_L = np.array([[0.0, 1.0, 0.0]])
+_PC_OPTS = DesignOptions(starts=1, random_state=0, max_iter=5, candidate_points=50)
+
+
+def _pc_binomial_cfg(**kwargs) -> PowerGLMContrastConfig:
+    defaults = dict(
+        L=_PC_L, delta=np.array([0.5]), baseline=0.4,
+        family="binomial", alpha=0.05, power=0.80, max_n=60,
+    )
+    defaults.update(kwargs)
+    return PowerGLMContrastConfig(**defaults)
+
+
+def _pc_poisson_cfg(**kwargs) -> PowerGLMContrastConfig:
+    defaults = dict(
+        L=_PC_L, delta=np.array([0.4]), baseline=2.0,
+        family="poisson", alpha=0.05, power=0.80, max_n=60,
+    )
+    defaults.update(kwargs)
+    return PowerGLMContrastConfig(**defaults)
+
+
+def _make_design_df(cfg: PowerGLMContrastConfig, n: int = 25) -> "pd.DataFrame":
+    """Build a small I-optimal design df for baseline-sweep tests."""
+    result = i_optimal_powered_design(
+        _PC_FORMULA, _PC_FACTORS,
+        PowerGLMContrastConfig(
+            L=cfg.L, delta=cfg.delta, baseline=cfg.baseline,
+            family=cfg.family, alpha=cfg.alpha, power=cfg.power, max_n=n, max_iter=4,
+        ),
+        _PC_OPTS,
+    )
+    return result["design_df"]
+
+
+@pytest.mark.slow
+class TestGLMPowerCurves:
+    """GL-4: GLM power curves and baseline sweep."""
+
+    # --- power_curve_by_n with GLM ---
+
+    def test_power_curve_by_n_glm_returns_dataframe(self):
+        df = power_curve_by_n(
+            _PC_FORMULA, _PC_FACTORS, _pc_binomial_cfg(),
+            design_opts=_PC_OPTS, n_range=(5, 40), n_points=5,
+        )
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) > 0
+
+    def test_power_curve_by_n_glm_power_increases_with_n(self):
+        df = power_curve_by_n(
+            _PC_FORMULA, _PC_FACTORS, _pc_binomial_cfg(),
+            design_opts=_PC_OPTS, n_range=(5, 48), n_points=6,
+        )
+        # Power should be (roughly) non-decreasing overall
+        powers = list(df["power"])
+        assert powers[-1] >= powers[0]
+
+    def test_power_curve_by_n_glm_has_n_and_power_columns(self):
+        df = power_curve_by_n(
+            _PC_FORMULA, _PC_FACTORS, _pc_binomial_cfg(),
+            design_opts=_PC_OPTS, n_range=(5, 30), n_points=4,
+        )
+        assert "n" in df.columns
+        assert "power" in df.columns
+
+    def test_power_curve_by_n_glm_power_in_unit_interval(self):
+        df = power_curve_by_n(
+            _PC_FORMULA, _PC_FACTORS, _pc_binomial_cfg(),
+            design_opts=_PC_OPTS, n_range=(5, 30), n_points=4,
+        )
+        assert (df["power"].between(0.0, 1.0)).all()
+
+    # --- power_curve_by_effect with GLM ---
+
+    def test_power_curve_by_effect_glm_returns_dataframe(self):
+        df = power_curve_by_effect(
+            _PC_FORMULA, _PC_FACTORS, 30, _pc_binomial_cfg(),
+            design_opts=_PC_OPTS,
+        )
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) > 0
+
+    def test_power_curve_by_effect_glm_power_increases_with_delta(self):
+        df = power_curve_by_effect(
+            _PC_FORMULA, _PC_FACTORS, 30, _pc_binomial_cfg(),
+            design_opts=_PC_OPTS,
+        )
+        assert "effect_scale" in df.columns
+        assert df["power"].iloc[-1] >= df["power"].iloc[0]
+
+    # --- power_curve_by_baseline ---
+
+    def test_by_baseline_returns_dataframe(self):
+        design_df = _make_design_df(_pc_binomial_cfg())
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(0.1, 0.9), baseline_points=10,
+        )
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 10
+
+    def test_by_baseline_has_correct_columns(self):
+        design_df = _make_design_df(_pc_binomial_cfg())
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(0.1, 0.9), baseline_points=5,
+        )
+        for col in ("baseline", "power", "lam", "family", "link"):
+            assert col in df.columns
+
+    def test_by_baseline_power_peaks_near_half_for_binomial(self):
+        """p0=0.5 maximises Fisher weight for binomial → peak power near 0.5."""
+        design_df = _make_design_df(_pc_binomial_cfg())
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(0.05, 0.95), baseline_points=19,
+        )
+        peak_idx = df["power"].idxmax()
+        peak_baseline = float(df.loc[peak_idx, "baseline"])
+        assert 0.3 <= peak_baseline <= 0.7
+
+    def test_by_baseline_power_decreases_toward_extremes_binomial(self):
+        """Power at p0=0.5 should exceed power at p0=0.1 for binomial."""
+        design_df = _make_design_df(_pc_binomial_cfg())
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(0.1, 0.9), baseline_points=17,
+        )
+        mid_power = df.loc[(df["baseline"] - 0.5).abs().idxmin(), "power"]
+        extreme_power = df.loc[df["baseline"].idxmin(), "power"]
+        assert mid_power >= extreme_power
+
+    def test_by_baseline_poisson_power_increases_with_baseline(self):
+        """Higher μ₀ → more Fisher info → higher power for Poisson."""
+        design_df = _make_design_df(_pc_poisson_cfg())
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_poisson_cfg(),
+            baseline_range=(0.5, 5.0), baseline_points=10,
+        )
+        assert df["power"].iloc[-1] >= df["power"].iloc[0]
+
+    def test_by_baseline_uses_provided_design(self):
+        """power_curve_by_baseline does not re-optimize — uses fixed design_df."""
+        design_df = _make_design_df(_pc_binomial_cfg())
+        n_rows = len(design_df)
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(0.2, 0.8), baseline_points=5,
+        )
+        assert len(design_df) == n_rows
+        assert len(df) == 5
+
+    def test_by_baseline_range_respected(self):
+        design_df = _make_design_df(_pc_binomial_cfg())
+        lo, hi = 0.15, 0.85
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(lo, hi), baseline_points=8,
+        )
+        assert float(df["baseline"].min()) == pytest.approx(lo, abs=1e-6)
+        assert float(df["baseline"].max()) == pytest.approx(hi, abs=1e-6)
+
+    def test_by_baseline_family_column_matches_config(self):
+        design_df = _make_design_df(_pc_binomial_cfg())
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(0.2, 0.8), baseline_points=5,
+        )
+        assert (df["family"] == "binomial").all()
+
+    def test_by_baseline_link_column_matches_config(self):
+        design_df = _make_design_df(_pc_binomial_cfg())
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(0.2, 0.8), baseline_points=5,
+        )
+        assert (df["link"] == "logit").all()
+
+    def test_by_baseline_single_point(self):
+        design_df = _make_design_df(_pc_binomial_cfg())
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(0.5, 0.5), baseline_points=1,
+        )
+        assert len(df) == 1
+        assert 0.0 <= float(df["power"].iloc[0]) <= 1.0
+
+    def test_by_baseline_power_all_in_unit_interval(self):
+        design_df = _make_design_df(_pc_binomial_cfg())
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(0.05, 0.95), baseline_points=12,
+        )
+        assert (df["power"].between(0.0, 1.0)).all()
+
+    def test_by_baseline_lam_nonneg(self):
+        design_df = _make_design_df(_pc_binomial_cfg())
+        df = power_curve_by_baseline(
+            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
+            baseline_range=(0.1, 0.9), baseline_points=8,
+        )
+        assert (df["lam"] >= 0.0).all()
+
+    # --- Regression guards ---
+
+    def test_ols_power_curve_by_n_unchanged(self):
+        """OLS power_curve_by_n still returns a DataFrame with n and power."""
+        cfg = PowerContrastConfig(
+            L=_PC_L, delta=np.array([0.5]), sigma=1.0,
+            alpha=0.05, power=0.80, max_n=60,
+        )
+        df = power_curve_by_n(
+            _PC_FORMULA, _PC_FACTORS, cfg,
+            design_opts=_PC_OPTS, n_range=(5, 30), n_points=4,
+        )
+        assert "n" in df.columns and "power" in df.columns
+
+    def test_ols_power_curve_by_effect_unchanged(self):
+        """OLS power_curve_by_effect still returns DataFrame with effect_scale."""
+        cfg = PowerContrastConfig(
+            L=_PC_L, delta=np.array([0.5]), sigma=1.0,
+            alpha=0.05, power=0.80, max_n=60,
+        )
+        df = power_curve_by_effect(
+            _PC_FORMULA, _PC_FACTORS, 20, cfg, design_opts=_PC_OPTS,
+        )
+        assert "effect_scale" in df.columns
