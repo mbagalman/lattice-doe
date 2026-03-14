@@ -2722,3 +2722,222 @@ class TestGLMPowerCurves:
             _PC_FORMULA, _PC_FACTORS, 20, cfg, design_opts=_PC_OPTS,
         )
         assert "effect_scale" in df.columns
+
+
+# ---------------------------------------------------------------------------
+# GL-5 — GLM min_detectable_effect and compare_criteria
+# ---------------------------------------------------------------------------
+
+_GL5_FORMULA = "~ 1 + A + B"
+_GL5_FACTORS = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+_GL5_L = np.array([[0.0, 1.0, 0.0]])
+_GL5_OPTS = DesignOptions(starts=1, random_state=0, max_iter=5, candidate_points=50)
+
+
+def _gl5_bin_cfg(**kwargs) -> PowerGLMContrastConfig:
+    defaults = dict(
+        L=_GL5_L, delta=np.array([0.5]), baseline=0.4,
+        family="binomial", alpha=0.05, power=0.80, max_n=50, max_iter=8,
+    )
+    defaults.update(kwargs)
+    return PowerGLMContrastConfig(**defaults)
+
+
+def _gl5_design(cfg: PowerGLMContrastConfig) -> "pd.DataFrame":
+    """Build a small design for MDE tests."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = i_optimal_powered_design(_GL5_FORMULA, _GL5_FACTORS, cfg, _GL5_OPTS)
+    return res["design_df"]
+
+
+@pytest.mark.slow
+class TestGLMMDE:
+    """GL-5: GLM min_detectable_effect and compare_criteria."""
+
+    # --- min_detectable_effect GLM ---
+
+    def test_mde_glm_returns_dict(self):
+        design_df = _gl5_design(_gl5_bin_cfg())
+        result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg())
+        assert isinstance(result, dict)
+
+    def test_mde_glm_has_min_delta_lp_key(self):
+        design_df = _gl5_design(_gl5_bin_cfg())
+        result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg())
+        assert "min_delta_lp" in result
+
+    def test_mde_glm_mode_is_glm(self):
+        design_df = _gl5_design(_gl5_bin_cfg())
+        result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg())
+        assert result["mode"] == "glm"
+
+    def test_mde_glm_has_family_and_baseline(self):
+        design_df = _gl5_design(_gl5_bin_cfg())
+        result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg())
+        assert result["family"] == "binomial"
+        assert result["baseline"] == pytest.approx(0.4)
+
+    def test_mde_glm_achieved_power_near_target(self):
+        design_df = _gl5_design(_gl5_bin_cfg())
+        target = 0.70
+        result = min_detectable_effect(
+            design_df, _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(), target_power=target
+        )
+        if result["mde"] != float("inf"):
+            assert abs(result["achieved_power"] - target) < 0.05
+
+    def test_mde_glm_larger_n_smaller_mde(self):
+        """A larger design should require smaller delta to achieve the same power."""
+        small_cfg = _gl5_bin_cfg(max_n=15, max_iter=4)
+        large_cfg = _gl5_bin_cfg(max_n=40, max_iter=4)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            small_res = i_optimal_powered_design(_GL5_FORMULA, _GL5_FACTORS, small_cfg, _GL5_OPTS)
+            large_res = i_optimal_powered_design(_GL5_FORMULA, _GL5_FACTORS, large_cfg, _GL5_OPTS)
+        mde_small = min_detectable_effect(
+            small_res["design_df"], _GL5_FORMULA, _GL5_FACTORS,
+            _gl5_bin_cfg(), target_power=0.70,
+        )
+        mde_large = min_detectable_effect(
+            large_res["design_df"], _GL5_FORMULA, _GL5_FACTORS,
+            _gl5_bin_cfg(), target_power=0.70,
+        )
+        # Larger design → need smaller (or equal) delta to hit power target
+        assert mde_large["mde"] <= mde_small["mde"] + 0.5  # allow noise from random starts
+
+    def test_mde_glm_poisson(self):
+        cfg = PowerGLMContrastConfig(
+            L=_GL5_L, delta=np.array([0.4]), baseline=2.0,
+            family="poisson", alpha=0.05, power=0.80, max_n=50, max_iter=8,
+        )
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            design_df = i_optimal_powered_design(_GL5_FORMULA, _GL5_FACTORS, cfg, _GL5_OPTS)["design_df"]
+        result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, cfg)
+        assert result["mode"] == "glm"
+        assert result["family"] == "poisson"
+        assert "min_delta_lp" in result
+
+    def test_mde_glm_min_delta_lp_equals_mde_times_delta_norm(self):
+        design_df = _gl5_design(_gl5_bin_cfg())
+        cfg = _gl5_bin_cfg()
+        result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, cfg)
+        if result["mde"] != float("inf"):
+            expected_lp = result["mde"] * float(np.linalg.norm(cfg.delta))
+            assert result["min_delta_lp"] == pytest.approx(expected_lp, rel=1e-6)
+
+    def test_mde_glm_n_matches_design(self):
+        design_df = _gl5_design(_gl5_bin_cfg())
+        result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg())
+        assert result["n"] == len(design_df)
+
+    # --- compare_criteria GLM ---
+
+    def test_compare_criteria_glm_runs(self):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = compare_criteria(
+                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS, criteria=["I", "D"],
+            )
+        assert "summary" in result
+
+    def test_compare_criteria_glm_returns_dataframe(self):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = compare_criteria(
+                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS, criteria=["I", "D"],
+            )
+        assert isinstance(result["summary"], pd.DataFrame)
+
+    def test_compare_criteria_glm_has_two_rows(self):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = compare_criteria(
+                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS, criteria=["I", "D"],
+            )
+        assert len(result["summary"]) == 2
+
+    def test_compare_criteria_glm_has_family_column(self):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = compare_criteria(
+                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS, criteria=["I", "D"],
+            )
+        assert "family" in result["summary"].columns
+        assert (result["summary"]["family"] == "binomial").all()
+
+    def test_compare_criteria_glm_has_baseline_column(self):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = compare_criteria(
+                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS, criteria=["I", "D"],
+            )
+        assert "baseline" in result["summary"].columns
+
+    def test_compare_criteria_glm_has_power_column(self):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = compare_criteria(
+                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS, criteria=["I", "D"],
+            )
+        assert "achieved_power" in result["summary"].columns
+        assert (result["summary"]["achieved_power"].between(0.0, 1.0)).all()
+
+    def test_compare_criteria_glm_no_sigma_column(self):
+        """GLM summary should not have a sigma column."""
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = compare_criteria(
+                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS, criteria=["I", "D"],
+            )
+        assert "sigma" not in result["summary"].columns
+
+    # --- Regression guards ---
+
+    def test_mde_ols_unchanged(self):
+        """OLS min_detectable_effect still returns mode='contrast'."""
+        ols_cfg = PowerContrastConfig(
+            L=_GL5_L, delta=np.array([0.5]), sigma=1.0,
+            alpha=0.05, power=0.80, max_n=50,
+        )
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            design_df = i_optimal_powered_design(_GL5_FORMULA, _GL5_FACTORS, ols_cfg, _GL5_OPTS)["design_df"]
+        result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, ols_cfg)
+        assert result["mode"] == "contrast"
+        assert "mde" in result
+
+    def test_compare_criteria_ols_unchanged(self):
+        """OLS compare_criteria still runs and returns criterion column."""
+        ols_cfg = PowerContrastConfig(
+            L=_GL5_L, delta=np.array([0.5]), sigma=1.0,
+            alpha=0.05, power=0.80, max_n=50, max_iter=8,
+        )
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = compare_criteria(
+                _GL5_FORMULA, _GL5_FACTORS, ols_cfg,
+                design_opts=_GL5_OPTS, criteria=["I", "D"],
+            )
+        assert "criterion" in result["summary"].columns
+        assert "family" not in result["summary"].columns

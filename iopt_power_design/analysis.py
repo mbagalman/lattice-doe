@@ -553,7 +553,7 @@ def min_detectable_effect(
     design_df: pd.DataFrame,
     formula: str,
     factors: Dict[str, Any],
-    power_cfg: Union[PowerContrastConfig, PowerR2Config],
+    power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     target_power: float = 0.80,
     design_opts: Optional[DesignOptions] = None,
     tol: float = 1e-4,
@@ -658,6 +658,52 @@ def min_detectable_effect(
             "mode": "contrast",
         }
 
+    elif isinstance(power_cfg, PowerGLMContrastConfig):
+        # GLM: bisect over a multiplicative scale on delta (LP scale).
+        base_delta = np.asarray(power_cfg.delta)
+
+        def _pwr_glm(scale: float) -> float:
+            _tmp = copy.copy(power_cfg)
+            object.__setattr__(_tmp, "delta", base_delta * scale)
+            res = glm_contrast_power(_tmp, X, jitter=jitter)
+            return float(res.power)
+
+        lo_s, hi_s = 0.0, 20.0
+        for _ in range(20):
+            if _pwr_glm(hi_s) >= target_power:
+                break
+            hi_s *= 2.0
+        else:
+            return {
+                "mde": float("inf"),
+                "min_delta_lp": float("inf"),
+                "achieved_power": _pwr_glm(hi_s),
+                "n": n,
+                "mode": "glm",
+                "family": power_cfg.family,
+                "baseline": float(power_cfg.baseline),
+            }
+
+        for _ in range(max_iter):
+            mid = (lo_s + hi_s) / 2.0
+            if _pwr_glm(mid) >= target_power:
+                hi_s = mid
+            else:
+                lo_s = mid
+            if hi_s - lo_s < tol:
+                break
+
+        mde = (lo_s + hi_s) / 2.0
+        return {
+            "mde": float(mde),
+            "min_delta_lp": float(mde * float(np.linalg.norm(base_delta))),
+            "achieved_power": float(_pwr_glm(mde)),
+            "n": n,
+            "mode": "glm",
+            "family": power_cfg.family,
+            "baseline": float(power_cfg.baseline),
+        }
+
     else:  # PowerR2Config
         # Bisect over r2_target in (0, 1).
         # Higher R² → higher power (monotone).
@@ -712,7 +758,7 @@ def min_detectable_effect(
 def compare_criteria(
     formula: str,
     factors: Dict[str, Any],
-    power_cfg: Union[PowerContrastConfig, PowerR2Config],
+    power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     design_opts: Optional[DesignOptions] = None,
     criteria: Optional[List[str]] = None,
     plot: bool = False,
@@ -817,14 +863,18 @@ def compare_criteria(
         all_results[criterion] = res
         rpt = res["report"]
         diag = rpt.get("diagnostics") or {}
-        rows.append({
+        row: Dict[str, Any] = {
             "criterion": criterion,
             "n": int(rpt["n"]),
             "achieved_power": float(rpt["achieved_power"]),
             "elapsed_sec": float(rpt.get("elapsed_sec", float("nan"))),
             "condition_number": float(diag.get("condition_number", float("nan"))),
             "d_efficiency": float(diag.get("d_efficiency", float("nan"))),
-        })
+        }
+        if isinstance(power_cfg, PowerGLMContrastConfig):
+            row["family"] = power_cfg.family
+            row["baseline"] = float(power_cfg.baseline)
+        rows.append(row)
 
     summary = pd.DataFrame(rows)
 
