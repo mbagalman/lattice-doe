@@ -2447,7 +2447,7 @@ class TestSplitPlotSheets:
         """Parsing settings with blank htc_factors produces no split_plot."""
         from iopt_power_design.sheets import _parse_config_sheet
         rows = _sp_sheet_rows({"htc_factors": "", "n_whole_plots": "4"})
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_ws_sp(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_ws_sp(rows))
         assert design_opts.split_plot is None
 
     def test_design_opts_sp_activated_when_valid(self):
@@ -2460,7 +2460,7 @@ class TestSplitPlotSheets:
             "subplots_per_wp": "3",
             "df_method": "conservative",
         })
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_ws_sp(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_ws_sp(rows))
         assert design_opts.split_plot is not None
         sp = design_opts.split_plot
         assert sp.htc_factors == ["x1"]
@@ -2473,7 +2473,7 @@ class TestSplitPlotSheets:
         """n_whole_plots < 2 does not activate split-plot even with htc_factors set."""
         from iopt_power_design.sheets import _parse_config_sheet
         rows = _sp_sheet_rows({"htc_factors": "x1", "n_whole_plots": "1"})
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_ws_sp(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_ws_sp(rows))
         assert design_opts.split_plot is None
 
     def test_design_opts_subplots_per_wp_zero_maps_to_none(self):
@@ -2484,7 +2484,7 @@ class TestSplitPlotSheets:
             "n_whole_plots": "3",
             "subplots_per_wp": "0",
         })
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_ws_sp(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_ws_sp(rows))
         assert design_opts.split_plot is not None
         assert design_opts.split_plot.subplots_per_wp is None
 
@@ -2532,7 +2532,7 @@ class TestSplitPlotExcel:
 
         dest = create_excel_template(str(tmp_path / "tpl.xlsx"), example="r2")
         wb = openpyxl.load_workbook(dest)
-        _, _, _, design_opts = _read_config_sheet(wb["Config"])
+        _, _, _, design_opts, _ = _read_config_sheet(wb["Config"])
         assert design_opts.split_plot is None
 
     def test_read_config_sheet_sp_activated(self, tmp_path):
@@ -2562,7 +2562,7 @@ class TestSplitPlotExcel:
 
         wb.save(dest)
         wb2 = openpyxl.load_workbook(dest)
-        _, _, _, design_opts = _read_config_sheet(wb2["Config"])
+        _, _, _, design_opts, _ = _read_config_sheet(wb2["Config"])
         assert design_opts.split_plot is not None
         sp = design_opts.split_plot
         assert sp.htc_factors == ["A"]
