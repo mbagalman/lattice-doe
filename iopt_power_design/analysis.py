@@ -1411,6 +1411,374 @@ def power_curve_by_wp(
     return pd.DataFrame(rows)
 
 
+# ---------------------------------------------------------------------------
+# MR-7: Multi-response analysis functions
+# ---------------------------------------------------------------------------
+
+def power_curve_by_n_multiresponse(
+    formula: str,
+    factors: Dict[str, Any],
+    multi_cfg: "MultiResponseOptions",
+    n_range: Tuple[int, int] = (5, 100),
+    n_points: int = 20,
+    design_opts: Optional[DesignOptions] = None,
+    plot: bool = False,
+    plot_backend: Literal["matplotlib", "plotly"] = "matplotlib",
+) -> pd.DataFrame:
+    """Power vs n curve for each response plus the combined power.
+
+    Sweeps n from ``n_range[0]`` to ``n_range[1]`` at ``n_points`` evenly
+    spaced values.  At each n, builds an I-optimal design (shared or compound
+    criterion) and evaluates per-response powers plus the combined power.
+
+    Parameters
+    ----------
+    formula : str
+        Global Patsy formula (right-hand side).
+    factors : dict
+        Factor definitions.
+    multi_cfg : MultiResponseOptions
+        Per-response power configs and combination rule.
+    n_range : tuple of (int, int), default (5, 100)
+        Inclusive sweep bounds ``(n_min, n_max)``.
+    n_points : int, default 20
+        Number of evenly-spaced n values to evaluate.  Output has exactly
+        this many rows (ties in the integer grid are kept as-is).
+    design_opts : DesignOptions or None
+        Design search options.  Defaults to ``DesignOptions()``.
+    plot : bool, default False
+        If True, produce a power-vs-n line chart (one line per response
+        plus a dashed combined-power line).
+    plot_backend : {"matplotlib", "plotly"}, default "matplotlib"
+        Plotting backend.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``n``, ``combined_power``, and ``<name>_power`` for each
+        response in ``multi_cfg.responses``.  Total: ``len(responses) + 2``
+        columns; exactly ``n_points`` rows.
+    """
+    # Deferred imports keep module load fast and avoid circular refs.
+    from .candidate import build_candidate, estimate_candidate_size
+    from .iopt_search import build_i_opt_design_with_idx, build_compound_design
+    from .utils import validate_factors
+    from .config import MultiResponseOptions as _MROpt
+    from .power import eval_response_power, combine_powers as _combine
+
+    if design_opts is None:
+        design_opts = DesignOptions()
+
+    validate_factors(factors)
+
+    n_min, n_max = int(n_range[0]), int(n_range[1])
+    if n_min < 1:
+        raise ValueError(f"n_range[0] must be >= 1, got {n_min}.")
+    if n_min >= n_max:
+        raise ValueError("n_range[0] must be < n_range[1].")
+    if n_points < 1:
+        raise ValueError("n_points must be >= 1.")
+
+    # --- Candidate set (built once) ---
+    if design_opts.auto_candidate:
+        candidate_points = estimate_candidate_size(
+            formula=formula, factors=factors,
+            cand_min=design_opts.cand_min, cand_max=design_opts.cand_max,
+            cat_cells_cap=design_opts.cat_cells_cap,
+            per_cell_alpha=design_opts.per_cell_alpha,
+            per_cell_min=design_opts.per_cell_min,
+            per_cell_max=design_opts.per_cell_max,
+            seed=design_opts.random_state,
+        )
+    else:
+        candidate_points = int(design_opts.candidate_points)
+
+    cand = build_candidate(
+        factors=factors, candidate_points=candidate_points,
+        seed=design_opts.random_state,
+        constraint_func=design_opts.constraint_func,
+        cat_cells_cap=design_opts.cat_cells_cap,
+    )
+
+    # Detect compound path (any response formula differs from global).
+    _compound = any(
+        r.formula is not None and r.formula != formula
+        for r in multi_cfg.responses
+    )
+
+    rule = multi_cfg.power_combination
+    weights = [r.weight for r in multi_cfg.responses]
+    resp_names = [r.name for r in multi_cfg.responses]
+
+    if _compound:
+        candidates_list: List[np.ndarray] = []
+        p_names_list: List[List[str]] = []
+        for r in multi_cfg.responses:
+            f_k = r.formula if r.formula is not None else formula
+            X_cand_k, p_names_k = build_model_matrix(f_k, cand)
+            candidates_list.append(X_cand_k)
+            p_names_list.append(list(p_names_k))
+        n_cand = candidates_list[0].shape[0]
+    else:
+        X_cand, p_names_global = build_model_matrix(formula, cand)
+        n_cand = X_cand.shape[0]
+
+    _search_kwargs: Dict[str, Any] = dict(
+        cand=cand,
+        formula=formula,
+        criterion=design_opts.criterion,
+        n_start=design_opts.starts,
+        algo=design_opts.algo,
+        max_iter=design_opts.max_iter,
+        random_state=design_opts.random_state,
+        workers=design_opts.workers,
+        parallel_seed_stride=design_opts.parallel_seed_stride,
+        jitter=design_opts.xtx_jitter,
+        preallocate_categorical=design_opts.preallocate_categorical,
+        alloc_min_per_cell=design_opts.alloc_min_per_cell,
+        alloc_max_per_cell=design_opts.alloc_max_per_cell,
+        alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
+        alloc_wynn_tol=design_opts.alloc_wynn_tol,
+        cat_cells_cap=design_opts.cat_cells_cap,
+    )
+
+    # n sweep: exactly n_points values (may include integer duplicates for small ranges)
+    n_vals: List[int] = np.round(np.linspace(n_min, n_max, n_points)).astype(int).tolist()
+
+    rows: List[Dict[str, Any]] = []
+    for n_ in n_vals:
+        n_safe = min(int(n_), n_cand)
+        try:
+            if _compound:
+                idx_ = build_compound_design(
+                    candidates_list, weights, n_safe,
+                    criterion=design_opts.criterion,
+                    n_start=design_opts.starts,
+                    max_iter=design_opts.max_iter,
+                    random_state=design_opts.random_state,
+                    jitter=design_opts.xtx_jitter,
+                )
+                per_r_ = [
+                    eval_response_power(r_k, X_cand_k[idx_], p_names_k,
+                                        jitter=design_opts.xtx_jitter)
+                    for r_k, X_cand_k, p_names_k in zip(
+                        multi_cfg.responses, candidates_list, p_names_list
+                    )
+                ]
+            else:
+                _, idx_, _ = build_i_opt_design_with_idx(n=n_safe, **_search_kwargs)
+                X_ = X_cand[idx_]
+                per_r_ = [
+                    eval_response_power(r, X_, p_names_global,
+                                        jitter=design_opts.xtx_jitter)
+                    for r in multi_cfg.responses
+                ]
+            combined_ = _combine([d["power"] for d in per_r_], weights, rule)
+            row: Dict[str, Any] = {"n": int(n_), "combined_power": float(combined_)}
+            for rd in per_r_:
+                row[f"{rd['name']}_power"] = float(rd["power"])
+        except Exception:
+            row = {"n": int(n_), "combined_power": float("nan")}
+            for name in resp_names:
+                row[f"{name}_power"] = float("nan")
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+
+    if plot:
+        if plot_backend == "plotly":
+            try:
+                import plotly.graph_objects as go  # type: ignore[import]
+                fig = go.Figure()
+                for name in resp_names:
+                    col = f"{name}_power"
+                    if col in df.columns:
+                        fig.add_trace(go.Scatter(
+                            x=df["n"], y=df[col], mode="lines", name=name,
+                        ))
+                fig.add_trace(go.Scatter(
+                    x=df["n"], y=df["combined_power"], mode="lines",
+                    name="combined", line=dict(dash="dash"),
+                ))
+                fig.update_layout(
+                    xaxis_title="n",
+                    yaxis_title="Power",
+                    title="Multi-Response Power vs n",
+                )
+            except ImportError:
+                pass
+        else:
+            try:
+                import matplotlib.pyplot as plt  # type: ignore[import]
+                fig_mr, ax = plt.subplots(figsize=(8, 5))
+                for name in resp_names:
+                    col = f"{name}_power"
+                    if col in df.columns:
+                        ax.plot(df["n"], df[col], label=name)
+                ax.plot(df["n"], df["combined_power"], "--", label="combined", linewidth=2)
+                ax.set_xlabel("n (sample size)")
+                ax.set_ylabel("Statistical Power")
+                ax.set_ylim([0, 1.05])
+                ax.set_title("Multi-Response Power vs n")
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+            except ImportError:
+                pass
+
+    return df
+
+
+def multiresponse_sensitivity(
+    formula: str,
+    factors: Dict[str, Any],
+    multi_cfg: "MultiResponseOptions",
+    fixed_n: int,
+    sigma_range: Tuple[float, float] = (0.5, 3.0),
+    sigma_points: int = 20,
+    design_opts: Optional[DesignOptions] = None,
+) -> pd.DataFrame:
+    """Sigma sensitivity for a multi-response design at fixed n.
+
+    Builds a single I-optimal design at ``fixed_n`` runs, then sweeps a
+    common sigma scale factor across ``sigma_range``.  Each response's
+    ``sigma`` is multiplied by the scale factor at every point.
+
+    Only valid for contrast-mode responses (``PowerContrastConfig``).
+
+    Parameters
+    ----------
+    formula : str
+        Global Patsy formula (right-hand side).
+    factors : dict
+        Factor definitions.
+    multi_cfg : MultiResponseOptions
+        Per-response power configs. All must be ``PowerContrastConfig``.
+    fixed_n : int
+        Number of runs; one design is built at this n for all sweep points.
+    sigma_range : tuple of (lo, hi), default (0.5, 3.0)
+        Scale-factor range.  Each response's sigma is multiplied by the
+        scale factor; must satisfy 0 < lo < hi.
+    sigma_points : int, default 20
+        Number of evenly-spaced scale values; must be >= 2.
+    design_opts : DesignOptions or None
+        Design search options.  Defaults to ``DesignOptions()``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``sigma_scale``, ``combined_power``, and ``<name>_power``
+        for each response.  Power decreases monotonically as sigma_scale
+        increases (larger sigma → smaller noncentrality → lower power).
+
+    Raises
+    ------
+    TypeError
+        If any response uses ``PowerR2Config``; sigma scaling is undefined
+        for R²-mode responses.
+    """
+    from .candidate import build_candidate, estimate_candidate_size
+    from .iopt_search import build_i_opt_design_with_idx
+    from .utils import validate_factors
+    from .config import PowerR2Config as _PowerR2Config
+    from .power import combine_powers as _combine
+
+    if design_opts is None:
+        design_opts = DesignOptions()
+
+    for r in multi_cfg.responses:
+        if isinstance(r.power_cfg, _PowerR2Config):
+            raise TypeError(
+                f"multiresponse_sensitivity only supports PowerContrastConfig responses; "
+                f"response '{r.name}' uses PowerR2Config. "
+                "Sigma scaling is undefined for R²-mode responses."
+            )
+
+    validate_factors(factors)
+
+    if sigma_range[0] <= 0 or sigma_range[1] <= 0:
+        raise ValueError("sigma_range values must be > 0.")
+    if sigma_range[0] >= sigma_range[1]:
+        raise ValueError("sigma_range[0] must be < sigma_range[1].")
+    if sigma_points < 2:
+        raise ValueError("sigma_points must be >= 2.")
+    if fixed_n < 1:
+        raise ValueError("fixed_n must be >= 1.")
+
+    if design_opts.auto_candidate:
+        candidate_points = estimate_candidate_size(
+            formula=formula, factors=factors,
+            cand_min=design_opts.cand_min, cand_max=design_opts.cand_max,
+            cat_cells_cap=design_opts.cat_cells_cap,
+            per_cell_alpha=design_opts.per_cell_alpha,
+            per_cell_min=design_opts.per_cell_min,
+            per_cell_max=design_opts.per_cell_max,
+            seed=design_opts.random_state,
+        )
+    else:
+        candidate_points = int(design_opts.candidate_points)
+
+    cand = build_candidate(
+        factors=factors, candidate_points=candidate_points,
+        seed=design_opts.random_state,
+        constraint_func=design_opts.constraint_func,
+        cat_cells_cap=design_opts.cat_cells_cap,
+    )
+    X_cand, p_names_global = build_model_matrix(formula, cand)
+
+    n_safe = min(fixed_n, X_cand.shape[0])
+    _, idx_, _ = build_i_opt_design_with_idx(
+        n=n_safe,
+        cand=cand,
+        formula=formula,
+        criterion=design_opts.criterion,
+        n_start=design_opts.starts,
+        algo=design_opts.algo,
+        max_iter=design_opts.max_iter,
+        random_state=design_opts.random_state,
+        workers=design_opts.workers,
+        parallel_seed_stride=design_opts.parallel_seed_stride,
+        jitter=design_opts.xtx_jitter,
+        preallocate_categorical=design_opts.preallocate_categorical,
+        alloc_min_per_cell=design_opts.alloc_min_per_cell,
+        alloc_max_per_cell=design_opts.alloc_max_per_cell,
+        alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
+        alloc_wynn_tol=design_opts.alloc_wynn_tol,
+        cat_cells_cap=design_opts.cat_cells_cap,
+    )
+    X = X_cand[idx_]
+
+    rule = multi_cfg.power_combination
+    weights = [r.weight for r in multi_cfg.responses]
+    scale_vals = np.linspace(sigma_range[0], sigma_range[1], sigma_points).tolist()
+
+    rows: List[Dict[str, Any]] = []
+    for scale in scale_vals:
+        per_r_: List[Dict[str, Any]] = []
+        for r in multi_cfg.responses:
+            cfg = r.power_cfg  # PowerContrastConfig guaranteed
+            scaled_sigma = float(cfg.sigma) * float(scale)
+            pwr, lam = contrast_power(
+                L=cfg.L,
+                delta=cfg.delta,
+                X=X,
+                sigma=scaled_sigma,
+                alpha=cfg.alpha,
+                jitter=design_opts.xtx_jitter,
+            )
+            per_r_.append({"name": r.name, "power": float(pwr), "lam": float(lam)})
+        combined_ = _combine([d["power"] for d in per_r_], weights, rule)
+        row: Dict[str, Any] = {
+            "sigma_scale": float(scale),
+            "combined_power": float(combined_),
+        }
+        for rd in per_r_:
+            row[f"{rd['name']}_power"] = float(rd["power"])
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
 __all__ = [
     "power_curve_by_n",
     "power_curve_by_effect",
@@ -1420,4 +1788,6 @@ __all__ = [
     "compare_criteria",
     "robustness_report",
     "power_curve_by_wp",
+    "power_curve_by_n_multiresponse",
+    "multiresponse_sensitivity",
 ]

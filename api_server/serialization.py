@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 
-from iopt_power_design.config import DesignOptions, PowerContrastConfig, PowerR2Config, SplitPlotOptions
+from iopt_power_design.config import DesignOptions, MultiResponseOptions, PowerContrastConfig, PowerR2Config, ResponseSpec, SplitPlotOptions
 
 
 # ---------------------------------------------------------------------------
@@ -169,4 +169,41 @@ def serialize_design_result(result: dict) -> dict:
         "design_df": df_to_records(result["design_df"]),
         "buckets_df": df_to_records(result["buckets_df"]),
         "report": serialize_report(result["report"]),
+    }
+
+
+def pydantic_multi_cfg_to_dataclass(model: Any) -> MultiResponseOptions:
+    """Convert a Pydantic MultiResponseOptionsModel to MultiResponseOptions."""
+    responses = [
+        ResponseSpec(
+            name=r.name,
+            power_cfg=pydantic_power_cfg_to_dataclass(r.power_cfg),
+            formula=r.formula,
+            weight=r.weight,
+        )
+        for r in model.responses
+    ]
+    kwargs: dict = dict(
+        responses=responses,
+        power_combination=model.power_combination,
+    )
+    if model.sigma_joint is not None:
+        kwargs["sigma_joint"] = np.array(model.sigma_joint, dtype=float)
+    return MultiResponseOptions(**kwargs)
+
+
+def serialize_multiresponse_result(result: dict) -> dict:
+    """Convert an i_optimal_multiresponse_design result dict to JSON-safe form."""
+    design_df = result.get("design")
+    buckets_df = result.get("buckets")
+    return {
+        "design": df_to_records(design_df) if isinstance(design_df, pd.DataFrame) else [],
+        "n": int(result["n"]),
+        "achieved_power": sanitize_float(result["achieved_power"]),
+        "responses": [sanitize_value(r) for r in result.get("responses", [])],
+        "combination_rule": str(result.get("combination_rule", "min")),
+        "compound_criterion": bool(result.get("compound_criterion", False)),
+        "elapsed_sec": sanitize_float(result.get("elapsed_sec")),
+        "buckets": df_to_records(buckets_df) if isinstance(buckets_df, pd.DataFrame) else [],
+        "warnings": list(result.get("warnings", [])),
     }

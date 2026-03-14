@@ -202,3 +202,56 @@ class DesignOptionsModel(BaseModel):
             "Cannot be combined with n_blocks."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Multi-response models
+# ---------------------------------------------------------------------------
+
+class ResponseSpecModel(BaseModel):
+    """One response variable's power requirements for a multi-response design."""
+
+    name: str = Field(..., min_length=1, description="Label for this response.")
+    power_cfg: PowerCfgModel = Field(
+        ...,
+        description="Power requirements (r2 or contrast mode).",
+    )
+    formula: Optional[str] = Field(
+        None,
+        description=(
+            "Patsy formula for this response. When None the global formula is used. "
+            "Setting a per-response formula activates the compound-criterion path."
+        ),
+    )
+    weight: float = Field(
+        1.0,
+        gt=0.0,
+        description="Relative importance weight (used with power_combination='weighted_mean').",
+    )
+
+
+class MultiResponseOptionsModel(BaseModel):
+    """Options for multi-response powered designs."""
+
+    responses: List[ResponseSpecModel] = Field(
+        ...,
+        min_length=2,
+        description="Per-response power specs. Must contain at least two entries.",
+    )
+    power_combination: Literal["min", "product", "weighted_mean"] = Field(
+        "min",
+        description=(
+            "Rule for aggregating per-response powers: "
+            "'min' (all responses must reach target), "
+            "'product' (joint probability assuming independence), "
+            "'weighted_mean' (weighted average)."
+        ),
+    )
+    sigma_joint: Optional[List[List[float]]] = Field(
+        None,
+        description=(
+            "Inter-response error covariance matrix (k×k, JSON list-of-lists). "
+            "When set, Hotelling T² joint power is used. "
+            "Only valid when all responses share the same formula and use contrast mode."
+        ),
+    )

@@ -12,8 +12,11 @@ from __future__ import annotations
 __version__ = "0.1.0"
 
 # Re-export primary API and configuration types
-from .api import i_optimal_powered_design  # noqa: F401
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions  # noqa: F401
+from .api import i_optimal_powered_design, i_optimal_multiresponse_design  # noqa: F401
+from .config import (  # noqa: F401
+    PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions,
+    ResponseSpec, MultiResponseOptions,
+)
 
 # Power surface — canonical implementation in power_curves
 from .power_curves import power_surface_2d  # noqa: F401
@@ -28,8 +31,10 @@ from .analysis import (  # noqa: F401
     compare_criteria,
     robustness_report,
     power_curve_by_wp,
+    power_curve_by_n_multiresponse,
+    multiresponse_sensitivity,
 )
-from .power import contrast_power_sp, global_r2_power_sp  # noqa: F401
+from .power import contrast_power_sp, global_r2_power_sp, eval_response_power, combine_powers, hotelling_t2_power  # noqa: F401
 from .allocation import i_optimal_allocation  # noqa: F401
 from .candidate import build_candidate, build_split_plot_candidate  # noqa: F401
 from .model_matrix import build_model_matrix  # noqa: F401
@@ -49,6 +54,7 @@ __all__ = [
     "__version__",
     # Top-level API
     "i_optimal_powered_design",
+    "i_optimal_multiresponse_design",
     "power_curve_by_n",
     "power_curve_by_effect",
     "generate_power_curves",
@@ -57,6 +63,9 @@ __all__ = [
     "compare_criteria",
     "robustness_report",
     "power_curve_by_wp",
+    # Multi-response analysis
+    "power_curve_by_n_multiresponse",
+    "multiresponse_sensitivity",
     # Design utilities
     "augment_design",
     "build_split_plot_design",
@@ -65,6 +74,8 @@ __all__ = [
     "PowerR2Config",
     "DesignOptions",
     "SplitPlotOptions",
+    "ResponseSpec",
+    "MultiResponseOptions",
     # Power surface
     "power_surface_2d",
     # Low-level utilities
@@ -97,4 +108,9 @@ __all__ = [
     # Split-plot power functions
     "contrast_power_sp",
     "global_r2_power_sp",
+    # Multi-response power wrapper
+    "eval_response_power",
+    "combine_powers",
+    # Hotelling T² joint power
+    "hotelling_t2_power",
 ]

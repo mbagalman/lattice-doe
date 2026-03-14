@@ -3,7 +3,10 @@
 import numpy as np
 import pytest
 
-from iopt_power_design.power import contrast_power, global_r2_power
+from iopt_power_design.power import contrast_power, global_r2_power, eval_response_power, combine_powers, hotelling_t2_power
+from iopt_power_design.config import (
+    PowerContrastConfig, PowerR2Config, ResponseSpec, SplitPlotOptions,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -195,3 +198,461 @@ class TestGlobalR2Power:
         X = _full_rank_X(3, 3)  # df_denom = 0
         with pytest.raises(ValueError):
             global_r2_power(r2_target=0.2, X=X, alpha=0.05)
+
+
+# ---------------------------------------------------------------------------
+# eval_response_power
+# ---------------------------------------------------------------------------
+
+def _make_X(n=30, p=3, seed=7):
+    rng = np.random.default_rng(seed)
+    X = np.ones((n, p))
+    X[:, 1:] = rng.standard_normal((n, p - 1))
+    return X
+
+
+def _contrast_rs(name="Y1", **kw):
+    defaults = dict(L=[[0, 1, 0]], delta=[1.0], sigma=1.0, alpha=0.05, power=0.8)
+    defaults.update(kw)
+    cfg = PowerContrastConfig(**defaults)
+    return ResponseSpec(name=name, power_cfg=cfg)
+
+
+def _r2_rs(name="Y2", **kw):
+    defaults = dict(r2_target=0.4, alpha=0.05, power=0.8)
+    defaults.update(kw)
+    cfg = PowerR2Config(**defaults)
+    return ResponseSpec(name=name, power_cfg=cfg)
+
+
+class TestEvalResponsePower:
+    def test_contrast_returns_dict(self):
+        X = _make_X()
+        p_names = ["Intercept", "A", "B"]
+        result = eval_response_power(_contrast_rs(), X, p_names)
+        assert isinstance(result, dict)
+
+    def test_contrast_dict_keys(self):
+        X = _make_X()
+        p_names = ["Intercept", "A", "B"]
+        result = eval_response_power(_contrast_rs(), X, p_names)
+        assert set(result.keys()) == {"name", "power", "lam", "df1", "df2"}
+
+    def test_contrast_name_matches_response(self):
+        X = _make_X()
+        result = eval_response_power(_contrast_rs(name="Yield"), X, ["Intercept", "A", "B"])
+        assert result["name"] == "Yield"
+
+    def test_contrast_power_matches_contrast_power_direct(self):
+        X = _make_X()
+        p_names = ["Intercept", "A", "B"]
+        rs = _contrast_rs()
+        cfg = rs.power_cfg
+        expected = contrast_power(cfg.L, cfg.delta, X, cfg.sigma, cfg.alpha)
+        result = eval_response_power(rs, X, p_names)
+        assert abs(result["power"] - expected.power) < 1e-12
+        assert abs(result["lam"] - expected.lam) < 1e-12
+
+    def test_contrast_lam_matches_direct(self):
+        X = _make_X()
+        p_names = ["Intercept", "A", "B"]
+        rs = _contrast_rs()
+        cfg = rs.power_cfg
+        expected = contrast_power(cfg.L, cfg.delta, X, cfg.sigma, cfg.alpha)
+        result = eval_response_power(rs, X, p_names)
+        assert abs(result["lam"] - expected.lam) < 1e-12
+
+    def test_contrast_df1_equals_L_rows(self):
+        X = _make_X()
+        rs = _contrast_rs()
+        result = eval_response_power(rs, X, ["Intercept", "A", "B"])
+        assert result["df1"] == rs.power_cfg.L.shape[0]
+
+    def test_contrast_df2_equals_n_minus_rank(self):
+        X = _make_X(n=30, p=3)
+        rs = _contrast_rs()
+        result = eval_response_power(rs, X, ["Intercept", "A", "B"])
+        expected_df2 = int(X.shape[0] - np.linalg.matrix_rank(X))
+        assert result["df2"] == expected_df2
+
+    def test_r2_returns_dict(self):
+        X = _make_X()
+        result = eval_response_power(_r2_rs(), X, ["Intercept", "A", "B"])
+        assert isinstance(result, dict)
+
+    def test_r2_dict_keys_no_df1(self):
+        X = _make_X()
+        result = eval_response_power(_r2_rs(), X, ["Intercept", "A", "B"])
+        assert "df1" not in result
+        assert "df2" in result
+
+    def test_r2_power_matches_global_r2_power_direct(self):
+        X = _make_X()
+        rs = _r2_rs()
+        cfg = rs.power_cfg
+        from iopt_power_design.power import global_r2_power
+        expected = global_r2_power(cfg.r2_target, X, cfg.alpha, lambda_mode=cfg.lambda_mode)
+        result = eval_response_power(rs, X, ["Intercept", "A", "B"])
+        assert abs(result["power"] - expected.power) < 1e-12
+        assert abs(result["lam"] - expected.lam) < 1e-12
+
+    def test_r2_name_in_result(self):
+        X = _make_X()
+        result = eval_response_power(_r2_rs(name="Purity"), X, ["Intercept", "A", "B"])
+        assert result["name"] == "Purity"
+
+    def test_power_value_in_zero_one(self):
+        X = _make_X()
+        result = eval_response_power(_contrast_rs(), X, ["Intercept", "A", "B"])
+        assert 0.0 <= result["power"] <= 1.0
+
+    def test_lam_nonnegative(self):
+        X = _make_X()
+        result = eval_response_power(_contrast_rs(), X, ["Intercept", "A", "B"])
+        assert result["lam"] >= 0.0
+
+    def test_split_plot_missing_Z_raises(self):
+        X = _make_X()
+        sp_opts = SplitPlotOptions(htc_factors=["A"], n_whole_plots=5)
+        with pytest.raises(ValueError, match="Z"):
+            eval_response_power(
+                _contrast_rs(), X, ["Intercept", "A", "B"],
+                split_plot_opts=sp_opts, Z=None,
+            )
+
+    def test_exported_from_top_level(self):
+        import iopt_power_design
+        assert hasattr(iopt_power_design, "eval_response_power")
+
+
+# ---------------------------------------------------------------------------
+# combine_powers
+# ---------------------------------------------------------------------------
+
+class TestCombinePowers:
+    def test_min_returns_minimum(self):
+        assert combine_powers([0.8, 0.9], None, "min") == 0.8
+
+    def test_min_single_value(self):
+        assert combine_powers([0.75], None, "min") == 0.75
+
+    def test_min_three_values(self):
+        assert combine_powers([0.9, 0.7, 0.85], None, "min") == 0.7
+
+    def test_product_two_values(self):
+        assert combine_powers([0.8, 0.9], None, "product") == pytest.approx(0.72)
+
+    def test_product_three_values(self):
+        assert combine_powers([0.8, 0.9, 0.5], None, "product") == pytest.approx(0.36)
+
+    def test_product_single_value(self):
+        assert combine_powers([0.65], None, "product") == pytest.approx(0.65)
+
+    def test_weighted_mean_equal_weights(self):
+        # equal weights → arithmetic mean
+        result = combine_powers([0.8, 0.9], [1.0, 1.0], "weighted_mean")
+        assert result == pytest.approx(0.85)
+
+    def test_weighted_mean_unequal_weights(self):
+        # 2×0.8 + 1×0.9 / 3 = (1.6 + 0.9)/3 = 2.5/3
+        result = combine_powers([0.8, 0.9], [2.0, 1.0], "weighted_mean")
+        assert result == pytest.approx(2.5 / 3.0)
+
+    def test_weighted_mean_none_weights_uses_equal(self):
+        # None → equal weights → mean
+        result = combine_powers([0.8, 0.9], None, "weighted_mean")
+        assert result == pytest.approx(0.85)
+
+    def test_weighted_mean_weights_normalised(self):
+        # weights [4, 2] same ratio as [2, 1]; result identical to above
+        result = combine_powers([0.8, 0.9], [4.0, 2.0], "weighted_mean")
+        assert result == pytest.approx(2.5 / 3.0)
+
+    def test_unknown_rule_raises(self):
+        with pytest.raises(ValueError, match="unknown combination rule"):
+            combine_powers([0.8, 0.9], None, "geometric")
+
+    def test_empty_powers_raises(self):
+        with pytest.raises(ValueError, match="empty"):
+            combine_powers([], None, "min")
+
+    def test_min_ignores_weights(self):
+        # weights are irrelevant for "min"
+        assert combine_powers([0.8, 0.9], [99.0, 1.0], "min") == 0.8
+
+    def test_product_ignores_weights(self):
+        assert combine_powers([0.8, 0.9], [99.0, 1.0], "product") == pytest.approx(0.72)
+
+    def test_result_in_zero_one_for_valid_inputs(self):
+        for rule in ("min", "product", "weighted_mean"):
+            result = combine_powers([0.6, 0.7, 0.8], None, rule)
+            assert 0.0 <= result <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# TestHotellingT2Power  (MR-6)
+# ---------------------------------------------------------------------------
+
+def _ht2_X(n: int = 30, p: int = 3, seed: int = 42) -> np.ndarray:
+    """Small full-rank design matrix for Hotelling T² tests."""
+    rng = np.random.default_rng(seed)
+    X = np.ones((n, p))
+    X[:, 1:] = rng.standard_normal((n, p - 1))
+    return X
+
+
+class TestHotellingT2Power:
+    """MR-6: Hotelling T² joint power for multi-response linear contrasts."""
+
+    def test_returns_named_tuple(self):
+        X = _ht2_X()
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[1.5, 1.5]])
+        Sigma = np.eye(2)
+        result = hotelling_t2_power(L, Delta, X, Sigma)
+        assert hasattr(result, "power")
+        assert hasattr(result, "lam")
+        assert hasattr(result, "df1")
+        assert hasattr(result, "df2")
+
+    def test_power_in_unit_interval(self):
+        X = _ht2_X()
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[1.5, 1.5]])
+        result = hotelling_t2_power(L, Delta, X, np.eye(2))
+        assert 0.0 <= result.power <= 1.0
+
+    def test_k1_sigma_identity_matches_contrast_power(self):
+        # For k=1, sigma_joint=[[sigma²]], should match contrast_power exactly.
+        X = _ht2_X(n=30, p=3)
+        L = np.array([[0, 1, 0]])
+        delta = np.array([1.5])
+        sigma = 1.0
+        # contrast_power with q=1, sigma=1
+        cp = contrast_power(L, delta, X, sigma=sigma, alpha=0.05)
+        # hotelling_t2_power with k=1, sigma_joint=[[sigma²]]
+        Delta = delta.reshape(-1, 1)
+        ht2 = hotelling_t2_power(L, Delta, X, np.array([[sigma ** 2]]))
+        assert ht2.power == pytest.approx(cp.power, abs=1e-6)
+
+    def test_k1_sigma_not_1_matches_contrast_power(self):
+        # For k=1, sigma_joint=[[σ²]], any sigma value.
+        X = _ht2_X(n=40, p=3)
+        L = np.array([[0, 1, 0], [0, 0, 1]])
+        delta = np.array([1.2, 0.8])
+        sigma = 1.5
+        cp = contrast_power(L, delta, X, sigma=sigma, alpha=0.05)
+        Delta = delta.reshape(-1, 1)
+        ht2 = hotelling_t2_power(L, Delta, X, np.array([[sigma ** 2]]))
+        assert ht2.power == pytest.approx(cp.power, abs=1e-6)
+
+    def test_identity_sigma_k2_geq_individual_min(self):
+        # With sigma_joint=I_2, Hotelling T² power should be at least the individual min.
+        X = _ht2_X(n=40, p=3)
+        L = np.array([[0, 1, 0]])
+        delta1 = np.array([1.5])
+        delta2 = np.array([1.5])
+        cp1 = contrast_power(L, delta1, X, sigma=1.0)
+        Delta = np.column_stack([delta1, delta2])
+        ht2 = hotelling_t2_power(L, Delta, X, np.eye(2))
+        assert ht2.power >= min(cp1.power, cp1.power) - 1e-6
+
+    def test_lam_positive(self):
+        X = _ht2_X()
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[1.0, 1.0]])
+        result = hotelling_t2_power(L, Delta, X, np.eye(2))
+        assert result.lam >= 0.0
+
+    def test_df1_equals_q_times_k(self):
+        X = _ht2_X(n=50, p=3)
+        L = np.array([[0, 1, 0], [0, 0, 1]])  # q=2
+        Delta = np.column_stack([np.array([1.0, 0.8]), np.array([1.0, 0.8]), np.array([1.0, 0.8])])  # k=3
+        result = hotelling_t2_power(L, Delta, X, np.eye(3))
+        assert result.df1 == 2 * 3  # q * k
+
+    def test_df2_correct(self):
+        n, p, k = 30, 3, 2
+        X = _ht2_X(n=n, p=p)
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[1.0, 1.0]])
+        result = hotelling_t2_power(L, Delta, X, np.eye(k))
+        # df2 = n - rank(X) - k + 1 = 30 - 3 - 2 + 1 = 26
+        assert result.df2 == n - p - k + 1
+
+    def test_singular_sigma_raises(self):
+        X = _ht2_X()
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[1.0, 1.0]])
+        # Singular: row 1 = row 2
+        Sigma_sing = np.array([[1.0, 1.0], [1.0, 1.0]])
+        with pytest.raises(ValueError, match="singular"):
+            hotelling_t2_power(L, Delta, X, Sigma_sing)
+
+    def test_non_symmetric_sigma_raises(self):
+        X = _ht2_X()
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[1.0, 1.0]])
+        Sigma_asym = np.array([[1.0, 0.5], [0.3, 1.0]])
+        with pytest.raises(ValueError, match="symmetric"):
+            hotelling_t2_power(L, Delta, X, Sigma_asym)
+
+    def test_delta_1d_treated_as_single_response(self):
+        # 1-D delta is treated as q×1 Delta.
+        X = _ht2_X()
+        L = np.array([[0, 1, 0]])
+        delta_1d = np.array([1.5])
+        sigma_sq = np.array([[1.0]])
+        result = hotelling_t2_power(L, delta_1d, X, sigma_sq)
+        assert 0.0 <= result.power <= 1.0
+
+    def test_higher_effect_size_gives_higher_power(self):
+        X = _ht2_X(n=30, p=3)
+        L = np.array([[0, 1, 0]])
+        Sigma = np.eye(2)
+        low = hotelling_t2_power(L, np.array([[0.5, 0.5]]), X, Sigma)
+        high = hotelling_t2_power(L, np.array([[2.0, 2.0]]), X, Sigma)
+        assert high.power > low.power
+
+    def test_exported_from_top_level(self):
+        import iopt_power_design
+        assert hasattr(iopt_power_design, "hotelling_t2_power")
+
+
+# ---------------------------------------------------------------------------
+# MR-10 — combine_powers and hotelling_t2_power property-based tests
+# ---------------------------------------------------------------------------
+
+
+class TestMR10CombinePowersProperties:
+    """MR-10: parametrized properties of combine_powers."""
+
+    @pytest.mark.parametrize("powers,weights", [
+        ([0.8, 0.9], [1.0, 1.0]),
+        ([0.5, 0.7, 0.6], [1.0, 2.0, 1.0]),
+        ([0.3, 0.95], [3.0, 1.0]),
+        ([0.85, 0.85], None),
+        ([0.1, 0.99, 0.5], [1.0, 1.0, 1.0]),
+        ([0.8, 0.8, 0.8], [2.0, 1.0, 3.0]),
+    ])
+    def test_weighted_mean_between_min_and_max(self, powers, weights):
+        """min(powers) <= weighted_mean <= max(powers) for any input."""
+        result = combine_powers(powers, weights, "weighted_mean")
+        assert min(powers) <= result <= max(powers) + 1e-12
+
+    @pytest.mark.parametrize("powers,weights", [
+        ([0.8, 0.9], [1.0, 2.0]),
+        ([0.6, 0.4, 0.7], [2.0, 1.0, 3.0]),
+        ([0.5, 0.5], [10.0, 10.0]),
+    ])
+    def test_product_leq_weighted_mean(self, powers, weights):
+        """product rule <= weighted_mean for powers in (0,1)."""
+        r_prod = combine_powers(powers, weights, "product")
+        r_wm = combine_powers(powers, weights, "weighted_mean")
+        assert r_prod <= r_wm + 1e-12
+
+    @pytest.mark.parametrize("powers", [
+        [0.8, 0.9],
+        [0.5, 0.7, 0.6],
+        [0.3, 0.95],
+    ])
+    def test_min_leq_weighted_mean_leq_max(self, powers):
+        """min <= weighted_mean <= max for equal weights."""
+        r = combine_powers(powers, None, "weighted_mean")
+        assert min(powers) - 1e-12 <= r <= max(powers) + 1e-12
+
+    def test_three_equal_powers_all_rules_same(self):
+        """Equal powers p: min=product^(1/k)=wm=p."""
+        powers = [0.8, 0.8, 0.8]
+        r_min = combine_powers(powers, None, "min")
+        r_wm = combine_powers(powers, None, "weighted_mean")
+        assert r_min == pytest.approx(0.8)
+        assert r_wm == pytest.approx(0.8)
+
+    def test_min_rule_returns_exact_minimum(self):
+        """min rule returns exactly the smallest value."""
+        assert combine_powers([0.9, 0.3, 0.7], None, "min") == pytest.approx(0.3)
+
+    def test_product_decreases_with_more_responses(self):
+        """Adding more sub-unit powers under product gives lower combined."""
+        p2 = combine_powers([0.8, 0.9], None, "product")
+        p3 = combine_powers([0.8, 0.9, 0.85], None, "product")
+        assert p3 < p2
+
+    def test_weighted_mean_higher_weight_on_higher_power(self):
+        """Placing higher weight on larger power raises weighted mean above equal-weight mean."""
+        powers = [0.6, 0.9]
+        r_equal = combine_powers(powers, [1.0, 1.0], "weighted_mean")
+        r_heavier = combine_powers(powers, [1.0, 3.0], "weighted_mean")  # more weight on 0.9
+        assert r_heavier > r_equal
+
+    def test_combine_powers_all_rules_output_in_unit_interval(self):
+        """All combination rules produce values in [0, 1] for valid inputs."""
+        powers = [0.7, 0.85, 0.6]
+        for rule in ("min", "product", "weighted_mean"):
+            r = combine_powers(powers, [1.0, 2.0, 1.0], rule)
+            assert 0.0 <= r <= 1.0, f"Rule {rule} gave {r} outside [0,1]"
+
+
+class TestMR10HotellingT2Properties:
+    """MR-10: property-based tests for hotelling_t2_power."""
+
+    def test_large_diagonal_sigma_power_near_zero(self):
+        """Very large diagonal sigma_joint => joint power approaches 0."""
+        X = _ht2_X(n=40, p=3)
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[1.0, 1.0]])
+        sigma_large = np.diag([1e8, 1e8])
+        result = hotelling_t2_power(L, Delta, X, sigma_large)
+        assert result.power < 0.10
+
+    def test_scaling_sigma_joint_monotone_in_power(self):
+        """Increasing scale of sigma_joint decreases power monotonically."""
+        X = _ht2_X(n=50, p=3)
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[2.0, 2.0]])
+        r_small = hotelling_t2_power(L, Delta, X, np.eye(2))
+        r_large = hotelling_t2_power(L, Delta, X, 100.0 * np.eye(2))
+        assert r_small.power >= r_large.power
+
+    def test_larger_n_gives_higher_power(self):
+        """Larger design matrix (more runs) gives higher joint power."""
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[1.0, 1.0]])
+        r_small = hotelling_t2_power(L, Delta, _ht2_X(n=15, p=3), np.eye(2))
+        r_large = hotelling_t2_power(L, Delta, _ht2_X(n=80, p=3), np.eye(2))
+        assert r_large.power >= r_small.power
+
+    def test_lam_nonneg_for_any_nonzero_delta(self):
+        """Noncentrality lambda >= 0 for any valid input."""
+        X = _ht2_X(n=30, p=3)
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[0.5, 0.5]])
+        result = hotelling_t2_power(L, Delta, X, np.eye(2))
+        assert result.lam >= 0.0
+
+    def test_zero_delta_gives_alpha_level_power(self):
+        """Zero effect (delta=0) should give power == alpha (no effect)."""
+        X = _ht2_X(n=30, p=3)
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[0.0, 0.0]])
+        result = hotelling_t2_power(L, Delta, X, np.eye(2), alpha=0.05)
+        assert result.power == pytest.approx(0.05, abs=0.01)
+
+    def test_identity_sigma_power_between_0_and_1(self):
+        """Identity sigma_joint gives power in [0, 1]."""
+        X = _ht2_X(n=30, p=3)
+        L = np.array([[0, 1, 0]])
+        Delta = np.array([[1.5, 1.5]])
+        result = hotelling_t2_power(L, Delta, X, np.eye(2))
+        assert 0.0 <= result.power <= 1.0
+
+    @pytest.mark.parametrize("k", [2, 3])
+    def test_df1_equals_q_times_k_parametrized(self, k):
+        """df1 == q * k for any valid q and k."""
+        q = 2
+        X = _ht2_X(n=40, p=3)
+        L = np.array([[0, 1, 0], [0, 0, 1]])  # q=2
+        Delta = np.ones((q, k))
+        result = hotelling_t2_power(L, Delta, X, np.eye(k))
+        assert result.df1 == q * k

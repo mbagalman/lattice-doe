@@ -59,6 +59,11 @@ def init_state() -> None:
         "sp_subplots_per_wp": 0,   # 0 = auto-compute
         "sp_df_method": "auto",    # "auto" | "conservative" | "sp_only"
 
+        # --- Multi-response options (MR-8) ---
+        "mr_enabled": False,          # enable multi-response mode
+        "mr_combination": "min",      # "min" | "product" | "weighted_mean"
+        "mr_responses": [],           # list of response dicts (see Page 2)
+
         # --- Results (populated after a successful run) ---
         "result": None,       # full dict from i_optimal_powered_design
         "run_error": None,    # error string if the last run failed

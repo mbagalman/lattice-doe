@@ -95,7 +95,7 @@ class TestReadConfigSheet:
             ["x1", "continuous", "-1.0", "1.0"],
             ["x2", "continuous", "-1.0", "1.0"],
         ]
-        formula, factors, power_cfg, design_opts = _read_config_sheet(_make_ws(rows))
+        formula, factors, power_cfg, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert formula == "x1 + x2"
         assert factors["x1"] == (-1.0, 1.0)
         assert factors["x2"] == (-1.0, 1.0)
@@ -110,7 +110,7 @@ class TestReadConfigSheet:
             ["factor_name", "type", "value1", "value2"],
             ["x1", "continuous", "-1.0", "1.0"],
         ]
-        _, _, power_cfg, _ = _read_config_sheet(_make_ws(rows))
+        _, _, power_cfg, _, _ = _read_config_sheet(_make_ws(rows))
         assert isinstance(power_cfg, PowerR2Config)
         assert power_cfg.r2_target == pytest.approx(0.25)
 
@@ -123,7 +123,7 @@ class TestReadConfigSheet:
             ["factor_name", "type", "value1", "value2"],
             ["x1", "continuous", "-1.0", "1.0"],
         ]
-        _, _, power_cfg, design_opts = _read_config_sheet(_make_ws(rows))
+        _, _, power_cfg, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert isinstance(power_cfg, PowerR2Config)
         assert power_cfg.alpha == pytest.approx(0.05)
         assert power_cfg.power == pytest.approx(0.80)
@@ -142,7 +142,7 @@ class TestReadConfigSheet:
             ["x1", "continuous", "-1.0", "1.0"],
             ["x2", "continuous", "-1.0", "1.0"],
         ]
-        _, _, power_cfg, _ = _read_config_sheet(_make_ws(rows))
+        _, _, power_cfg, _, _ = _read_config_sheet(_make_ws(rows))
         assert isinstance(power_cfg, PowerContrastConfig)
         assert power_cfg.L.shape == (1, 3)
         np.testing.assert_array_equal(power_cfg.L[0], [0.0, 1.0, 0.0])
@@ -162,7 +162,7 @@ class TestReadConfigSheet:
             ["x1", "continuous", "-1.0", "1.0"],
             ["x2", "continuous", "-1.0", "1.0"],
         ]
-        _, _, power_cfg, _ = _read_config_sheet(_make_ws(rows))
+        _, _, power_cfg, _, _ = _read_config_sheet(_make_ws(rows))
         assert isinstance(power_cfg, PowerContrastConfig)
         assert power_cfg.L.shape == (2, 3)
         np.testing.assert_array_equal(power_cfg.delta, [1.0, 0.5])
@@ -245,7 +245,7 @@ class TestReadConfigSheet:
             ["factor_name", "type", "value1", "value2"],
             ["temp", "continuous", "20.0", "80.0"],
         ]
-        _, factors, _, _ = _read_config_sheet(_make_ws(rows))
+        _, factors, _, _, _ = _read_config_sheet(_make_ws(rows))
         assert factors["temp"] == (20.0, 80.0)
         assert isinstance(factors["temp"], tuple)
 
@@ -258,7 +258,7 @@ class TestReadConfigSheet:
             ["factor_name", "type", "value1", "value2", "value3"],
             ["material", "categorical", "Steel", "Aluminum", "Titanium"],
         ]
-        _, factors, _, _ = _read_config_sheet(_make_ws(rows))
+        _, factors, _, _, _ = _read_config_sheet(_make_ws(rows))
         assert factors["material"] == ["Steel", "Aluminum", "Titanium"]
 
     def test_unknown_factor_type_raises(self):
@@ -285,7 +285,7 @@ class TestReadConfigSheet:
             ["factor_name", "type", "value1", "value2"],
             ["x1", "continuous", "-1.0", "1.0"],
         ]
-        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        _, _, _, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert design_opts.starts == 3
         assert design_opts.random_state == 99
 
@@ -324,7 +324,7 @@ class TestCreateExcelTemplate:
             p = create_excel_template(Path(td) / "test.xlsx", example="r2")
             wb = openpyxl.load_workbook(p)
             ws = wb["Config"]
-            formula, factors, power_cfg, design_opts = _read_config_sheet(ws)
+            formula, factors, power_cfg, design_opts, _ = _read_config_sheet(ws)
         assert isinstance(power_cfg, PowerR2Config)
         assert formula  # non-empty
         assert factors   # at least one factor
@@ -336,7 +336,7 @@ class TestCreateExcelTemplate:
             p = create_excel_template(Path(td) / "test.xlsx", example="contrast")
             wb = openpyxl.load_workbook(p)
             ws = wb["Config"]
-            formula, factors, power_cfg, design_opts = _read_config_sheet(ws)
+            formula, factors, power_cfg, design_opts, _ = _read_config_sheet(ws)
         assert isinstance(power_cfg, PowerContrastConfig)
 
     def test_workbook_has_expected_sheets(self):
@@ -430,7 +430,7 @@ class TestCR22BlockedPreAllocFields:
 
     def test_n_blocks_zero_leaves_unblocked(self):
         rows = self._base_rows([["n_blocks", "0"]])
-        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        _, _, _, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert design_opts.n_blocks is None
 
     def test_n_blocks_2_enables_blocking(self):
@@ -438,13 +438,13 @@ class TestCR22BlockedPreAllocFields:
             ["n_blocks", "2"],
             ["block_factor_name", "Batch"],
         ])
-        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        _, _, _, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert design_opts.n_blocks == 2
         assert design_opts.block_factor_name == "Batch"
 
     def test_block_factor_name_default_is_block(self):
         rows = self._base_rows([["n_blocks", "3"]])
-        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        _, _, _, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert design_opts.block_factor_name == "Block"
 
     def test_preallocate_categorical_true(self):
@@ -452,13 +452,13 @@ class TestCR22BlockedPreAllocFields:
             ["preallocate_categorical", "true"],
             ["alloc_min_per_cell", "2"],
         ])
-        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        _, _, _, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert design_opts.preallocate_categorical is True
         assert design_opts.alloc_min_per_cell == 2
 
     def test_preallocate_categorical_false_by_default(self):
         rows = self._base_rows([])
-        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        _, _, _, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert design_opts.preallocate_categorical is False
 
     def test_alloc_max_per_cell_zero_maps_to_none(self):
@@ -466,7 +466,7 @@ class TestCR22BlockedPreAllocFields:
             ["preallocate_categorical", "true"],
             ["alloc_max_per_cell", "0"],
         ])
-        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        _, _, _, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert design_opts.alloc_max_per_cell is None
 
     def test_alloc_max_per_cell_positive_is_forwarded(self):
@@ -474,13 +474,13 @@ class TestCR22BlockedPreAllocFields:
             ["preallocate_categorical", "true"],
             ["alloc_max_per_cell", "5"],
         ])
-        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        _, _, _, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert design_opts.alloc_max_per_cell == 5
 
     def test_excel_numeric_cell_for_n_blocks(self):
         """Excel numeric cells arrive as '2.0' — int(float()) must handle it."""
         rows = self._base_rows([["n_blocks", "2.0"]])
-        _, _, _, design_opts = _read_config_sheet(_make_ws(rows))
+        _, _, _, design_opts, _ = _read_config_sheet(_make_ws(rows))
         assert design_opts.n_blocks == 2
 
     def test_invalid_bool_raises(self):
@@ -517,6 +517,6 @@ class TestCR22BlockedPreAllocFields:
                 create_excel_template(p, example=example)
                 import openpyxl
                 wb = openpyxl.load_workbook(p)
-                formula, factors, power_cfg, design_opts = _read_config_sheet(wb["Config"])
+                formula, factors, power_cfg, design_opts, _ = _read_config_sheet(wb["Config"])
                 assert formula
                 assert factors

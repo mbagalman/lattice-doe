@@ -71,6 +71,7 @@ def _simple_parse_return():
         {"x1": (-1.0, 1.0)},
         PowerR2Config(r2_target=0.25),
         DesignOptions(),
+        None,  # multi_cfg (single-response path)
     )
 
 
@@ -128,7 +129,7 @@ class TestParseConfigSheet:
             ["x1", "continuous", "-1.0", "1.0"],
             ["x2", "continuous", "-1.0", "1.0"],
         ]
-        formula, factors, power_cfg, design_opts = _parse_config_sheet(
+        formula, factors, power_cfg, design_opts, _ = _parse_config_sheet(
             _make_mock_worksheet(rows)
         )
         assert formula == "x1 + x2"
@@ -145,7 +146,7 @@ class TestParseConfigSheet:
             ["factor_name", "type", "value1", "value2"],
             ["x1", "continuous", "-1.0", "1.0"],
         ]
-        _, _, power_cfg, _ = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, power_cfg, _, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert isinstance(power_cfg, PowerR2Config)
         assert power_cfg.r2_target == pytest.approx(0.25)
 
@@ -158,7 +159,7 @@ class TestParseConfigSheet:
             ["factor_name", "type", "value1", "value2"],
             ["x1", "continuous", "-1.0", "1.0"],
         ]
-        _, _, power_cfg, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, power_cfg, design_opts, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert isinstance(power_cfg, PowerR2Config)
         assert power_cfg.alpha == pytest.approx(0.05)
         assert power_cfg.power == pytest.approx(0.80)
@@ -178,7 +179,7 @@ class TestParseConfigSheet:
             ["x1", "continuous", "-1.0", "1.0"],
             ["x2", "continuous", "-1.0", "1.0"],
         ]
-        _, _, power_cfg, _ = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, power_cfg, _, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert isinstance(power_cfg, PowerContrastConfig)
         assert power_cfg.L.shape == (1, 3)
         np.testing.assert_array_equal(power_cfg.L[0], [0.0, 1.0, 0.0])
@@ -198,7 +199,7 @@ class TestParseConfigSheet:
             ["x1", "continuous", "-1.0", "1.0"],
             ["x2", "continuous", "-1.0", "1.0"],
         ]
-        _, _, power_cfg, _ = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, power_cfg, _, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert isinstance(power_cfg, PowerContrastConfig)
         assert power_cfg.L.shape == (2, 3)
         np.testing.assert_array_equal(power_cfg.delta, [1.0, 0.5])
@@ -281,7 +282,7 @@ class TestParseConfigSheet:
             ["factor_name", "type", "value1", "value2"],
             ["temp", "continuous", "20.0", "80.0"],
         ]
-        _, factors, _, _ = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, factors, _, _, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert factors["temp"] == (20.0, 80.0)
         assert isinstance(factors["temp"], tuple)
 
@@ -294,7 +295,7 @@ class TestParseConfigSheet:
             ["factor_name", "type", "value1", "value2", "value3"],
             ["material", "categorical", "Steel", "Aluminum", "Titanium"],
         ]
-        _, factors, _, _ = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, factors, _, _, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert factors["material"] == ["Steel", "Aluminum", "Titanium"]
 
     def test_unknown_factor_type_raises(self):
@@ -527,7 +528,7 @@ class TestCreateSheetTemplate:
     def test_r2_example_produces_parseable_config(self):
         """_TEMPLATE_ROWS['r2'] must round-trip through _parse_config_sheet."""
         ws = _make_mock_worksheet(_TEMPLATE_ROWS["r2"])
-        formula, factors, power_cfg, design_opts = _parse_config_sheet(ws)
+        formula, factors, power_cfg, design_opts, _ = _parse_config_sheet(ws)
         assert formula == "x1 + x2"
         assert isinstance(power_cfg, PowerR2Config)
         assert "x1" in factors
@@ -536,7 +537,7 @@ class TestCreateSheetTemplate:
     def test_contrast_example_produces_parseable_config(self):
         """_TEMPLATE_ROWS['contrast'] must round-trip through _parse_config_sheet."""
         ws = _make_mock_worksheet(_TEMPLATE_ROWS["contrast"])
-        formula, factors, power_cfg, design_opts = _parse_config_sheet(ws)
+        formula, factors, power_cfg, design_opts, _ = _parse_config_sheet(ws)
         assert formula == "x1 + x2"
         assert isinstance(power_cfg, PowerContrastConfig)
         assert "x1" in factors
@@ -569,7 +570,7 @@ class TestCR21BlockedPreAllocFields:
 
     def test_n_blocks_zero_leaves_unblocked(self):
         rows = self._base_rows([["n_blocks", "0"]])
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert design_opts.n_blocks is None
 
     def test_n_blocks_2_enables_blocking(self):
@@ -577,13 +578,13 @@ class TestCR21BlockedPreAllocFields:
             ["n_blocks", "2"],
             ["block_factor_name", "Batch"],
         ])
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert design_opts.n_blocks == 2
         assert design_opts.block_factor_name == "Batch"
 
     def test_block_factor_name_default_is_block(self):
         rows = self._base_rows([["n_blocks", "3"]])
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert design_opts.block_factor_name == "Block"
 
     def test_preallocate_categorical_true(self):
@@ -591,13 +592,13 @@ class TestCR21BlockedPreAllocFields:
             ["preallocate_categorical", "true"],
             ["alloc_min_per_cell", "2"],
         ])
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert design_opts.preallocate_categorical is True
         assert design_opts.alloc_min_per_cell == 2
 
     def test_preallocate_categorical_false_by_default(self):
         rows = self._base_rows([])
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert design_opts.preallocate_categorical is False
 
     def test_alloc_max_per_cell_zero_maps_to_none(self):
@@ -605,7 +606,7 @@ class TestCR21BlockedPreAllocFields:
             ["preallocate_categorical", "true"],
             ["alloc_max_per_cell", "0"],
         ])
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert design_opts.alloc_max_per_cell is None
 
     def test_alloc_max_per_cell_positive_is_forwarded(self):
@@ -613,7 +614,7 @@ class TestCR21BlockedPreAllocFields:
             ["preallocate_categorical", "true"],
             ["alloc_max_per_cell", "5"],
         ])
-        _, _, _, design_opts = _parse_config_sheet(_make_mock_worksheet(rows))
+        _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_worksheet(rows))
         assert design_opts.alloc_max_per_cell == 5
 
     def test_invalid_bool_raises(self):
@@ -635,6 +636,6 @@ class TestCR21BlockedPreAllocFields:
         for example, rows in _TEMPLATE_ROWS.items():
             ws = _make_mock_worksheet(rows)
             # Should not raise
-            formula, factors, power_cfg, design_opts = _parse_config_sheet(ws)
+            formula, factors, power_cfg, design_opts, _ = _parse_config_sheet(ws)
             assert formula
             assert factors

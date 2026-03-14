@@ -6,7 +6,12 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from api_server.models.common import DesignOptionsModel, FactorSpec, PowerCfgModel
+from api_server.models.common import (
+    DesignOptionsModel,
+    FactorSpec,
+    MultiResponseOptionsModel,
+    PowerCfgModel,
+)
 
 
 class DesignRequest(BaseModel):
@@ -75,3 +80,73 @@ class DesignResponse(BaseModel):
         ..., description="Unique run frequencies."
     )
     report: ReportModel
+
+
+# ---------------------------------------------------------------------------
+# Multi-response design endpoint models
+# ---------------------------------------------------------------------------
+
+class MultiResponseDesignRequest(BaseModel):
+    """Request body for POST /multiresponse_design."""
+
+    formula: str = Field(
+        ...,
+        description="Global Patsy formula string, e.g. '~ 1 + A + B + A:B'.",
+        examples=["~ 1 + A + B"],
+    )
+    factors: Dict[str, FactorSpec] = Field(
+        ...,
+        description=(
+            "Factor specifications. Continuous: [low, high]. "
+            "Categorical: [\"lvl1\", \"lvl2\", ...]."
+        ),
+        examples=[{"A": [-1.0, 1.0], "B": [-1.0, 1.0]}],
+    )
+    multi_cfg: MultiResponseOptionsModel = Field(
+        ...,
+        description="Per-response power specifications and combination rule.",
+    )
+    design_opts: Optional[DesignOptionsModel] = Field(
+        None,
+        description="Design generation options. Uses defaults when omitted.",
+    )
+
+    model_config = {"json_schema_extra": {
+        "examples": [{
+            "formula": "~ 1 + A + B",
+            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+            "multi_cfg": {
+                "responses": [
+                    {"name": "Y1", "power_cfg": {"type": "r2", "r2_target": 0.15}},
+                    {"name": "Y2", "power_cfg": {"type": "r2", "r2_target": 0.20}},
+                ],
+                "power_combination": "min",
+            },
+        }]
+    }}
+
+
+class MultiResponseDesignResponse(BaseModel):
+    """Response body for POST /multiresponse_design."""
+
+    design: List[Dict[str, Any]] = Field(
+        ..., description="Design matrix rows as records."
+    )
+    n: int = Field(..., description="Number of runs in the optimal design.")
+    achieved_power: float = Field(
+        ..., description="Combined power achieved by the aggregation rule."
+    )
+    responses: List[Dict[str, Any]] = Field(
+        ..., description="Per-response power details (name, power, n, ...)."
+    )
+    combination_rule: str = Field(
+        ..., description="Aggregation rule used (min / product / weighted_mean)."
+    )
+    compound_criterion: bool = Field(
+        ..., description="True when per-response formulas differ (compound path)."
+    )
+    elapsed_sec: Optional[float] = Field(None, description="Wall-clock search time.")
+    buckets: List[Dict[str, Any]] = Field(
+        ..., description="Unique run-frequency buckets."
+    )
+    warnings: List[str] = Field(default_factory=list)

@@ -25,8 +25,11 @@ Notes:
 
 from __future__ import annotations
 
-from typing import List, Literal, NamedTuple, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Literal, NamedTuple, Optional, Tuple
 import numpy as np
+
+if TYPE_CHECKING:
+    from .config import ResponseSpec, SplitPlotOptions
 
 try:
     # Only import when actually computing power
@@ -44,6 +47,10 @@ else:
 # --- Custom Types for readable return values ---
 ContrastPowerResult = NamedTuple("ContrastPowerResult", [("power", float), ("lam", float)])
 GlobalPowerResult = NamedTuple("GlobalPowerResult", [("power", float), ("lam", float)])
+HotellingT2Result = NamedTuple(
+    "HotellingT2Result",
+    [("power", float), ("lam", float), ("df1", int), ("df2", int)],
+)
 
 
 # ---------------------------------------------------------------------
@@ -565,12 +572,297 @@ def global_r2_power_sp(
     return GlobalPowerResult(power=power, lam=lam)
 
 
+def combine_powers(
+    powers: List[float],
+    weights: Optional[List[float]],
+    rule: Literal["min", "product", "weighted_mean"],
+) -> float:
+    """Combine per-response power values into a single scalar.
+
+    Parameters
+    ----------
+    powers : list of float in [0, 1]
+        Per-response power values.
+    weights : list of float (> 0) or None
+        Relative weights, same length as *powers*.  Ignored for ``"min"`` and
+        ``"product"``; required (but defaults to equal weights) for
+        ``"weighted_mean"``.  Weights are normalised internally.
+    rule : {"min", "product", "weighted_mean"}
+        Combination rule.
+
+    Returns
+    -------
+    float in [0, 1]
+
+    Raises
+    ------
+    ValueError
+        If *powers* is empty or *rule* is not one of the three valid values.
+    """
+    if len(powers) == 0:
+        raise ValueError("combine_powers: powers list must not be empty.")
+    if rule == "min":
+        return float(min(powers))
+    elif rule == "product":
+        result = 1.0
+        for pv in powers:
+            result *= pv
+        return float(result)
+    elif rule == "weighted_mean":
+        w = weights if weights is not None else [1.0] * len(powers)
+        total_w = sum(w)
+        return float(sum(pv * wv for pv, wv in zip(powers, w)) / total_w)
+    raise ValueError(
+        f"combine_powers: unknown combination rule {rule!r}. "
+        "Must be 'min', 'product', or 'weighted_mean'."
+    )
+
+
+def eval_response_power(
+    response: "ResponseSpec",
+    X: np.ndarray,
+    p_names: List[str],
+    jitter: float = 1e-8,
+    split_plot_opts: Optional["SplitPlotOptions"] = None,
+    Z: Optional[np.ndarray] = None,
+    all_factor_names: Optional[List[str]] = None,
+) -> Dict:
+    """Evaluate power for one response given a fixed design matrix X.
+
+    Parameters
+    ----------
+    response : ResponseSpec
+        Specification of the response's power requirements.
+    X : ndarray (n, p)
+        Model matrix for this response's formula.
+    p_names : list of str
+        Column names of X (from ``build_model_matrix``).
+    jitter : float
+        Tikhonov jitter for (X'X)⁻¹.
+    split_plot_opts : SplitPlotOptions or None
+        When not None, uses GLS power functions (``contrast_power_sp`` /
+        ``global_r2_power_sp``) instead of OLS versions.
+    Z : ndarray (n, n_wp) or None
+        Whole-plot indicator matrix; required when *split_plot_opts* is not None.
+    all_factor_names : list of str or None
+        All factor names in the design (HTC + ETC).  Used to resolve
+        HTC column indices when *split_plot_opts* is provided.  When None,
+        ``split_plot_opts.htc_factors`` is used as a best-effort fallback.
+
+    Returns
+    -------
+    dict
+        Keys: ``"name"``, ``"power"``, ``"lam"``, ``"df2"``,
+        and ``"df1"`` (contrast mode only).
+    """
+    from .config import PowerContrastConfig, PowerR2Config  # avoid circular at module level
+
+    cfg = response.power_cfg
+    n, p = X.shape
+    df2 = int(n - int(np.linalg.matrix_rank(X)))
+
+    if isinstance(cfg, PowerContrastConfig):
+        if split_plot_opts is not None:
+            if Z is None:
+                raise ValueError(
+                    "eval_response_power: Z (whole-plot indicator) is required "
+                    "when split_plot_opts is provided."
+                )
+            from .split_plot import htc_factor_cols_from_names
+
+            _all_fnames = all_factor_names if all_factor_names is not None else list(
+                split_plot_opts.htc_factors
+            )
+            htc_cols = htc_factor_cols_from_names(
+                p_names, split_plot_opts.htc_factors, _all_fnames
+            )
+            result = contrast_power_sp(
+                cfg.L, cfg.delta, X, Z,
+                sigma_sp=cfg.sigma, eta=split_plot_opts.eta, alpha=cfg.alpha,
+                df_method=split_plot_opts.df_method, htc_factor_cols=htc_cols,
+                jitter=jitter,
+            )
+        else:
+            result = contrast_power(cfg.L, cfg.delta, X, cfg.sigma, cfg.alpha, jitter=jitter)
+        return {
+            "name": response.name,
+            "power": result.power,
+            "lam": result.lam,
+            "df1": int(np.linalg.matrix_rank(cfg.L)),
+            "df2": df2,
+        }
+    else:  # PowerR2Config
+        if split_plot_opts is not None:
+            if Z is None:
+                raise ValueError(
+                    "eval_response_power: Z (whole-plot indicator) is required "
+                    "when split_plot_opts is provided."
+                )
+            result = global_r2_power_sp(
+                cfg.r2_target, X, Z,
+                sigma_sp=cfg.sigma, eta=split_plot_opts.eta, alpha=cfg.alpha,
+                df_method=split_plot_opts.df_method, lambda_mode=cfg.lambda_mode,
+                jitter=jitter,
+            )
+        else:
+            result = global_r2_power(cfg.r2_target, X, cfg.alpha, lambda_mode=cfg.lambda_mode)
+        return {
+            "name": response.name,
+            "power": result.power,
+            "lam": result.lam,
+            "df2": df2,
+        }
+
+
+def hotelling_t2_power(
+    L: np.ndarray,
+    Delta: np.ndarray,
+    X: np.ndarray,
+    sigma_joint: np.ndarray,
+    alpha: float = 0.05,
+    jitter: float = 1e-8,
+) -> HotellingT2Result:
+    """Joint power for k simultaneous linear contrasts via Hotelling T² / Pillai trace.
+
+    Computes the multivariate power for testing H0: CΒ = 0 vs H1: CΒ = Δ,
+    where all k responses share the common contrast matrix L and the inter-response
+    error covariance is Σ (``sigma_joint``).
+
+    Noncentrality matrix
+    --------------------
+    Ω = Δ' [L(X'X)⁻¹L']⁻¹ Δ Σ⁻¹          (k × k)
+
+    Pillai-Bartlett F approximation
+    --------------------------------
+    λ   = trace(Ω)                           (noncentrality parameter)
+    df1 = q · k
+    df2 = n − rank(X) − k + 1
+    F_crit = F_{1−α}(df1, df2)
+    Power  = 1 − ncF(F_crit; df1, df2, λ)
+
+    This reduces exactly to ``contrast_power`` when k = 1 and
+    ``sigma_joint = [[σ²]]``.
+
+    Parameters
+    ----------
+    L : ndarray (q × p)
+        Common contrast matrix shared by all k responses.  If 1-D, treated as
+        a single-row matrix.
+    Delta : ndarray (q × k)
+        Effect-size matrix; column r is δ_r for response r.  If 1-D (q,),
+        treated as q × 1 (single response).
+    X : ndarray (n × p)
+        Design/model matrix.
+    sigma_joint : ndarray (k × k)
+        Inter-response error covariance matrix.  Must be symmetric and
+        positive definite.
+    alpha : float
+        Significance level (default 0.05).
+    jitter : float
+        Small ridge added to X'X for numerical stability.
+
+    Returns
+    -------
+    HotellingT2Result
+        NamedTuple with fields ``power``, ``lam``, ``df1``, ``df2``.
+
+    Raises
+    ------
+    ValueError
+        If ``sigma_joint`` is non-symmetric or singular.
+    ValueError
+        If df2 ≤ 0 (n too small for k responses).
+    """
+    _require_scipy()
+
+    L = np.asarray(L, dtype=float)
+    Delta = np.asarray(Delta, dtype=float)
+    X = np.asarray(X, dtype=float)
+    sigma_joint = np.asarray(sigma_joint, dtype=float)
+
+    if L.ndim == 1:
+        L = L.reshape(1, -1)
+    if Delta.ndim == 1:
+        Delta = Delta.reshape(-1, 1)
+
+    n, p = X.shape
+    q, p_L = L.shape
+    q_D, k = Delta.shape
+
+    if p_L != p:
+        raise ValueError(
+            f"L has {p_L} columns but X has {p} columns; shapes incompatible."
+        )
+    if q_D != q:
+        raise ValueError(
+            f"L has {q} rows but Delta has {q_D} rows; both must equal q."
+        )
+    if sigma_joint.shape != (k, k):
+        raise ValueError(
+            f"sigma_joint must be ({k}, {k}) for k={k} responses, "
+            f"got {sigma_joint.shape}."
+        )
+
+    # Symmetry check
+    if not np.allclose(sigma_joint, sigma_joint.T, atol=1e-8):
+        raise ValueError(
+            "sigma_joint must be symmetric; "
+            f"max asymmetry = {float(np.max(np.abs(sigma_joint - sigma_joint.T))):.3e}."
+        )
+
+    # Positive-definiteness: check via slogdet
+    sign, _ = np.linalg.slogdet(sigma_joint)
+    if sign <= 0:
+        raise ValueError(
+            "sigma_joint is singular (non-positive determinant). "
+            "The inter-response covariance must be positive definite."
+        )
+
+    rank_X = int(np.linalg.matrix_rank(X))
+    df1 = q * k
+    df2 = n - rank_X - k + 1
+
+    if df1 <= 0:
+        raise ValueError(f"df1 = q*k = {df1} ≤ 0; L or Delta has zero rank.")
+    if df2 <= 0:
+        raise ValueError(
+            f"Hotelling T² df2 = n − rank(X) − k + 1 = {df2} ≤ 0. "
+            f"Increase n (currently {n}) or reduce k (currently {k})."
+        )
+
+    # [L (X'X)⁻¹ L']⁻¹  (q × q)
+    XtX_inv = _pinv_xtx(X, jitter=jitter)
+    V_unscaled = _symmetrize(L @ XtX_inv @ L.T)
+    try:
+        V_inv = np.linalg.inv(V_unscaled)
+    except np.linalg.LinAlgError:
+        V_inv = np.linalg.pinv(V_unscaled)
+
+    # Σ⁻¹  (k × k)
+    Sigma_inv = np.linalg.inv(sigma_joint)
+
+    # Noncentrality matrix  Ω = Δ' V⁻¹ Δ Σ⁻¹  (k × k)
+    Omega = Delta.T @ V_inv @ Delta @ Sigma_inv
+
+    # λ = trace(Ω) — Pillai-Bartlett approximation; equals contrast λ for k=1
+    lam = float(max(0.0, np.trace(Omega)))
+
+    F_crit = float(f_dist.ppf(1.0 - alpha, df1, df2))
+    power = float(np.clip(1.0 - ncf_dist.cdf(F_crit, df1, df2, lam), 0.0, 1.0))
+
+    return HotellingT2Result(power=power, lam=lam, df1=df1, df2=df2)
+
+
 __all__ = [
     "contrast_power",
     "global_r2_power",
     "contrast_power_sp",
     "global_r2_power_sp",
+    "eval_response_power",
+    "combine_powers",
+    "hotelling_t2_power",
     "ContrastPowerResult",
     "GlobalPowerResult",
+    "HotellingT2Result",
     "_r2_df_num",
 ]

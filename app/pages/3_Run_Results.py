@@ -31,11 +31,13 @@ init_state()
 render_sidebar()
 
 try:
-    from iopt_power_design import i_optimal_powered_design
+    from iopt_power_design import i_optimal_powered_design, i_optimal_multiresponse_design
     from iopt_power_design.config import (
         DesignOptions,
         PowerContrastConfig,
         PowerR2Config,
+        MultiResponseOptions,
+        ResponseSpec,
     )
     from iopt_power_design.contrasts import contrast_from_scenarios
     _HAS_IOPT = True
@@ -107,6 +109,37 @@ def _build_power_cfg(ss: dict):
             max_n=int(ss["max_n"]),
             lambda_mode=ss["lambda_mode"],
         )
+
+
+def _build_multi_response_cfg(ss: dict) -> "MultiResponseOptions":
+    """Build MultiResponseOptions from session-state mr_responses list."""
+    import numpy as np  # noqa: PLC0415
+    specs = []
+    for r in ss.get("mr_responses", []):
+        r_alpha = float(r.get("alpha", ss.get("alpha", 0.05)))
+        r_power = float(r.get("power", ss.get("power_target", 0.80)))
+        r_sigma = float(r.get("sigma", 1.0))
+        r_weight = float(r.get("weight", 1.0))
+        if r.get("power_mode", "contrast") == "contrast":
+            L = _parse_matrix(r.get("L_text", ""))
+            delta = _parse_vector(r.get("delta_text", ""))
+            pcfg = PowerContrastConfig(
+                L=L, delta=delta, alpha=r_alpha, power=r_power, sigma=r_sigma,
+            )
+        else:
+            pcfg = PowerR2Config(
+                r2_target=float(r.get("r2_target", 0.15)),
+                alpha=r_alpha, power=r_power,
+            )
+        specs.append(ResponseSpec(
+            name=str(r.get("name", f"R{len(specs) + 1}")),
+            power_cfg=pcfg,
+            weight=r_weight,
+        ))
+    return MultiResponseOptions(
+        responses=specs,
+        power_combination=ss.get("mr_combination", "min"),
+    )
 
 
 def _build_design_opts(ss: dict) -> DesignOptions:
@@ -316,19 +349,29 @@ if not _HAS_IOPT:
 
 if run_clicked and not _issues and _HAS_IOPT:
     try:
-        power_cfg = _build_power_cfg(ss)
         design_opts = _build_design_opts(ss)
         factor_spec = _factors_to_spec(factors)
         with st.spinner("Searching for the optimal design\u2026"):
-            result = i_optimal_powered_design(
-                formula=formula,
-                factors=factor_spec,
-                power_cfg=power_cfg,
-                design_opts=design_opts,
-            )
+            if ss.get("mr_enabled", False):
+                multi_cfg = _build_multi_response_cfg(ss)
+                result = i_optimal_multiresponse_design(
+                    formula=formula,
+                    factors=factor_spec,
+                    multi_cfg=multi_cfg,
+                    design_opts=design_opts,
+                )
+                ss["_last_power_cfg"] = None
+            else:
+                power_cfg = _build_power_cfg(ss)
+                result = i_optimal_powered_design(
+                    formula=formula,
+                    factors=factor_spec,
+                    power_cfg=power_cfg,
+                    design_opts=design_opts,
+                )
+                ss["_last_power_cfg"] = power_cfg
         ss["result"] = result
         ss["run_error"] = None
-        ss["_last_power_cfg"] = power_cfg
         st.rerun()
     except Exception as exc:
         ss["run_error"] = str(exc)
@@ -378,6 +421,20 @@ m6.metric("Strategy", report.get("search_strategy", "\u2014"))
 
 with st.expander("Full report (JSON)"):
     st.json(_jsonify(report))
+
+# Per-response powers (multi-response mode)
+_mr_response_keys = [k for k in report if k.endswith("_power") and k != "achieved_power"]
+if _mr_response_keys:
+    with st.expander("Per-response powers", expanded=True):
+        _pr_data = {k.replace("_power", ""): [f"{report[k]:.3f}"] for k in sorted(_mr_response_keys)}
+        if "combined_power" in report:
+            _pr_data["combined"] = [f"{report['combined_power']:.3f}"]
+        st.dataframe(
+            __import__("pandas").DataFrame(_pr_data, index=["power"]),
+            use_container_width=True,
+        )
+        if "combination_rule" in report:
+            st.caption(f"Combination rule: **{report['combination_rule']}**")
 
 if "split_plot" in report:
     sp = report["split_plot"]

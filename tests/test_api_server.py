@@ -591,3 +591,368 @@ class TestAugmentIntegration:
         assert body["n_added"] == 2
         assert body["n_total"] == body["n_original"] + 2
         assert len(body["augmented_df"]) == body["n_total"]
+
+
+# ---------------------------------------------------------------------------
+# MR-9 — Multi-response endpoint tests
+# ---------------------------------------------------------------------------
+
+_MR_FAST_OPTS: Dict[str, Any] = {
+    "candidate_points": 100,
+    "auto_candidate": False,
+    "starts": 2,
+    "max_iter": 50,
+    "random_state": 42,
+}
+
+_MR_TWO_RESPONSES = [
+    {"name": "Y1", "power_cfg": {"type": "r2", "r2_target": 0.15, "max_n": 30}},
+    {"name": "Y2", "power_cfg": {"type": "r2", "r2_target": 0.20, "max_n": 30}},
+]
+
+_MR_SIMPLE_BODY: Dict[str, Any] = {
+    "formula": "~ 1 + A + B",
+    "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+    "multi_cfg": {
+        "responses": _MR_TWO_RESPONSES,
+        "power_combination": "min",
+    },
+    "design_opts": _MR_FAST_OPTS,
+}
+
+
+class TestMultiResponseModels:
+    """Unit tests for MR-9 Pydantic models (no HTTP, no server needed)."""
+
+    def test_response_spec_model_basic(self):
+        from api_server.models.common import ResponseSpecModel, PowerR2ConfigModel
+        r = ResponseSpecModel(
+            name="Y1",
+            power_cfg=PowerR2ConfigModel(type="r2", r2_target=0.15),
+        )
+        assert r.name == "Y1"
+        assert r.weight == 1.0
+        assert r.formula is None
+
+    def test_response_spec_model_weight_gt0_required(self):
+        from api_server.models.common import ResponseSpecModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError):
+            ResponseSpecModel(
+                name="Y1",
+                power_cfg={"type": "r2", "r2_target": 0.15},
+                weight=0.0,
+            )
+
+    def test_response_spec_model_empty_name_rejected(self):
+        from api_server.models.common import ResponseSpecModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError):
+            ResponseSpecModel(
+                name="",
+                power_cfg={"type": "r2", "r2_target": 0.15},
+            )
+
+    def test_multi_response_options_model_min_two_responses(self):
+        from api_server.models.common import MultiResponseOptionsModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError):
+            MultiResponseOptionsModel(
+                responses=[
+                    {"name": "Y1", "power_cfg": {"type": "r2", "r2_target": 0.15}},
+                ],
+            )
+
+    def test_multi_response_options_model_invalid_combination_rule(self):
+        from api_server.models.common import MultiResponseOptionsModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError):
+            MultiResponseOptionsModel(
+                responses=_MR_TWO_RESPONSES,
+                power_combination="invalid_rule",
+            )
+
+    def test_multi_response_options_sigma_joint_accepted(self):
+        from api_server.models.common import MultiResponseOptionsModel
+        model = MultiResponseOptionsModel(
+            responses=_MR_TWO_RESPONSES,
+            sigma_joint=[[1.0, 0.3], [0.3, 1.0]],
+        )
+        assert model.sigma_joint == [[1.0, 0.3], [0.3, 1.0]]
+
+    def test_pydantic_multi_cfg_to_dataclass_returns_MultiResponseOptions(self):
+        from api_server.models.common import MultiResponseOptionsModel
+        from api_server.serialization import pydantic_multi_cfg_to_dataclass
+        from iopt_power_design.config import MultiResponseOptions
+        model = MultiResponseOptionsModel(responses=_MR_TWO_RESPONSES)
+        result = pydantic_multi_cfg_to_dataclass(model)
+        assert isinstance(result, MultiResponseOptions)
+        assert len(result.responses) == 2
+
+    def test_pydantic_multi_cfg_response_names_propagated(self):
+        from api_server.models.common import MultiResponseOptionsModel
+        from api_server.serialization import pydantic_multi_cfg_to_dataclass
+        model = MultiResponseOptionsModel(responses=_MR_TWO_RESPONSES)
+        result = pydantic_multi_cfg_to_dataclass(model)
+        assert result.responses[0].name == "Y1"
+        assert result.responses[1].name == "Y2"
+
+    def test_pydantic_multi_cfg_sigma_joint_is_ndarray(self):
+        from api_server.models.common import MultiResponseOptionsModel
+        from api_server.serialization import pydantic_multi_cfg_to_dataclass
+        model = MultiResponseOptionsModel(
+            responses=_MR_TWO_RESPONSES,
+            sigma_joint=[[1.0, 0.5], [0.5, 1.0]],
+        )
+        result = pydantic_multi_cfg_to_dataclass(model)
+        assert isinstance(result.sigma_joint, np.ndarray)
+        assert result.sigma_joint.shape == (2, 2)
+
+    def test_serialize_multiresponse_result_keys(self):
+        from api_server.serialization import serialize_multiresponse_result
+        fake_result = {
+            "design": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
+            "n": 10,
+            "achieved_power": 0.85,
+            "responses": [{"name": "Y1", "power": 0.87}, {"name": "Y2", "power": 0.85}],
+            "combination_rule": "min",
+            "compound_criterion": False,
+            "elapsed_sec": 1.23,
+            "buckets": pd.DataFrame({"A": [0.1], "count": [2]}),
+            "warnings": [],
+        }
+        out = serialize_multiresponse_result(fake_result)
+        assert isinstance(out["design"], list)
+        assert isinstance(out["buckets"], list)
+        assert out["n"] == 10
+        assert out["combination_rule"] == "min"
+        assert not out["compound_criterion"]
+        assert len(out["responses"]) == 2
+
+    def test_serialize_multiresponse_result_numpy_sanitized(self):
+        from api_server.serialization import serialize_multiresponse_result
+        fake_result = {
+            "design": pd.DataFrame({"A": [0.1]}),
+            "n": np.int64(8),
+            "achieved_power": np.float64(0.82),
+            "responses": [{"name": "Y1", "power": np.float64(0.82)}],
+            "combination_rule": "min",
+            "compound_criterion": False,
+            "elapsed_sec": None,
+            "buckets": pd.DataFrame({"A": [0.1]}),
+            "warnings": [],
+        }
+        out = serialize_multiresponse_result(fake_result)
+        assert isinstance(out["n"], int)
+        # achieved_power sanitized to plain float
+        ap = out["achieved_power"]
+        assert ap is None or isinstance(ap, float)
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
+class TestMultiResponseEndpoint:
+    """MR-9 HTTP tests for POST /multiresponse_design."""
+
+    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    async def test_multiresponse_returns_200_with_mock(self, mock_run, client):
+        mock_run.return_value = {
+            "design": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
+            "n": 10,
+            "achieved_power": 0.85,
+            "responses": [
+                {"name": "Y1", "power": 0.87},
+                {"name": "Y2", "power": 0.85},
+            ],
+            "combination_rule": "min",
+            "compound_criterion": False,
+            "elapsed_sec": 0.5,
+            "buckets": pd.DataFrame({"A": [0.1], "count": [2]}),
+            "warnings": [],
+        }
+        r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
+        assert r.status_code == 200
+        body = r.json()
+        assert "design" in body
+        assert body["n"] == 10
+        assert len(body["responses"]) == 2
+
+    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    async def test_multiresponse_responses_count_matches_request(self, mock_run, client):
+        mock_run.return_value = {
+            "design": pd.DataFrame({"A": [0.1]}),
+            "n": 5,
+            "achieved_power": 0.80,
+            "responses": [
+                {"name": "Y1", "power": 0.82},
+                {"name": "Y2", "power": 0.80},
+            ],
+            "combination_rule": "min",
+            "compound_criterion": False,
+            "elapsed_sec": 0.2,
+            "buckets": pd.DataFrame({"A": [0.1]}),
+            "warnings": [],
+        }
+        r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["responses"]) == len(_MR_TWO_RESPONSES)
+
+    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    async def test_multiresponse_combination_rule_in_response(self, mock_run, client):
+        mock_run.return_value = {
+            "design": pd.DataFrame({"A": [0.1]}),
+            "n": 5,
+            "achieved_power": 0.80,
+            "responses": [{"name": "Y1", "power": 0.80}, {"name": "Y2", "power": 0.80}],
+            "combination_rule": "min",
+            "compound_criterion": False,
+            "elapsed_sec": 0.1,
+            "buckets": pd.DataFrame({"A": [0.1]}),
+            "warnings": [],
+        }
+        r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
+        assert r.status_code == 200
+        assert r.json()["combination_rule"] == "min"
+
+    async def test_422_missing_multi_cfg(self, client):
+        r = await client.post("/multiresponse_design", json={
+            "formula": "~ 1 + A + B",
+            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+        })
+        assert r.status_code == 422
+
+    async def test_422_only_one_response(self, client):
+        r = await client.post("/multiresponse_design", json={
+            "formula": "~ 1 + A + B",
+            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+            "multi_cfg": {
+                "responses": [
+                    {"name": "Y1", "power_cfg": {"type": "r2", "r2_target": 0.15}},
+                ],
+            },
+        })
+        assert r.status_code == 422
+
+    async def test_422_invalid_power_combination(self, client):
+        r = await client.post("/multiresponse_design", json={
+            "formula": "~ 1 + A + B",
+            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+            "multi_cfg": {
+                "responses": _MR_TWO_RESPONSES,
+                "power_combination": "nonsense",
+            },
+        })
+        assert r.status_code == 422
+
+    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    async def test_422_ValueError_from_library(self, mock_run, client):
+        mock_run.side_effect = ValueError("incompatible formulas")
+        r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
+        assert r.status_code == 422
+        assert "incompatible formulas" in r.json()["detail"]
+
+    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    async def test_sigma_joint_roundtrips(self, mock_run, client):
+        """sigma_joint list-of-lists passes through serialization without error."""
+        mock_run.return_value = {
+            "design": pd.DataFrame({"A": [0.1]}),
+            "n": 5,
+            "achieved_power": 0.82,
+            "responses": [{"name": "Y1", "power": 0.82}, {"name": "Y2", "power": 0.82}],
+            "combination_rule": "min",
+            "compound_criterion": False,
+            "elapsed_sec": 0.1,
+            "buckets": pd.DataFrame({"A": [0.1]}),
+            "warnings": [],
+        }
+        body = {
+            **_MR_SIMPLE_BODY,
+            "multi_cfg": {
+                **_MR_SIMPLE_BODY["multi_cfg"],
+                "sigma_joint": [[1.0, 0.3], [0.3, 1.0]],
+            },
+        }
+        r = await client.post("/multiresponse_design", json=body)
+        assert r.status_code == 200
+        # sigma_joint is passed to library — verify it reached the mock as ndarray
+        call_args = mock_run.call_args
+        passed_multi_cfg = call_args.kwargs.get("multi_cfg") or call_args.args[2]
+        assert passed_multi_cfg.sigma_joint is not None
+        assert passed_multi_cfg.sigma_joint.shape == (2, 2)
+
+    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    async def test_contrast_response_accepted(self, mock_run, client):
+        mock_run.return_value = {
+            "design": pd.DataFrame({"A": [0.1], "B": [-0.1]}),
+            "n": 8,
+            "achieved_power": 0.81,
+            "responses": [{"name": "Y1", "power": 0.84}, {"name": "Y2", "power": 0.81}],
+            "combination_rule": "min",
+            "compound_criterion": False,
+            "elapsed_sec": 0.3,
+            "buckets": pd.DataFrame({"A": [0.1]}),
+            "warnings": [],
+        }
+        body = {
+            "formula": "~ 1 + A + B",
+            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+            "multi_cfg": {
+                "responses": [
+                    {
+                        "name": "Y1",
+                        "power_cfg": {
+                            "type": "contrast",
+                            "L": [[0, 1, 0]],
+                            "delta": [0.5],
+                            "sigma": 1.0,
+                        },
+                    },
+                    {
+                        "name": "Y2",
+                        "power_cfg": {"type": "r2", "r2_target": 0.15, "max_n": 30},
+                    },
+                ],
+                "power_combination": "min",
+            },
+            "design_opts": _MR_FAST_OPTS,
+        }
+        r = await client.post("/multiresponse_design", json=body)
+        assert r.status_code == 200
+
+    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    async def test_health_not_broken_by_mr9(self, mock_run, client):
+        """GET /health still returns 200 after MR-9 is registered."""
+        r = await client.get("/health")
+        assert r.status_code == 200
+
+
+@pytest.mark.slow
+@pytest.mark.anyio
+@pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
+class TestMultiResponseIntegration:
+    """MR-9 real-compute integration test (marked @slow)."""
+
+    async def test_post_multiresponse_design_returns_valid_response(self, client):
+        r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["design"]) >= 1
+        assert body["n"] >= 1
+        assert 0 < body["achieved_power"] <= 1.0
+        assert len(body["responses"]) == 2
+        assert body["combination_rule"] == "min"
+        assert "compound_criterion" in body
+
+    async def test_post_multiresponse_design_has_factor_columns(self, client):
+        r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
+        assert r.status_code == 200
+        row = r.json()["design"][0]
+        assert "A" in row and "B" in row
+
+    async def test_post_multiresponse_design_no_nan_json(self, client):
+        r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
+        assert r.status_code == 200
+        body = r.json()
+        assert math.isfinite(body["achieved_power"])
+        assert isinstance(body["n"], int)

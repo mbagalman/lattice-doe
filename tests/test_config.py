@@ -12,6 +12,8 @@ from iopt_power_design.config import (
     PowerContrastConfig,
     PowerR2Config,
     SplitPlotOptions,
+    ResponseSpec,
+    MultiResponseOptions,
     _compile_constraint_expr,
 )
 
@@ -543,3 +545,275 @@ class TestDesignOptionsSplitPlot:
     def test_split_plot_importable_from_top_level(self):
         import iopt_power_design
         assert hasattr(iopt_power_design, "SplitPlotOptions")
+
+
+# ---------------------------------------------------------------------------
+# ResponseSpec
+# ---------------------------------------------------------------------------
+
+def _contrast_cfg(**kw):
+    defaults = dict(L=[[0, 1]], delta=[0.5])
+    defaults.update(kw)
+    return PowerContrastConfig(**defaults)
+
+
+def _r2_cfg(**kw):
+    defaults = dict(r2_target=0.5)
+    defaults.update(kw)
+    return PowerR2Config(**defaults)
+
+
+class TestResponseSpec:
+    def test_valid_contrast_mode(self):
+        rs = ResponseSpec(name="Y1", power_cfg=_contrast_cfg())
+        assert rs.name == "Y1"
+        assert rs.formula is None
+        assert rs.weight == 1.0
+
+    def test_valid_r2_mode(self):
+        rs = ResponseSpec(name="Y2", power_cfg=_r2_cfg())
+        assert rs.name == "Y2"
+
+    def test_formula_none_default(self):
+        rs = ResponseSpec(name="Y1", power_cfg=_contrast_cfg())
+        assert rs.formula is None
+
+    def test_formula_string_accepted(self):
+        rs = ResponseSpec(name="Y1", power_cfg=_contrast_cfg(), formula="~ 1 + A + B")
+        assert rs.formula == "~ 1 + A + B"
+
+    def test_weight_custom(self):
+        rs = ResponseSpec(name="Y1", power_cfg=_contrast_cfg(), weight=2.5)
+        assert rs.weight == 2.5
+
+    def test_empty_name_raises(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            ResponseSpec(name="", power_cfg=_contrast_cfg())
+
+    def test_wrong_power_cfg_type_raises(self):
+        with pytest.raises(TypeError, match="PowerContrastConfig or PowerR2Config"):
+            ResponseSpec(name="Y1", power_cfg="not_a_config")
+
+    def test_weight_zero_raises(self):
+        with pytest.raises(ValueError, match="weight must be > 0"):
+            ResponseSpec(name="Y1", power_cfg=_contrast_cfg(), weight=0.0)
+
+    def test_weight_negative_raises(self):
+        with pytest.raises(ValueError, match="weight must be > 0"):
+            ResponseSpec(name="Y1", power_cfg=_contrast_cfg(), weight=-1.0)
+
+    def test_dataclasses_replace_works(self):
+        rs = ResponseSpec(name="Y1", power_cfg=_contrast_cfg())
+        rs2 = dataclasses.replace(rs, name="Y2")
+        assert rs2.name == "Y2"
+        assert rs2.power_cfg is rs.power_cfg
+
+    def test_all_exports_response_spec(self):
+        import iopt_power_design.config as cfg_module
+        assert "ResponseSpec" in cfg_module.__all__
+
+
+# ---------------------------------------------------------------------------
+# MultiResponseOptions
+# ---------------------------------------------------------------------------
+
+class TestMultiResponseOptions:
+    def _two_contrast(self, **kw):
+        r1 = ResponseSpec(name="Y1", power_cfg=_contrast_cfg())
+        r2 = ResponseSpec(name="Y2", power_cfg=_contrast_cfg())
+        return MultiResponseOptions(responses=[r1, r2], **kw)
+
+    def test_valid_two_contrast_responses(self):
+        mro = self._two_contrast()
+        assert len(mro.responses) == 2
+        assert mro.power_combination == "min"
+        assert mro.sigma_joint is None
+
+    def test_valid_mixed_contrast_r2(self):
+        r1 = ResponseSpec(name="Y1", power_cfg=_contrast_cfg())
+        r2 = ResponseSpec(name="Y2", power_cfg=_r2_cfg())
+        mro = MultiResponseOptions(responses=[r1, r2])
+        assert len(mro.responses) == 2
+
+    def test_power_combination_min(self):
+        mro = self._two_contrast(power_combination="min")
+        assert mro.power_combination == "min"
+
+    def test_power_combination_product(self):
+        mro = self._two_contrast(power_combination="product")
+        assert mro.power_combination == "product"
+
+    def test_power_combination_weighted_mean(self):
+        mro = self._two_contrast(power_combination="weighted_mean")
+        assert mro.power_combination == "weighted_mean"
+
+    def test_sigma_joint_none_default(self):
+        mro = self._two_contrast()
+        assert mro.sigma_joint is None
+
+    def test_sigma_joint_valid_shape(self):
+        sigma = np.eye(2)
+        mro = self._two_contrast(sigma_joint=sigma)
+        assert mro.sigma_joint is not None
+
+    def test_sigma_joint_wrong_shape_raises(self):
+        sigma = np.eye(3)  # wrong: 3x3 for 2 responses
+        with pytest.raises(ValueError, match="sigma_joint must be"):
+            self._two_contrast(sigma_joint=sigma)
+
+    def test_fewer_than_two_responses_raises(self):
+        r1 = ResponseSpec(name="Y1", power_cfg=_contrast_cfg())
+        with pytest.raises(ValueError, match="at least 2"):
+            MultiResponseOptions(responses=[r1])
+
+    def test_duplicate_names_raises(self):
+        r1 = ResponseSpec(name="Y1", power_cfg=_contrast_cfg())
+        r2 = ResponseSpec(name="Y1", power_cfg=_contrast_cfg())
+        with pytest.raises(ValueError, match="unique"):
+            MultiResponseOptions(responses=[r1, r2])
+
+    def test_invalid_power_combination_raises(self):
+        with pytest.raises(ValueError, match="power_combination"):
+            self._two_contrast(power_combination="bad_rule")
+
+    def test_dataclasses_replace_power_combination(self):
+        mro = self._two_contrast()
+        mro2 = dataclasses.replace(mro, power_combination="product")
+        assert mro2.power_combination == "product"
+
+    def test_responses_stored_in_insertion_order(self):
+        names = ["Alpha", "Beta", "Gamma"]
+        responses = [ResponseSpec(name=n, power_cfg=_contrast_cfg()) for n in names]
+        mro = MultiResponseOptions(responses=responses)
+        assert [r.name for r in mro.responses] == names
+
+    def test_all_exports_multi_response_options(self):
+        import iopt_power_design.config as cfg_module
+        assert "MultiResponseOptions" in cfg_module.__all__
+
+
+# ---------------------------------------------------------------------------
+# MR-10 — Additional ResponseSpec and MultiResponseOptions edge-case tests
+# ---------------------------------------------------------------------------
+
+
+def _r2_cfg_simple():
+    return PowerR2Config(r2_target=0.3)
+
+
+def _contrast_cfg_simple():
+    return PowerContrastConfig(L=np.array([[0, 1]]), delta=np.array([0.5]))
+
+
+class TestMR10ResponseSpecEdgeCases:
+    """MR-10: edge cases for ResponseSpec not covered by TestResponseSpec."""
+
+    def test_r2_config_with_nondefault_weight(self):
+        """R2Config ResponseSpec stores non-default weight correctly."""
+        r = ResponseSpec(name="Y1", power_cfg=_r2_cfg_simple(), weight=3.5)
+        assert r.weight == pytest.approx(3.5)
+
+    def test_contrast_config_weight_very_small_positive(self):
+        """Very small positive weight (1e-10) is accepted."""
+        r = ResponseSpec(name="Y1", power_cfg=_contrast_cfg_simple(), weight=1e-10)
+        assert r.weight > 0
+
+    def test_formula_override_stored_separately_from_global(self):
+        """Per-response formula is independent of other ResponseSpec instances."""
+        r1 = ResponseSpec("Y1", _contrast_cfg_simple(), formula="~ 1 + A")
+        r2 = ResponseSpec("Y2", _contrast_cfg_simple())
+        assert r1.formula == "~ 1 + A"
+        assert r2.formula is None
+
+    def test_dataclasses_replace_weight(self):
+        """dataclasses.replace updates weight without touching other fields."""
+        r = ResponseSpec("Y1", _contrast_cfg_simple(), weight=1.0)
+        r2 = dataclasses.replace(r, weight=5.0)
+        assert r2.weight == pytest.approx(5.0)
+        assert r2.name == "Y1"
+
+    def test_dataclasses_replace_formula(self):
+        """dataclasses.replace updates formula independently."""
+        r = ResponseSpec("Y1", _contrast_cfg_simple())
+        r2 = dataclasses.replace(r, formula="~ 1 + A + B")
+        assert r2.formula == "~ 1 + A + B"
+        assert r.formula is None  # original unchanged
+
+    def test_power_cfg_r2_type_stored(self):
+        """R2Config stored as PowerR2Config type."""
+        r = ResponseSpec("Y1", _r2_cfg_simple())
+        assert isinstance(r.power_cfg, PowerR2Config)
+
+    def test_power_cfg_contrast_type_stored(self):
+        """ContrastConfig stored as PowerContrastConfig type."""
+        r = ResponseSpec("Y1", _contrast_cfg_simple())
+        assert isinstance(r.power_cfg, PowerContrastConfig)
+
+
+class TestMR10MultiResponseOptionsEdgeCases:
+    """MR-10: edge cases for MultiResponseOptions not covered by TestMultiResponseOptions."""
+
+    def _two(self, rule="min", **kw):
+        r1 = ResponseSpec("Y1", _contrast_cfg_simple())
+        r2 = ResponseSpec("Y2", _contrast_cfg_simple())
+        return MultiResponseOptions([r1, r2], power_combination=rule, **kw)
+
+    def test_three_responses_accepted(self):
+        """Three responses are accepted."""
+        responses = [ResponseSpec(f"Y{i}", _r2_cfg_simple()) for i in range(1, 4)]
+        mro = MultiResponseOptions(responses)
+        assert len(mro.responses) == 3
+
+    def test_five_responses_accepted(self):
+        """Five responses are accepted (no upper bound on k)."""
+        responses = [ResponseSpec(f"Y{i}", _r2_cfg_simple()) for i in range(1, 6)]
+        mro = MultiResponseOptions(responses)
+        assert len(mro.responses) == 5
+
+    def test_sigma_joint_stored_as_ndarray(self):
+        """sigma_joint is stored as a numpy ndarray, not a list."""
+        sigma = np.eye(2)
+        mro = self._two(sigma_joint=sigma)
+        assert isinstance(mro.sigma_joint, np.ndarray)
+
+    def test_sigma_joint_three_responses_3x3_accepted(self):
+        """3x3 sigma_joint is accepted for 3 responses."""
+        responses = [ResponseSpec(f"Y{i}", _contrast_cfg_simple()) for i in range(1, 4)]
+        sigma = np.eye(3)
+        mro = MultiResponseOptions(responses, sigma_joint=sigma)
+        assert mro.sigma_joint.shape == (3, 3)
+
+    def test_sigma_joint_wrong_k_raises_shape_error(self):
+        """2x2 sigma_joint for 3 responses raises ValueError."""
+        responses = [ResponseSpec(f"Y{i}", _contrast_cfg_simple()) for i in range(1, 4)]
+        with pytest.raises(ValueError, match="sigma_joint"):
+            MultiResponseOptions(responses, sigma_joint=np.eye(2))
+
+    def test_weights_on_individual_responses_stored(self):
+        """Weights set on individual ResponseSpec objects are preserved in responses list."""
+        r1 = ResponseSpec("Y1", _contrast_cfg_simple(), weight=3.0)
+        r2 = ResponseSpec("Y2", _contrast_cfg_simple(), weight=1.0)
+        mro = MultiResponseOptions([r1, r2])
+        assert mro.responses[0].weight == pytest.approx(3.0)
+        assert mro.responses[1].weight == pytest.approx(1.0)
+
+    def test_mixed_r2_contrast_three_responses(self):
+        """Mix of R2 and contrast responses is accepted for 3 responses."""
+        r1 = ResponseSpec("Y1", _contrast_cfg_simple())
+        r2 = ResponseSpec("Y2", _r2_cfg_simple())
+        r3 = ResponseSpec("Y3", _contrast_cfg_simple())
+        mro = MultiResponseOptions([r1, r2, r3])
+        assert len(mro.responses) == 3
+
+    def test_default_power_combination_is_min(self):
+        """Default power_combination is 'min'."""
+        r1 = ResponseSpec("Y1", _r2_cfg_simple())
+        r2 = ResponseSpec("Y2", _r2_cfg_simple())
+        mro = MultiResponseOptions([r1, r2])
+        assert mro.power_combination == "min"
+
+    def test_responses_length_matches_input(self):
+        """len(mro.responses) matches the number of responses passed."""
+        responses = [ResponseSpec(f"Y{i}", _r2_cfg_simple()) for i in range(1, 5)]
+        mro = MultiResponseOptions(responses)
+        assert len(mro.responses) == 4

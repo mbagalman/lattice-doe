@@ -17,7 +17,7 @@ import ast as _ast
 import math as _math
 import warnings as _warnings
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Literal, TYPE_CHECKING
+from typing import Callable, List, Optional, Literal, Union, TYPE_CHECKING
 import numpy as np  # core dependency
 
 if TYPE_CHECKING:
@@ -706,4 +706,107 @@ class DesignOptions:
         )
 
 
-__all__ = ["PowerContrastConfig", "PowerR2Config", "DesignOptions", "SplitPlotOptions"]
+
+# ---------------------------------------------------------------------
+# Multi-response design configuration
+# ---------------------------------------------------------------------
+
+#: Type alias for the per-response power configuration discriminated union.
+PowerCfg = Union["PowerContrastConfig", "PowerR2Config"]
+
+
+@dataclass
+class ResponseSpec:
+    """Specification of one response variable's power requirements.
+
+    Parameters
+    ----------
+    name : str
+        Label for this response (used in reporting and result dict keys).
+    power_cfg : PowerContrastConfig | PowerR2Config
+        Power requirements for this response.  Each response may use a
+        different mode (contrast or R²), have its own sigma, L, delta, etc.
+    formula : str or None, default None
+        Patsy formula for this response.  If None, the global formula
+        passed to i_optimal_multiresponse_design() is used.  Setting a
+        different formula per-response activates the compound criterion path.
+    weight : float, default 1.0
+        Relative importance weight used when power_combination="weighted_mean".
+        Weights are normalised internally (they do not need to sum to 1).
+    """
+
+    name: str
+    power_cfg: PowerCfg
+    formula: Optional[str] = None
+    weight: float = 1.0
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("ResponseSpec.name must be a non-empty string.")
+        if not isinstance(self.power_cfg, (PowerContrastConfig, PowerR2Config)):
+            raise TypeError(
+                "ResponseSpec.power_cfg must be a PowerContrastConfig or PowerR2Config."
+            )
+        if self.weight <= 0:
+            raise ValueError(f"ResponseSpec.weight must be > 0, got {self.weight}.")
+
+
+@dataclass
+class MultiResponseOptions:
+    """Options for multi-response powered design.
+
+    Parameters
+    ----------
+    responses : list of ResponseSpec
+        One entry per response variable.  Must contain at least two entries
+        (use i_optimal_powered_design for single-response problems).
+    power_combination : {"min", "product", "weighted_mean"}, default "min"
+        Rule for aggregating per-response powers into a single scalar used
+        by the binary n-search.
+
+        * "min"           — design adequate when *all* responses reach target
+                            (conservative; recommended default).
+        * "product"       — overall probability all responses pass (independence).
+        * "weighted_mean" — weighted average; tolerates weaker minor responses.
+    sigma_joint : ndarray (k x k) or None, default None
+        Inter-response error covariance matrix for Hotelling T² joint power.
+        Must be symmetric positive definite with k = len(responses).
+        When None, per-response independence combination is used.
+        Only valid when all responses share the same formula and use contrast mode.
+    """
+
+    responses: List[ResponseSpec]
+    power_combination: Literal["min", "product", "weighted_mean"] = "min"
+    sigma_joint: Optional[np.ndarray] = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if len(self.responses) < 2:
+            raise ValueError(
+                "MultiResponseOptions requires at least 2 ResponseSpec entries. "
+                "Use i_optimal_powered_design() for single-response problems."
+            )
+        names = [r.name for r in self.responses]
+        if len(names) != len(set(names)):
+            raise ValueError("ResponseSpec names must be unique.")
+        if self.power_combination not in ("min", "product", "weighted_mean"):
+            raise ValueError(
+                "power_combination must be 'min', 'product', or 'weighted_mean'."
+            )
+        if self.sigma_joint is not None:
+            k = len(self.responses)
+            arr = np.asarray(self.sigma_joint)
+            if arr.shape != (k, k):
+                raise ValueError(
+                    f"sigma_joint must be ({k},{k}) for {k} responses, "
+                    f"got {arr.shape}."
+                )
+
+
+__all__ = [
+    "PowerContrastConfig",
+    "PowerR2Config",
+    "DesignOptions",
+    "SplitPlotOptions",
+    "ResponseSpec",
+    "MultiResponseOptions",
+]

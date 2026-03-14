@@ -53,7 +53,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions
+from .config import (
+    PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions,
+    MultiResponseOptions, ResponseSpec,
+)
 
 # ---------------------------------------------------------------------------
 # Soft dependency guard — same pattern as plot_backends.py (Plotly)
@@ -83,9 +86,10 @@ class SheetsError(RuntimeError):
 # ---------------------------------------------------------------------------
 # Section sentinel constants
 # ---------------------------------------------------------------------------
-_SENTINEL_SETTINGS = "[SETTINGS]"
-_SENTINEL_CONTRAST = "[CONTRAST]"
-_SENTINEL_FACTORS  = "[FACTORS]"
+_SENTINEL_SETTINGS   = "[SETTINGS]"
+_SENTINEL_CONTRAST   = "[CONTRAST]"
+_SENTINEL_FACTORS    = "[FACTORS]"
+_SENTINEL_RESPONSES  = "[RESPONSES]"
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +142,8 @@ def _read_all_rows(worksheet: "gspread.Worksheet") -> List[List[str]]:
 # ---------------------------------------------------------------------------
 def _parse_config_sheet(
     worksheet: "gspread.Worksheet",
-) -> Tuple[str, Dict[str, Any], Union[PowerContrastConfig, PowerR2Config], DesignOptions]:
-    """Parse the Config worksheet and return ``(formula, factors, power_cfg, design_opts)``.
+) -> Tuple[str, Dict[str, Any], Union[PowerContrastConfig, PowerR2Config, None], DesignOptions, Optional[MultiResponseOptions]]:
+    """Parse the Config worksheet and return ``(formula, factors, power_cfg, design_opts, multi_cfg)``.
 
     The worksheet must contain three sentinel-delimited sections in column A:
 
@@ -150,6 +154,10 @@ def _parse_config_sheet(
         entries (one per contrast) and a single ``delta`` entry.
     ``[FACTORS]``
         Factor table: name | type | value1 | value2 | …
+    ``[RESPONSES]``
+        Optional; when present activates multi-response mode.
+        Header row: name | power_mode | sigma | alpha | power | weight | L_row | delta | r2_target
+        One data row per response; a ``power_combination`` key-value row may follow.
 
     Parameters
     ----------
@@ -158,7 +166,9 @@ def _parse_config_sheet(
 
     Returns
     -------
-    (formula, factors, power_cfg, design_opts)
+    (formula, factors, power_cfg, design_opts, multi_cfg)
+        ``power_cfg`` is ``None`` and ``multi_cfg`` is a :class:`MultiResponseOptions`
+        when ``[RESPONSES]`` is present; otherwise ``multi_cfg`` is ``None``.
 
     Raises
     ------
@@ -171,9 +181,10 @@ def _parse_config_sheet(
     # ------------------------------------------------------------------
     # 1. Locate sentinel row indices
     # ------------------------------------------------------------------
-    idx_settings: Optional[int] = None
-    idx_contrast: Optional[int] = None
-    idx_factors:  Optional[int] = None
+    idx_settings:  Optional[int] = None
+    idx_contrast:  Optional[int] = None
+    idx_factors:   Optional[int] = None
+    idx_responses: Optional[int] = None
 
     for i, row in enumerate(rows):
         col_a = row[0].strip() if row else ""
@@ -183,6 +194,8 @@ def _parse_config_sheet(
             idx_contrast = i
         elif col_a == _SENTINEL_FACTORS:
             idx_factors = i
+        elif col_a == _SENTINEL_RESPONSES:
+            idx_responses = i
 
     if idx_settings is None:
         raise SheetsError(
@@ -200,7 +213,8 @@ def _parse_config_sheet(
     # ------------------------------------------------------------------
     # Rows between idx_settings+1 and the next sentinel (whichever comes first)
     sentinels_after = [
-        j for j in (idx_contrast, idx_factors) if j is not None and j > idx_settings
+        j for j in (idx_contrast, idx_factors, idx_responses)
+        if j is not None and j > idx_settings
     ]
     settings_end = min(sentinels_after) if sentinels_after else len(rows)
 
@@ -216,15 +230,16 @@ def _parse_config_sheet(
         raise SheetsError(
             "Config sheet [SETTINGS] is missing the required 'formula' key."
         )
-    if "power_mode" not in settings or not settings["power_mode"]:
+    # power_mode is required unless a [RESPONSES] section is present
+    if idx_responses is None and ("power_mode" not in settings or not settings["power_mode"]):
         raise SheetsError(
             "Config sheet [SETTINGS] is missing the required 'power_mode' key."
         )
 
-    formula   = settings["formula"]
-    power_mode = settings["power_mode"].strip().lower()
+    formula    = settings["formula"]
+    power_mode = settings.get("power_mode", "").strip().lower()
 
-    if power_mode not in ("r2", "contrast"):
+    if power_mode and power_mode not in ("r2", "contrast"):
         raise SheetsError(
             f"Config sheet [SETTINGS] power_mode must be 'r2' or 'contrast'; "
             f"got {settings['power_mode']!r}."
@@ -325,98 +340,102 @@ def _parse_config_sheet(
         raise SheetsError(f"Config sheet produced invalid DesignOptions: {e}") from e
 
     # ------------------------------------------------------------------
-    # 4. Build power config
+    # 4. Build power config  (skipped when [RESPONSES] is present)
     # ------------------------------------------------------------------
-    if power_mode == "r2":
-        try:
-            power_cfg: Union[PowerContrastConfig, PowerR2Config] = PowerR2Config(
-                r2_target=r2_target,
-                alpha=alpha,
-                power=power_target,
-                sigma=sigma,
-                max_n=max_n,
-            )
-        except (ValueError, TypeError) as e:
-            raise SheetsError(f"Config sheet produced invalid PowerR2Config: {e}") from e
+    power_cfg: Optional[Union[PowerContrastConfig, PowerR2Config]] = None
 
-    else:  # contrast
-        if idx_contrast is None:
-            raise SheetsError(
-                f"power_mode is 'contrast' but the '{_SENTINEL_CONTRAST}' sentinel "
-                "is missing from the Config sheet."
-            )
+    if idx_responses is None:
+        if power_mode == "r2":
+            try:
+                power_cfg = PowerR2Config(
+                    r2_target=r2_target,
+                    alpha=alpha,
+                    power=power_target,
+                    sigma=sigma,
+                    max_n=max_n,
+                )
+            except (ValueError, TypeError) as e:
+                raise SheetsError(f"Config sheet produced invalid PowerR2Config: {e}") from e
 
-        # Rows between idx_contrast+1 and idx_factors
-        sentinels_after_contrast = [
-            j for j in (idx_factors,) if j > idx_contrast
-        ]
-        contrast_end = min(sentinels_after_contrast) if sentinels_after_contrast else len(rows)
+        else:  # contrast
+            if idx_contrast is None:
+                raise SheetsError(
+                    f"power_mode is 'contrast' but the '{_SENTINEL_CONTRAST}' sentinel "
+                    "is missing from the Config sheet."
+                )
 
-        l_rows: List[List[float]] = []
-        delta_values: Optional[List[float]] = None
+            # Rows between idx_contrast+1 and idx_factors
+            sentinels_after_contrast = [
+                j for j in (idx_factors,) if j > idx_contrast
+            ]
+            contrast_end = min(sentinels_after_contrast) if sentinels_after_contrast else len(rows)
 
-        for row in rows[idx_contrast + 1 : contrast_end]:
-            col_a = row[0].strip() if len(row) > 0 else ""
-            col_b = row[1].strip() if len(row) > 1 else ""
-            if not col_a:
-                continue
-            if col_a == "L_row":
-                try:
-                    l_rows.append([float(v.strip()) for v in col_b.split(",") if v.strip()])
-                except ValueError as e:
-                    raise SheetsError(
-                        f"Config sheet [CONTRAST] L_row contains non-numeric value: {col_b!r}. "
-                        f"Expected comma-separated floats."
-                    ) from e
-            elif col_a == "delta":
-                try:
-                    delta_values = [float(v.strip()) for v in col_b.split(",") if v.strip()]
-                except ValueError as e:
-                    raise SheetsError(
-                        f"Config sheet [CONTRAST] delta contains non-numeric value: {col_b!r}. "
-                        f"Expected comma-separated floats."
-                    ) from e
+            l_rows: List[List[float]] = []
+            delta_values: Optional[List[float]] = None
 
-        if not l_rows:
-            raise SheetsError(
-                "Config sheet [CONTRAST] has no 'L_row' entries. "
-                "Add at least one row with 'L_row' in column A and "
-                "comma-separated contrast coefficients in column B."
-            )
-        if delta_values is None:
-            raise SheetsError(
-                "Config sheet [CONTRAST] is missing the 'delta' row. "
-                "Add a row with 'delta' in column A and the effect size(s) in column B."
-            )
-        if len(delta_values) != len(l_rows):
-            raise SheetsError(
-                f"Config sheet [CONTRAST] delta has {len(delta_values)} value(s) but "
-                f"there are {len(l_rows)} L_row(s). They must have the same length."
-            )
+            for row in rows[idx_contrast + 1 : contrast_end]:
+                col_a = row[0].strip() if len(row) > 0 else ""
+                col_b = row[1].strip() if len(row) > 1 else ""
+                if not col_a:
+                    continue
+                if col_a == "L_row":
+                    try:
+                        l_rows.append([float(v.strip()) for v in col_b.split(",") if v.strip()])
+                    except ValueError as e:
+                        raise SheetsError(
+                            f"Config sheet [CONTRAST] L_row contains non-numeric value: {col_b!r}. "
+                            f"Expected comma-separated floats."
+                        ) from e
+                elif col_a == "delta":
+                    try:
+                        delta_values = [float(v.strip()) for v in col_b.split(",") if v.strip()]
+                    except ValueError as e:
+                        raise SheetsError(
+                            f"Config sheet [CONTRAST] delta contains non-numeric value: {col_b!r}. "
+                            f"Expected comma-separated floats."
+                        ) from e
 
-        L = np.array(l_rows, dtype=float)
-        delta = np.array(delta_values, dtype=float)
+            if not l_rows:
+                raise SheetsError(
+                    "Config sheet [CONTRAST] has no 'L_row' entries. "
+                    "Add at least one row with 'L_row' in column A and "
+                    "comma-separated contrast coefficients in column B."
+                )
+            if delta_values is None:
+                raise SheetsError(
+                    "Config sheet [CONTRAST] is missing the 'delta' row. "
+                    "Add a row with 'delta' in column A and the effect size(s) in column B."
+                )
+            if len(delta_values) != len(l_rows):
+                raise SheetsError(
+                    f"Config sheet [CONTRAST] delta has {len(delta_values)} value(s) but "
+                    f"there are {len(l_rows)} L_row(s). They must have the same length."
+                )
 
-        try:
-            power_cfg = PowerContrastConfig(
-                L=L,
-                delta=delta,
-                alpha=alpha,
-                power=power_target,
-                sigma=sigma,
-                max_n=max_n,
-            )
-        except (ValueError, TypeError) as e:
-            raise SheetsError(
-                f"Config sheet produced invalid PowerContrastConfig: {e}"
-            ) from e
+            L = np.array(l_rows, dtype=float)
+            delta = np.array(delta_values, dtype=float)
+
+            try:
+                power_cfg = PowerContrastConfig(
+                    L=L,
+                    delta=delta,
+                    alpha=alpha,
+                    power=power_target,
+                    sigma=sigma,
+                    max_n=max_n,
+                )
+            except (ValueError, TypeError) as e:
+                raise SheetsError(
+                    f"Config sheet produced invalid PowerContrastConfig: {e}"
+                ) from e
 
     # ------------------------------------------------------------------
     # 5. Parse [FACTORS] section
     # ------------------------------------------------------------------
     factors: Dict[str, Any] = {}
 
-    factors_end = len(rows)
+    # Factors end at [RESPONSES] if present, otherwise end of sheet
+    factors_end = idx_responses if idx_responses is not None and idx_responses > idx_factors else len(rows)
     # First non-sentinel row after [FACTORS] is the header — skip it.
     factors_data_start = idx_factors + 2   # +1 = first row after sentinel, +1 = skip header
 
@@ -468,7 +487,106 @@ def _parse_config_sheet(
             "Add at least one factor row after the header."
         )
 
-    return formula, factors, power_cfg, design_opts
+    # ------------------------------------------------------------------
+    # 6. Parse [RESPONSES] section (optional — multi-response mode)
+    # ------------------------------------------------------------------
+    multi_cfg: Optional[MultiResponseOptions] = None
+
+    if idx_responses is not None:
+        # Header row at idx_responses + 1: name|power_mode|sigma|alpha|power|weight|L_row|delta|r2_target
+        # Data rows start at idx_responses + 2
+        responses_data_start = idx_responses + 2
+        specs: List[ResponseSpec] = []
+        power_combination = "min"
+
+        for row in rows[responses_data_start:]:
+            col_a = row[0].strip() if len(row) > 0 else ""
+            col_b = row[1].strip() if len(row) > 1 else ""
+            if not col_a:
+                continue
+            if col_a == "power_combination":
+                power_combination = col_b or "min"
+                continue
+
+            # Data columns: name|power_mode|sigma|alpha|power|weight|L_row|delta|r2_target
+            def _rcell(idx: int) -> str:
+                return row[idx].strip() if len(row) > idx else ""
+
+            r_name = col_a
+            r_mode = col_b.lower()
+            r_sigma = float(_rcell(2)) if _rcell(2) else sigma
+            r_alpha = float(_rcell(3)) if _rcell(3) else alpha
+            r_power_v = float(_rcell(4)) if _rcell(4) else power_target
+            r_weight = float(_rcell(5)) if _rcell(5) else 1.0
+            r_L_str  = _rcell(6)
+            r_d_str  = _rcell(7)
+            r_r2_str = _rcell(8)
+            r_formula_str = _rcell(9) or None
+
+            if r_mode == "contrast":
+                if not r_L_str or not r_d_str:
+                    raise SheetsError(
+                        f"[RESPONSES] row '{r_name}': contrast mode requires "
+                        "L_row (col 7) and delta (col 8) values."
+                    )
+                try:
+                    L_vals = [float(v.strip()) for v in r_L_str.split(",") if v.strip()]
+                    d_vals = [float(v.strip()) for v in r_d_str.split(",") if v.strip()]
+                except ValueError as e:
+                    raise SheetsError(
+                        f"[RESPONSES] row '{r_name}': non-numeric L_row or delta: {e}"
+                    ) from e
+                r_L = np.array([L_vals], dtype=float)
+                r_d = np.array(d_vals, dtype=float)
+                try:
+                    pcfg: Union[PowerContrastConfig, PowerR2Config] = PowerContrastConfig(
+                        L=r_L, delta=r_d, alpha=r_alpha, power=r_power_v, sigma=r_sigma,
+                    )
+                except (ValueError, TypeError) as e:
+                    raise SheetsError(
+                        f"[RESPONSES] row '{r_name}': invalid PowerContrastConfig: {e}"
+                    ) from e
+            elif r_mode == "r2":
+                if not r_r2_str:
+                    raise SheetsError(
+                        f"[RESPONSES] row '{r_name}': r2 mode requires r2_target (col 9)."
+                    )
+                try:
+                    pcfg = PowerR2Config(
+                        r2_target=float(r_r2_str),
+                        alpha=r_alpha, power=r_power_v, sigma=r_sigma,
+                    )
+                except (ValueError, TypeError) as e:
+                    raise SheetsError(
+                        f"[RESPONSES] row '{r_name}': invalid PowerR2Config: {e}"
+                    ) from e
+            else:
+                raise SheetsError(
+                    f"[RESPONSES] row '{r_name}': power_mode must be 'contrast' or 'r2'; "
+                    f"got {col_b!r}."
+                )
+
+            try:
+                specs.append(ResponseSpec(
+                    name=r_name, power_cfg=pcfg,
+                    formula=r_formula_str, weight=r_weight,
+                ))
+            except (ValueError, TypeError) as e:
+                raise SheetsError(f"[RESPONSES] row '{r_name}': {e}") from e
+
+        if len(specs) < 2:
+            raise SheetsError(
+                f"[RESPONSES] section must define at least 2 responses; "
+                f"found {len(specs)}."
+            )
+        try:
+            multi_cfg = MultiResponseOptions(
+                responses=specs, power_combination=power_combination,
+            )
+        except (ValueError, TypeError) as e:
+            raise SheetsError(f"Config sheet produced invalid MultiResponseOptions: {e}") from e
+
+    return formula, factors, power_cfg, design_opts, multi_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -868,7 +986,7 @@ def sheets_run(
     # 4. Parse config
     # ------------------------------------------------------------------
     try:
-        formula, factors, power_cfg, design_opts = _parse_config_sheet(config_ws)
+        formula, factors, power_cfg, design_opts, multi_cfg = _parse_config_sheet(config_ws)
     except SheetsError:
         raise
     except Exception as e:
@@ -878,13 +996,22 @@ def sheets_run(
     # 5. Run the design (lazy import to avoid circular imports)
     # ------------------------------------------------------------------
     try:
-        from .api import i_optimal_powered_design  # noqa: PLC0415
-        result: Dict[str, Any] = i_optimal_powered_design(
-            formula=formula,
-            factors=factors,
-            power_config=power_cfg,
-            design_options=design_opts,
-        )
+        if multi_cfg is not None:
+            from .api import i_optimal_multiresponse_design  # noqa: PLC0415
+            result: Dict[str, Any] = i_optimal_multiresponse_design(
+                formula=formula,
+                factors=factors,
+                multi_cfg=multi_cfg,
+                design_opts=design_opts,
+            )
+        else:
+            from .api import i_optimal_powered_design  # noqa: PLC0415
+            result = i_optimal_powered_design(
+                formula=formula,
+                factors=factors,
+                power_config=power_cfg,
+                design_options=design_opts,
+            )
     except Exception as e:
         raise SheetsError(
             f"Design optimisation failed: {e}"

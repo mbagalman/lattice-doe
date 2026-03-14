@@ -51,7 +51,7 @@ import sys
 import os
 import logging  # ADDED: For logging
 from pathlib import Path
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Union
 
 try:
     import yaml  # type: ignore
@@ -61,8 +61,11 @@ except Exception:  # pragma: no cover - optional dep
 
 import pandas as pd
 
-from .api import i_optimal_powered_design
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions
+from .api import i_optimal_powered_design, i_optimal_multiresponse_design
+from .config import (
+    PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions,
+    MultiResponseOptions, ResponseSpec,
+)
 from .contrasts import contrast_from_scenarios
 
 logger = logging.getLogger("iopt-design")
@@ -108,9 +111,10 @@ def _validate_config_keys(cfg: Dict[str, Any]) -> None:
     if "factors" not in cfg:
         raise KeyError("Config validation failed: 'factors' key is required.")
         
-    if "contrast" not in cfg and "r2_target" not in cfg:
+    if "responses" not in cfg and "contrast" not in cfg and "r2_target" not in cfg:
         raise KeyError(
-            "Config validation failed: Must contain either a 'contrast' block or 'r2_target' key."
+            "Config validation failed: Must contain either a 'responses' list (multi-response), "
+            "a 'contrast' block, or an 'r2_target' key."
         )
         
     if "contrast" in cfg:
@@ -209,6 +213,74 @@ def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
         # This path should be unreachable due to _validate_config_keys
         raise ValueError("Internal error: Missing r2_target or contrast block.")
     return PowerR2Config(r2_target=float(cfg["r2_target"]), alpha=alpha, power=power, sigma=sigma)
+
+
+def _make_multi_response_cfg(
+    cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]
+) -> MultiResponseOptions:
+    """Parse the ``responses:`` YAML block into a :class:`MultiResponseOptions`."""
+    raw_responses = cfg.get("responses")
+    if not isinstance(raw_responses, list) or len(raw_responses) < 2:
+        raise ValueError(
+            "Config 'responses' must be a list of at least 2 response entries."
+        )
+
+    global_alpha = float(cfg.get("alpha", 0.05))
+    global_power = float(cfg.get("power", 0.8))
+
+    specs: List[ResponseSpec] = []
+    for r in raw_responses:
+        if not isinstance(r, dict):
+            raise ValueError(f"Each 'responses' entry must be a mapping; got {type(r).__name__!r}.")
+        name = str(r.get("name", "")).strip()
+        if not name:
+            raise KeyError("Each response entry must have a non-empty 'name' key.")
+
+        r_alpha = float(r.get("alpha", global_alpha))
+        r_power = float(r.get("power", global_power))
+        r_sigma = float(r.get("sigma", 1.0))
+        r_weight = float(r.get("weight", 1.0))
+        r_formula = r.get("formula", None)
+        eff_formula = r_formula or formula
+
+        r_max_n = int(r.get("max_n", cfg.get("max_n", 500)))
+
+        if "contrast" in r:
+            c = r["contrast"] or {}
+            if {"scenario_a", "scenario_b", "sesoi"} <= c.keys():
+                L, delta = contrast_from_scenarios(
+                    eff_formula,
+                    factors,
+                    c["scenario_a"],
+                    c["scenario_b"],
+                    float(c["sesoi"]),
+                )
+            elif "L" in c and "delta" in c:
+                import numpy as np  # local import
+                L = np.asarray(c["L"], dtype=float)
+                delta = np.asarray(c["delta"], dtype=float)
+            else:
+                raise KeyError(
+                    f"Response '{name}' contrast block must contain "
+                    "[scenario_a, scenario_b, sesoi] or explicit [L, delta]."
+                )
+            pcfg: Union[PowerContrastConfig, PowerR2Config] = PowerContrastConfig(
+                L=L, delta=delta, alpha=r_alpha, power=r_power, sigma=r_sigma, max_n=r_max_n,
+            )
+        elif "r2_target" in r:
+            pcfg = PowerR2Config(
+                r2_target=float(r["r2_target"]), alpha=r_alpha, power=r_power, sigma=r_sigma,
+                max_n=r_max_n,
+            )
+        else:
+            raise KeyError(
+                f"Response '{name}' must contain either a 'contrast' block or an 'r2_target' key."
+            )
+
+        specs.append(ResponseSpec(name=name, power_cfg=pcfg, formula=r_formula, weight=r_weight))
+
+    power_combination = str(cfg.get("power_combination", "min"))
+    return MultiResponseOptions(responses=specs, power_combination=power_combination)
 
 
 def _apply_sp_cli_args(cfg: Dict[str, Any], args) -> Dict[str, Any]:
@@ -361,6 +433,22 @@ output:
 #   eta: 1.0                     # variance ratio σ²_wp / σ²_sp (≥ 0; 0 = OLS)
 #   subplots_per_wp: 4           # sub-plots per WP; omit for auto
 #   df_method: auto              # auto | conservative | sp_only
+
+# Multi-response (optional)
+# Replace the 'contrast:' block above with a 'responses:' list to optimise
+# a single design for multiple response variables simultaneously.
+# The top-level 'contrast:' / 'r2_target' keys must be removed when using this.
+# power_combination: min         # min | product | weighted_mean
+# responses:
+#   - name: Yield
+#     sigma: 2.0
+#     contrast:
+#       scenario_a: {{A: low,  B: 5.0}}
+#       scenario_b: {{A: high, B: 5.0}}
+#       sesoi: 1.0
+#   - name: Purity
+#     sigma: 0.5
+#     r2_target: 0.20
 """
 
 _TEMPLATE_R2 = """\
@@ -490,6 +578,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             "Read config from the 'Config' sheet of an existing .xlsx workbook at PATH, "
             "run the design search, and write Results/Design/Buckets sheets back. "
             "Requires: pip install 'iopt-power-design[extras]'"
+        ),
+    )
+    parser.add_argument(
+        "--multi-response",
+        action="store_true",
+        default=False,
+        help=(
+            "Treat the config as a multi-response design. "
+            "Requires a 'responses:' list in the config (see --template contrast). "
+            "When the config contains 'responses:', this flag is inferred automatically."
         ),
     )
     parser.add_argument(
@@ -677,7 +775,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.debug("Parsing config sections...")
         formula = str(cfg["formula"])
         factors = _as_factors(cfg["factors"])
-        power_cfg = _make_power_cfg(cfg, formula, factors)
+
+        _is_multiresponse = bool(args.multi_response) or "responses" in cfg
+        if _is_multiresponse:
+            power_cfg = None
+            multi_cfg = _make_multi_response_cfg(cfg, formula, factors)
+        else:
+            power_cfg = _make_power_cfg(cfg, formula, factors)
+            multi_cfg = None
 
         # Merge CLI split-plot flags into cfg["split_plot"] (CLI takes priority over YAML)
         cfg = _apply_sp_cli_args(cfg, args)
@@ -707,7 +812,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             logger.info("\n--- Dry Run Validation Successful ---")
             logger.info(f"  Formula: {formula}")
             logger.info(f"  Factors: {list(factors.keys())}")
-            logger.info(f"Power Config: {power_cfg.__class__.__name__}")
+            if _is_multiresponse:
+                logger.info(f"  Mode: multi-response ({len(multi_cfg.responses)} responses)")
+            else:
+                logger.info(f"Power Config: {power_cfg.__class__.__name__}")
             logger.info(f"Design Algo: {design_opts.algo}")
             logger.info(f" Output Dir: {out_dir.resolve()} (writable)")
             logger.info("--- Exiting without design generation ---")
@@ -715,17 +823,48 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # --- End Validation, Start Main Task ---
         logger.info("Config validated. Running powered design generation...")
-        
-        result = i_optimal_powered_design(
-            formula,
-            factors,
-            power_cfg,
-            design_opts,
-        )
-        
-        design_df = result["design_df"]
-        buckets_df = result["buckets_df"]
-        report = result["report"]
+
+        if _is_multiresponse:
+            _mr_result = i_optimal_multiresponse_design(
+                formula=formula,
+                factors=factors,
+                multi_cfg=multi_cfg,
+                design_opts=design_opts,
+            )
+            # Normalize multi-response result to the CLI's standard format
+            design_df = _mr_result["design"]
+            buckets_df = _mr_result["buckets"]
+            report: Dict[str, Any] = {
+                "n": _mr_result["n"],
+                "p": _mr_result.get("p"),
+                "achieved_power": _mr_result["achieved_power"],
+                "combined_power": _mr_result["achieved_power"],
+                "combination_rule": _mr_result.get("combination_rule"),
+                "criterion": design_opts.criterion,
+                "algo": design_opts.algo,
+                "starts": design_opts.starts,
+                "elapsed_sec": _mr_result.get("elapsed_sec"),
+                "search_strategy": _mr_result.get("search_strategy"),
+                "warnings": _mr_result.get("warnings", []),
+                "compound_criterion": _mr_result.get("compound_criterion", False),
+            }
+            # Add per-response power keys for the summary printout
+            for _rd in _mr_result.get("responses", []):
+                report[f"{_rd['name']}_power"] = _rd["power"]
+            result = dict(_mr_result)
+            result["design_df"] = design_df
+            result["buckets_df"] = buckets_df
+            result["report"] = report
+        else:
+            result = i_optimal_powered_design(
+                formula,
+                factors,
+                power_cfg,
+                design_opts,
+            )
+            design_df = result["design_df"]
+            buckets_df = result["buckets_df"]
+            report = result["report"]
 
         # Determine output basename (already done, just use `out_path`)
         logger.info(f"Writing output files with basename: {out_path}")
@@ -749,28 +888,34 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.info(f"Wrote: {buckets_csv}")
         logger.info(f"Wrote: {report_json}")
 
-        # Optional HTML report (CLI flag or config key)
+        # Optional HTML report (CLI flag or config key; not supported for multi-response)
         html_report_flag = args.html_report or bool(out_cfg.get("html_report", False))
         if html_report_flag:
-            report_html = out_path.with_name(out_path.name + "_report.html")
-            try:
-                from .report import generate_report
-                generate_report(
-                    result=result,
-                    formula=formula,
-                    factors=factors,
-                    power_cfg=power_cfg,
-                    output_path=report_html,
-                    include_power_curve=False,
-                )
-                logger.info(f"Wrote: {report_html}")
-            except ImportError:
-                logger.warning(
-                    "HTML report skipped: jinja2 is not installed. "
-                    'Install it with: pip install "iopt-power-design[report]"'
-                )
-            except Exception as _rpt_err:
-                logger.warning(f"HTML report failed: {_rpt_err}")
+            if _is_multiresponse:
+                logger.warning("HTML report is not yet supported for multi-response designs; skipped.")
+                report_html = None
+            else:
+                report_html = out_path.with_name(out_path.name + "_report.html")
+                try:
+                    from .report import generate_report
+                    generate_report(
+                        result=result,
+                        formula=formula,
+                        factors=factors,
+                        power_cfg=power_cfg,
+                        output_path=report_html,
+                        include_power_curve=False,
+                    )
+                    logger.info(f"Wrote: {report_html}")
+                except ImportError:
+                    logger.warning(
+                        "HTML report skipped: jinja2 is not installed. "
+                        'Install it with: pip install "iopt-power-design[report]"'
+                    )
+                except Exception as _rpt_err:
+                    logger.warning(f"HTML report failed: {_rpt_err}")
+        else:
+            report_html = None
 
         # Optional Excel (CLI flag has priority; config can also request excel)
         excel_flag = args.excel or bool(out_cfg.get("excel", False))
@@ -783,8 +928,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 pd.DataFrame([report]).to_excel(xw, index=False, sheet_name="report")
             logger.info(f"Wrote: {excel_path}")
 
-        # Optional robustness report
+        # Optional robustness report (single-response only)
         if args.robustness_report:
+            if _is_multiresponse:
+                logger.warning("--robustness-report is not supported for multi-response designs; skipped.")
             try:
                 from iopt_power_design.analysis import robustness_report  # noqa: PLC0415
                 rob = robustness_report(
@@ -821,11 +968,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         for k in ("n", "p", "df_num", "df_denom", "alpha", "target_power", "achieved_power"):
             if k in report:
                 print(f"{k:>15}: {report[k]}")
+        # Multi-response per-response powers
+        if _is_multiresponse:
+            for rspec in multi_cfg.responses:
+                key = f"{rspec.name}_power"
+                if key in report:
+                    print(f"{key:>15}: {report[key]:.3f}")
+            if "combined_power" in report:
+                print(f"{'combined_power':>15}: {report['combined_power']:.3f}")
         print(f"{'criterion':>15}: {report.get('criterion', 'N/A')}")
         print(f"{'algo':>15}: {report.get('algo', 'N/A')}")
         print(f"{'starts':>15}: {report.get('starts', 'N/A')}")
         # --- Enhancement 10: richer run metadata ---
-        if html_report_flag and report_html.exists():
+        if html_report_flag and report_html is not None and report_html.exists():
             print(f"{'html_report':>15}: {report_html}")
         if "elapsed_sec" in report:
             print(f"{'elapsed_sec':>15}: {report['elapsed_sec']:.4f} s")

@@ -14,7 +14,10 @@ from iopt_power_design import (
     PowerContrastConfig,
     PowerR2Config,
     SplitPlotOptions,
+    ResponseSpec,
+    MultiResponseOptions,
     i_optimal_powered_design,
+    i_optimal_multiresponse_design,
     power_curve_by_effect,
     power_curve_by_n,
     power_curve_by_wp,
@@ -23,6 +26,8 @@ from iopt_power_design import (
     compare_criteria,
     augment_design,
     robustness_report,
+    power_curve_by_n_multiresponse,
+    multiresponse_sensitivity,
 )
 from iopt_power_design.contrasts import contrast_from_scenarios
 
@@ -1197,3 +1202,1059 @@ class TestSplitPlotIntegration:
         assert "power" in df.columns
         assert len(df) == 3
         assert (df["power"] >= 0.0).all() and (df["power"] <= 1.0).all()
+
+
+# ---------------------------------------------------------------------------
+# TestMultiResponseAPI
+# ---------------------------------------------------------------------------
+
+# Shared helpers for multi-response tests — small problem so tests run fast.
+_MR_FORMULA = "~ 1 + A + B"
+_MR_FACTORS = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+_MR_L = np.array([[0, 1, 0], [0, 0, 1]])
+_MR_DELTA = np.array([1.5, 1.5])
+
+
+def _mr_opts(**kw):
+    defaults = dict(candidate_points=200, starts=2, random_state=7, max_iter=30)
+    defaults.update(kw)
+    return DesignOptions(**defaults)
+
+
+def _contrast_rs(name, sigma=1.0, power=0.8, max_n=60, **kw):
+    cfg = PowerContrastConfig(
+        L=_MR_L, delta=_MR_DELTA, sigma=sigma, power=power,
+        max_n=max_n, max_iter=30, **kw
+    )
+    return ResponseSpec(name=name, power_cfg=cfg)
+
+
+def _r2_rs(name, r2=0.5, power=0.8, max_n=60):
+    cfg = PowerR2Config(r2_target=r2, power=power, max_n=max_n, max_iter=30)
+    return ResponseSpec(name=name, power_cfg=cfg)
+
+
+def _run_mr(responses, rule="min", **opts_kw):
+    multi = MultiResponseOptions(responses=responses, power_combination=rule)
+    opts = _mr_opts(**opts_kw)
+    return i_optimal_multiresponse_design(_MR_FORMULA, _MR_FACTORS, multi, opts)
+
+
+class TestMultiResponseAPI:
+    def test_two_identical_responses_returns_result(self):
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
+        assert isinstance(result, dict)
+
+    def test_responses_length_matches_multi_cfg(self):
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
+        assert len(result["responses"]) == 2
+
+    def test_response_dicts_have_required_keys(self):
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
+        for rd in result["responses"]:
+            assert "name" in rd
+            assert "power" in rd
+            assert "lam" in rd
+
+    def test_compound_criterion_false_for_shared_formula(self):
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
+        assert result["compound_criterion"] is False
+
+    def test_combination_rule_in_result(self):
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")], rule="min")
+        assert result["combination_rule"] == "min"
+
+    def test_design_is_dataframe_with_factor_cols(self):
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
+        assert isinstance(result["design"], pd.DataFrame)
+        assert set(_MR_FACTORS.keys()).issubset(result["design"].columns)
+
+    def test_buckets_is_present(self):
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
+        assert "buckets" in result
+        assert isinstance(result["buckets"], pd.DataFrame)
+
+    def test_elapsed_sec_positive(self):
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
+        assert result["elapsed_sec"] > 0
+
+    def test_achieved_power_equals_combine_powers(self):
+        from iopt_power_design import combine_powers
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")], rule="min")
+        per_powers = [rd["power"] for rd in result["responses"]]
+        expected = combine_powers(per_powers, None, "min")
+        assert abs(result["achieved_power"] - expected) < 1e-12
+
+    def test_two_identical_responses_n_matches_single_response(self):
+        # With two identical responses + min rule, n must equal single-response n.
+        single_cfg = PowerContrastConfig(
+            L=_MR_L, delta=_MR_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=30
+        )
+        opts = _mr_opts()
+        single = i_optimal_powered_design(_MR_FORMULA, _MR_FACTORS, single_cfg, opts)
+        multi_result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
+        # Allow ±1 tolerance for design randomness
+        assert abs(multi_result["n"] - single["report"]["n"]) <= 1
+
+    def test_harder_response_drives_n(self):
+        # Y2 has smaller sigma → needs more runs → n must be ≥ Y1 alone
+        opts = _mr_opts()
+        single_cfg = PowerContrastConfig(
+            L=_MR_L, delta=_MR_DELTA, sigma=0.7, power=0.8, max_n=60, max_iter=30
+        )
+        single = i_optimal_powered_design(_MR_FORMULA, _MR_FACTORS, single_cfg, opts)
+        result = _run_mr([_contrast_rs("Y1", sigma=1.0), _contrast_rs("Y2", sigma=0.7)])
+        assert result["n"] >= single["report"]["n"] - 1
+
+    def test_product_combination_rule_accepted(self):
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")], rule="product")
+        assert result["combination_rule"] == "product"
+
+    def test_mixed_contrast_r2_responses_no_error(self):
+        result = _run_mr([_contrast_rs("Y1"), _r2_rs("Y2")])
+        assert len(result["responses"]) == 2
+        assert result["compound_criterion"] is False
+
+    def test_differing_formula_uses_compound_path(self):
+        # MR-5: differing formulas now route to the compound criterion path.
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=np.array([[0, 1]]), delta=np.array([1.5]),
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=30),
+                          formula="~ 1 + A")
+        L2 = np.array([[0, 1, 0], [0, 0, 1]])
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=L2, delta=np.array([1.5, 1.5]),
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=30))
+        multi = MultiResponseOptions([r1, r2])
+        result = i_optimal_multiresponse_design(_MR_FORMULA, _MR_FACTORS, multi, _mr_opts())
+        assert result["compound_criterion"] is True
+
+    def test_workers_parallel_returns_same_structure(self):
+        result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")], workers=2)
+        assert "n" in result
+        assert len(result["responses"]) == 2
+
+    def test_exported_from_top_level(self):
+        import iopt_power_design
+        assert hasattr(iopt_power_design, "i_optimal_multiresponse_design")
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for compound criterion tests (MR-5)
+# ---------------------------------------------------------------------------
+_CP_FORMULA = "~ 1 + A + B"
+_CP_FACTORS = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+# Linear formula (only A): p=2
+_CP_FORMULA_LINEAR = "~ 1 + A"
+# Quadratic formula (A, B, A*B): p=4
+_CP_FORMULA_QUAD = "~ 1 + A + B + A:B"
+
+_CP_L_FULL = np.array([[0, 1, 0], [0, 0, 1]])   # contrast for ~ 1 + A + B
+_CP_L_LINEAR = np.array([[0, 1]])                 # contrast for ~ 1 + A
+_CP_L_QUAD = np.array([[0, 1, 0, 0], [0, 0, 1, 0]])  # for ~ 1 + A + B + A:B
+_CP_DELTA_2 = np.array([1.5, 1.5])
+_CP_DELTA_1 = np.array([1.5])
+
+
+def _cp_opts(**kw):
+    defaults = dict(candidate_points=200, starts=2, random_state=42, max_iter=20)
+    defaults.update(kw)
+    return DesignOptions(**defaults)
+
+
+def _cp_run(r1, r2, rule="min", **opts_kw):
+    multi = MultiResponseOptions(responses=[r1, r2], power_combination=rule)
+    opts = _cp_opts(**opts_kw)
+    return i_optimal_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
+
+
+class TestCompoundCriterion:
+    """MR-5: compound criterion path for responses with different model formulas."""
+
+    def test_identical_formulas_compound_flag_false(self):
+        # When both responses use the global formula, compound_criterion must be False.
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2)
+        assert result["compound_criterion"] is False
+
+    def test_different_formulas_compound_flag_true(self):
+        # One response uses a sub-formula; compound path should be activated.
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2)
+        assert result["compound_criterion"] is True
+
+    def test_compound_result_has_required_keys(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2)
+        for key in ("design", "n", "achieved_power", "responses", "combination_rule",
+                    "compound_criterion", "buckets", "elapsed_sec", "p",
+                    "iteration", "search_strategy", "warnings"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_compound_design_is_dataframe(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2)
+        assert isinstance(result["design"], pd.DataFrame)
+        assert set(_CP_FACTORS.keys()).issubset(result["design"].columns)
+
+    def test_compound_responses_list_length(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2)
+        assert len(result["responses"]) == 2
+
+    def test_compound_responses_have_required_keys(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2)
+        for rd in result["responses"]:
+            assert set(rd.keys()) >= {"name", "power", "lam", "n"}
+
+    def test_compound_achieved_power_positive(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2)
+        assert 0.0 < result["achieved_power"] <= 1.0
+
+    def test_compound_n_positive_integer(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2)
+        assert isinstance(result["n"], int)
+        assert result["n"] > 0
+
+    def test_a_criterion_compound_raises(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        multi = MultiResponseOptions([r1, r2])
+        opts = _cp_opts(criterion="A")
+        with pytest.raises(NotImplementedError, match="A-compound"):
+            i_optimal_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
+
+    def test_unknown_factor_in_formula_raises(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=np.array([[0, 1, 0]]),
+                                                    delta=np.array([1.5]),
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5),
+                          formula="~ 1 + A + C")  # C not in factors
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        multi = MultiResponseOptions([r1, r2])
+        with pytest.raises(ValueError, match="could not be evaluated"):
+            i_optimal_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, _cp_opts())
+
+    def test_d_criterion_compound_runs(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        multi = MultiResponseOptions([r1, r2])
+        opts = _cp_opts(criterion="D")
+        result = i_optimal_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
+        assert result["compound_criterion"] is True
+        assert result["n"] > 0
+
+    def test_compound_design_estimable_both_formulas(self):
+        # Both model matrices formed from the returned design rows must have full rank.
+        from iopt_power_design.model_matrix import build_model_matrix
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2)
+        design = result["design"]
+        X1, _ = build_model_matrix(_CP_FORMULA_LINEAR, design)
+        X2, _ = build_model_matrix(_CP_FORMULA, design)
+        assert np.linalg.matrix_rank(X1) == X1.shape[1]
+        assert np.linalg.matrix_rank(X2) == X2.shape[1]
+
+    def test_formula_none_treated_as_global(self):
+        # A ResponseSpec with formula=None uses the global formula — no compound path.
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=None)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2)
+        assert result["compound_criterion"] is False
+
+    def test_compound_combination_rule_stored(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
+                          formula=_CP_FORMULA_LINEAR)
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        result = _cp_run(r1, r2, rule="weighted_mean")
+        assert result["combination_rule"] == "weighted_mean"
+
+
+# ---------------------------------------------------------------------------
+# MR-6: Hotelling T² integration tests (api-level)
+# ---------------------------------------------------------------------------
+_HT2_FORMULA = "~ 1 + A + B"
+_HT2_FACTORS = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+_HT2_L = np.array([[0, 1, 0], [0, 0, 1]])
+_HT2_DELTA = np.array([1.5, 1.5])
+
+
+def _ht2_mr_opts(**kw):
+    defaults = dict(candidate_points=200, starts=2, random_state=11, max_iter=25)
+    defaults.update(kw)
+    return DesignOptions(**defaults)
+
+
+def _ht2_run(sigma_joint, rule="min", **opts_kw):
+    r1 = ResponseSpec("Y1", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
+                                                sigma=1.0, power=0.8, max_n=60, max_iter=25))
+    r2 = ResponseSpec("Y2", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
+                                                sigma=1.0, power=0.8, max_n=60, max_iter=25))
+    multi = MultiResponseOptions([r1, r2], power_combination=rule,
+                                 sigma_joint=sigma_joint)
+    opts = _ht2_mr_opts(**opts_kw)
+    return i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, opts)
+
+
+class TestHotellingT2API:
+    """MR-6: api-level integration tests for sigma_joint / Hotelling T²."""
+
+    def test_joint_power_key_present(self):
+        result = _ht2_run(np.eye(2))
+        assert "joint_power" in result
+
+    def test_joint_power_in_unit_interval(self):
+        result = _ht2_run(np.eye(2))
+        assert 0.0 <= result["joint_power"] <= 1.0
+
+    def test_responses_still_present(self):
+        # Per-response powers are always reported alongside joint_power.
+        result = _ht2_run(np.eye(2))
+        assert len(result["responses"]) == 2
+        for rd in result["responses"]:
+            assert "power" in rd
+
+    def test_joint_lam_df_keys_present(self):
+        result = _ht2_run(np.eye(2))
+        for key in ("joint_lam", "joint_df1", "joint_df2"):
+            assert key in result
+
+    def test_sigma_joint_none_no_joint_power(self):
+        # Without sigma_joint, joint_power should not appear.
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=25))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=25))
+        multi = MultiResponseOptions([r1, r2])
+        result = i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi,
+                                                _ht2_mr_opts())
+        assert "joint_power" not in result
+
+    def test_sigma_joint_with_r2_response_raises(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        r2 = ResponseSpec("Y2", PowerR2Config(r2_target=0.5, power=0.8, max_n=60, max_iter=5))
+        multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
+        with pytest.raises(NotImplementedError, match="R²-mode"):
+            i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
+
+    def test_sigma_joint_with_compound_path_raises(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=np.array([[0, 1]]), delta=np.array([1.5]),
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5),
+                          formula="~ 1 + A")
+        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
+        with pytest.raises(NotImplementedError, match="compound"):
+            i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
+
+
+# ---------------------------------------------------------------------------
+# MR-7: Multi-response analysis function tests
+# ---------------------------------------------------------------------------
+_ANA_FORMULA = "~ 1 + A + B"
+_ANA_FACTORS = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+_ANA_L = np.array([[0, 1, 0], [0, 0, 1]])
+_ANA_DELTA = np.array([1.5, 1.5])
+
+
+def _ana_opts(**kw):
+    defaults = dict(candidate_points=150, starts=2, random_state=77, max_iter=15)
+    defaults.update(kw)
+    return DesignOptions(**defaults)
+
+
+def _ana_multi(rule="min"):
+    r1 = ResponseSpec("Y1", PowerContrastConfig(L=_ANA_L, delta=_ANA_DELTA,
+                                                sigma=1.0, power=0.8, max_n=60, max_iter=15))
+    r2 = ResponseSpec("Y2", PowerContrastConfig(L=_ANA_L, delta=_ANA_DELTA,
+                                                sigma=1.5, power=0.8, max_n=60, max_iter=15))
+    return MultiResponseOptions([r1, r2], power_combination=rule)
+
+
+class TestMultiResponseAnalysis:
+    """MR-7: power_curve_by_n_multiresponse and multiresponse_sensitivity."""
+
+    # --- power_curve_by_n_multiresponse ---
+
+    def test_returns_dataframe(self):
+        df = power_curve_by_n_multiresponse(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            n_range=(10, 30), n_points=5, design_opts=_ana_opts(),
+        )
+        assert isinstance(df, pd.DataFrame)
+
+    def test_column_count(self):
+        multi = _ana_multi()
+        n_responses = len(multi.responses)
+        df = power_curve_by_n_multiresponse(
+            _ANA_FORMULA, _ANA_FACTORS, multi,
+            n_range=(10, 30), n_points=5, design_opts=_ana_opts(),
+        )
+        # n, combined_power, Y1_power, Y2_power → 4 columns for 2 responses
+        assert df.shape[1] == n_responses + 2
+
+    def test_column_names(self):
+        df = power_curve_by_n_multiresponse(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            n_range=(10, 30), n_points=5, design_opts=_ana_opts(),
+        )
+        assert "n" in df.columns
+        assert "combined_power" in df.columns
+        assert "Y1_power" in df.columns
+        assert "Y2_power" in df.columns
+
+    def test_exact_n_points_rows(self):
+        n_points = 7
+        df = power_curve_by_n_multiresponse(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            n_range=(10, 30), n_points=n_points, design_opts=_ana_opts(),
+        )
+        assert len(df) == n_points
+
+    def test_n_range_respected(self):
+        df = power_curve_by_n_multiresponse(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            n_range=(12, 25), n_points=5, design_opts=_ana_opts(),
+        )
+        assert df["n"].min() >= 12
+        assert df["n"].max() <= 25
+
+    def test_combined_power_equals_combine_powers(self):
+        from iopt_power_design.power import combine_powers
+        df = power_curve_by_n_multiresponse(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            n_range=(15, 25), n_points=4, design_opts=_ana_opts(),
+        )
+        multi = _ana_multi()
+        weights = [r.weight for r in multi.responses]
+        rule = multi.power_combination
+        for _, row in df.iterrows():
+            per_r = [row["Y1_power"], row["Y2_power"]]
+            if not any(np.isnan(p) for p in per_r):
+                expected = combine_powers(per_r, weights, rule)
+                assert row["combined_power"] == pytest.approx(expected, abs=1e-9)
+
+    def test_plot_matplotlib_no_error(self):
+        pytest.importorskip("matplotlib")
+        power_curve_by_n_multiresponse(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            n_range=(10, 20), n_points=3, design_opts=_ana_opts(),
+            plot=True, plot_backend="matplotlib",
+        )
+
+    def test_plot_plotly_no_error(self):
+        pytest.importorskip("plotly")
+        power_curve_by_n_multiresponse(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            n_range=(10, 20), n_points=3, design_opts=_ana_opts(),
+            plot=True, plot_backend="plotly",
+        )
+
+    def test_exported_from_top_level(self):
+        import iopt_power_design
+        assert hasattr(iopt_power_design, "power_curve_by_n_multiresponse")
+
+    # --- multiresponse_sensitivity ---
+
+    def test_sensitivity_returns_dataframe(self):
+        df = multiresponse_sensitivity(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            fixed_n=20, sigma_range=(0.5, 2.0), sigma_points=5,
+            design_opts=_ana_opts(),
+        )
+        assert isinstance(df, pd.DataFrame)
+
+    def test_sensitivity_column_names(self):
+        df = multiresponse_sensitivity(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            fixed_n=20, sigma_range=(0.5, 2.0), sigma_points=5,
+            design_opts=_ana_opts(),
+        )
+        assert "sigma_scale" in df.columns
+        assert "combined_power" in df.columns
+        assert "Y1_power" in df.columns
+        assert "Y2_power" in df.columns
+
+    def test_sensitivity_exact_row_count(self):
+        sigma_points = 8
+        df = multiresponse_sensitivity(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            fixed_n=20, sigma_range=(0.5, 2.5), sigma_points=sigma_points,
+            design_opts=_ana_opts(),
+        )
+        assert len(df) == sigma_points
+
+    def test_sensitivity_monotonically_decreasing(self):
+        df = multiresponse_sensitivity(
+            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
+            fixed_n=25, sigma_range=(0.5, 3.0), sigma_points=10,
+            design_opts=_ana_opts(),
+        )
+        pwr = df["combined_power"].tolist()
+        # Each step should be non-increasing (larger sigma → lower power)
+        for i in range(1, len(pwr)):
+            assert pwr[i] <= pwr[i - 1] + 1e-9, (
+                f"Power increased at step {i}: {pwr[i-1]:.4f} → {pwr[i]:.4f}"
+            )
+
+    def test_sensitivity_r2_response_raises_type_error(self):
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_ANA_L, delta=_ANA_DELTA,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        r2 = ResponseSpec("Y2", PowerR2Config(r2_target=0.4, power=0.8, max_n=60, max_iter=5))
+        multi = MultiResponseOptions([r1, r2])
+        with pytest.raises(TypeError, match="PowerR2Config"):
+            multiresponse_sensitivity(
+                _ANA_FORMULA, _ANA_FACTORS, multi,
+                fixed_n=20, design_opts=_ana_opts(),
+            )
+
+    def test_sensitivity_exported_from_top_level(self):
+        import iopt_power_design
+        assert hasattr(iopt_power_design, "multiresponse_sensitivity")
+
+
+# ---------------------------------------------------------------------------
+# MR-8 CLI integration tests
+# ---------------------------------------------------------------------------
+
+class TestMultiResponseCLI:
+    """Tests for _make_multi_response_cfg, _validate_config_keys (MR-8)."""
+
+    def _scenario_cfg(self):
+        """Minimal valid multi-response config dict."""
+        return {
+            "formula": "~ 1 + A + B",
+            "factors": {"A": ["low", "high"], "B": [0.0, 10.0]},
+            "alpha": 0.05,
+            "power": 0.80,
+            "responses": [
+                {
+                    "name": "Yield",
+                    "sigma": 2.0,
+                    "contrast": {
+                        "scenario_a": {"A": "low", "B": 5.0},
+                        "scenario_b": {"A": "high", "B": 5.0},
+                        "sesoi": 1.0,
+                    },
+                },
+                {
+                    "name": "Purity",
+                    "sigma": 0.5,
+                    "r2_target": 0.20,
+                },
+            ],
+        }
+
+    def test_validate_accepts_responses_block(self):
+        from iopt_power_design.cli import _validate_config_keys
+        cfg = self._scenario_cfg()
+        _validate_config_keys(cfg)  # must not raise
+
+    def test_validate_still_rejects_missing_formula(self):
+        from iopt_power_design.cli import _validate_config_keys
+        cfg = self._scenario_cfg()
+        del cfg["formula"]
+        with pytest.raises(KeyError, match="formula"):
+            _validate_config_keys(cfg)
+
+    def test_validate_still_rejects_no_power_keys(self):
+        from iopt_power_design.cli import _validate_config_keys
+        cfg = {"formula": "~ 1 + A", "factors": {"A": [0.0, 1.0]}}
+        with pytest.raises(KeyError):
+            _validate_config_keys(cfg)
+
+    def test_make_multi_response_cfg_returns_correct_type(self):
+        from iopt_power_design.cli import _make_multi_response_cfg
+        from iopt_power_design.config import MultiResponseOptions
+        cfg = self._scenario_cfg()
+        formula = cfg["formula"]
+        from iopt_power_design.cli import _as_factors
+        factors = _as_factors(cfg["factors"])
+        multi = _make_multi_response_cfg(cfg, formula, factors)
+        assert isinstance(multi, MultiResponseOptions)
+
+    def test_make_multi_response_cfg_response_count(self):
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        cfg = self._scenario_cfg()
+        factors = _as_factors(cfg["factors"])
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        assert len(multi.responses) == 2
+
+    def test_make_multi_response_cfg_names(self):
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        cfg = self._scenario_cfg()
+        factors = _as_factors(cfg["factors"])
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        names = [r.name for r in multi.responses]
+        assert names == ["Yield", "Purity"]
+
+    def test_make_multi_response_cfg_power_combination(self):
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        cfg = self._scenario_cfg()
+        cfg["power_combination"] = "product"
+        factors = _as_factors(cfg["factors"])
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        assert multi.power_combination == "product"
+
+    def test_make_multi_response_cfg_explicit_L(self):
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from iopt_power_design.config import PowerContrastConfig
+        import numpy as np
+        cfg = self._scenario_cfg()
+        # Replace first response with explicit L/delta
+        cfg["responses"][0] = {
+            "name": "Yield",
+            "sigma": 1.0,
+            "contrast": {"L": [[0, 0, 1, 0]], "delta": [0.5]},
+        }
+        factors = _as_factors(cfg["factors"])
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        assert isinstance(multi.responses[0].power_cfg, PowerContrastConfig)
+
+    def test_make_multi_response_cfg_missing_name_raises(self):
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        cfg = self._scenario_cfg()
+        cfg["responses"][0]["name"] = ""
+        factors = _as_factors(cfg["factors"])
+        with pytest.raises(KeyError):
+            _make_multi_response_cfg(cfg, cfg["formula"], factors)
+
+    def test_make_multi_response_cfg_missing_power_key_raises(self):
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        cfg = self._scenario_cfg()
+        # Remove both contrast and r2_target from second response
+        del cfg["responses"][1]["r2_target"]
+        factors = _as_factors(cfg["factors"])
+        with pytest.raises(KeyError):
+            _make_multi_response_cfg(cfg, cfg["formula"], factors)
+
+    def test_make_multi_response_cfg_too_few_responses_raises(self):
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from iopt_power_design.config import MultiResponseOptions
+        cfg = self._scenario_cfg()
+        cfg["responses"] = cfg["responses"][:1]  # only 1
+        factors = _as_factors(cfg["factors"])
+        with pytest.raises((ValueError, TypeError)):
+            _make_multi_response_cfg(cfg, cfg["formula"], factors)
+
+    def test_cli_main_multiresponse_dry_run(self, tmp_path):
+        """--dry-run with a responses: config should succeed."""
+        import yaml
+        from iopt_power_design.cli import main
+        cfg = self._scenario_cfg()
+        cfg_path = tmp_path / "mr_config.yml"
+        cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+        rc = main(["--config", str(cfg_path), "--dry-run"])
+        assert rc == 0
+
+    def test_cli_main_multiresponse_flag_dry_run(self, tmp_path):
+        """--multi-response flag with responses: config should also work."""
+        import yaml
+        from iopt_power_design.cli import main
+        cfg = self._scenario_cfg()
+        cfg_path = tmp_path / "mr_config.yml"
+        cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+        rc = main(["--config", str(cfg_path), "--dry-run", "--multi-response"])
+        assert rc == 0
+
+    def test_cli_main_multiresponse_produces_output_files(self, tmp_path):
+        """Full end-to-end: multi-response config writes CSV outputs."""
+        import yaml
+        from iopt_power_design.cli import main
+        cfg = self._scenario_cfg()
+        # Low power target and small max_n keeps the bisection bounded
+        cfg["power"] = 0.50
+        cfg["max_n"] = 30  # caps bisection for both responses
+        cfg["responses"][1]["r2_target"] = 0.50  # easier to detect
+        # Use very small design options via design: block
+        cfg["design"] = {
+            "candidate_points": 300, "starts": 1, "max_iter": 30,
+            "random_state": 1, "auto_candidate": False,
+        }
+        cfg_path = tmp_path / "mr_config.yml"
+        cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+        out = str(tmp_path / "out")
+        rc = main(["--config", str(cfg_path), "--out", out])
+        assert rc == 0
+        assert (tmp_path / "out_design.csv").exists()
+        assert (tmp_path / "out_report.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# MR-10 Integration and property-based tests
+# ---------------------------------------------------------------------------
+
+_MR10_FORMULA = "~ 1 + A + B"
+_MR10_FACTORS = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+_MR10_L = np.array([[0, 1, 0], [0, 0, 1]])
+_MR10_DELTA = np.array([1.5, 1.5])
+
+
+def _mr10_opts(**kw):
+    defaults = dict(candidate_points=150, starts=2, random_state=17, max_iter=25)
+    defaults.update(kw)
+    return DesignOptions(**defaults)
+
+
+def _mr10_crs(name, sigma=1.0, power=0.8, max_n=40, weight=1.0):
+    cfg = PowerContrastConfig(
+        L=_MR10_L, delta=_MR10_DELTA,
+        sigma=sigma, power=power, max_n=max_n, max_iter=25,
+    )
+    return ResponseSpec(name=name, power_cfg=cfg, weight=weight)
+
+
+def _mr10_r2rs(name, r2=0.30, power=0.8, max_n=40, weight=1.0):
+    cfg = PowerR2Config(r2_target=r2, power=power, max_n=max_n, max_iter=25)
+    return ResponseSpec(name=name, power_cfg=cfg, weight=weight)
+
+
+
+@pytest.mark.slow
+class TestMR10Integration:
+    """MR-10: seven integration scenarios for multi-response powered designs."""
+
+    def test_s1_min_n_geq_harder_single_response(self):
+        """n from min combination >= max(individual n)."""
+        opts = _mr10_opts()
+        r1 = _mr10_crs("Y1", sigma=1.0, max_n=40)
+        r2 = _mr10_crs("Y2", sigma=1.5, max_n=40)
+        multi = MultiResponseOptions([r1, r2], power_combination="min")
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        n1 = i_optimal_powered_design(
+            _MR10_FORMULA, _MR10_FACTORS,
+            PowerContrastConfig(L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25),
+            opts,
+        )["report"]["n"]
+        n2 = i_optimal_powered_design(
+            _MR10_FORMULA, _MR10_FACTORS,
+            PowerContrastConfig(L=_MR10_L, delta=_MR10_DELTA, sigma=1.5, power=0.8, max_n=40, max_iter=25),
+            opts,
+        )["report"]["n"]
+        assert mr["n"] >= max(n1, n2) - 1
+
+    def test_s1_min_achieved_is_min_of_per_response(self):
+        """achieved_power == min(per-response) under min rule."""
+        opts = _mr10_opts()
+        r1 = _mr10_crs("Y1", sigma=1.0, max_n=40)
+        r2 = _mr10_crs("Y2", sigma=1.2, max_n=40)
+        multi = MultiResponseOptions([r1, r2], power_combination="min")
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        per = [rd["power"] for rd in mr["responses"]]
+        assert mr["achieved_power"] == pytest.approx(min(per), abs=1e-9)
+
+    def test_s2_product_achieved_equals_p1_times_p2(self):
+        """achieved_power == P1 * P2 under product rule."""
+        opts = _mr10_opts()
+        r1 = _mr10_r2rs("Y1", r2=0.28, max_n=40)
+        r2 = _mr10_r2rs("Y2", r2=0.33, max_n=40)
+        multi = MultiResponseOptions([r1, r2], power_combination="product")
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        p1 = next(rd["power"] for rd in mr["responses"] if rd["name"] == "Y1")
+        p2 = next(rd["power"] for rd in mr["responses"] if rd["name"] == "Y2")
+        assert mr["achieved_power"] == pytest.approx(p1 * p2, abs=1e-9)
+
+    def test_s2_product_power_leq_min_per_response(self):
+        """product rule: achieved_power <= min(per-response powers)."""
+        opts = _mr10_opts()
+        r1 = _mr10_r2rs("Y1", r2=0.28, max_n=40)
+        r2 = _mr10_r2rs("Y2", r2=0.35, max_n=40)
+        multi = MultiResponseOptions([r1, r2], power_combination="product")
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        per = [rd["power"] for rd in mr["responses"]]
+        assert mr["achieved_power"] <= min(per) + 1e-9
+
+    def test_s3_three_responses_weighted_mean_structure(self):
+        """Three-response weighted_mean returns valid result."""
+        opts = _mr10_opts()
+        responses = [
+            ResponseSpec("Y1", PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=2.0),
+            ResponseSpec("Y2", PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=1.0),
+            ResponseSpec("Y3", PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=1.0),
+        ]
+        multi = MultiResponseOptions(responses, power_combination="weighted_mean")
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        assert len(mr["responses"]) == 3
+        assert mr["combination_rule"] == "weighted_mean"
+        assert isinstance(mr["design"], pd.DataFrame)
+
+    def test_s3_weighted_mean_achieved_equals_formula(self):
+        """achieved_power == weighted mean of per-response powers."""
+        from iopt_power_design.power import combine_powers
+        opts = _mr10_opts()
+        responses = [
+            ResponseSpec("Y1", PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=2.0),
+            ResponseSpec("Y2", PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=1.0),
+            ResponseSpec("Y3", PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=1.0),
+        ]
+        multi = MultiResponseOptions(responses, power_combination="weighted_mean")
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        per_powers = [rd["power"] for rd in mr["responses"]]
+        weights = [r.weight for r in multi.responses]
+        expected = combine_powers(per_powers, weights, "weighted_mean")
+        assert mr["achieved_power"] == pytest.approx(expected, abs=1e-9)
+
+    def test_s4_compound_criterion_flag_set(self):
+        """Responses with different formulas set compound_criterion=True."""
+        opts = _mr10_opts()
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(L=np.array([[0, 1]]), delta=np.array([1.5]),
+                                sigma=1.0, power=0.8, max_n=40, max_iter=25),
+            formula="~ 1 + A",
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(L=np.array([[0, 1, 0, 0]]), delta=np.array([1.5]),
+                                sigma=1.0, power=0.8, max_n=40, max_iter=25),
+            formula="~ 1 + A + B + A:B",
+        )
+        multi = MultiResponseOptions([r1, r2], power_combination="min")
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        assert mr["compound_criterion"] is True
+
+    def test_s4_compound_design_estimable_for_both_formulas(self):
+        """Compound-criterion design is full-rank for both response model matrices."""
+        from iopt_power_design.model_matrix import build_model_matrix
+        opts = _mr10_opts()
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(L=np.array([[0, 1]]), delta=np.array([1.5]),
+                                sigma=1.0, power=0.8, max_n=40, max_iter=25),
+            formula="~ 1 + A",
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(L=np.array([[0, 1, 0, 0]]), delta=np.array([1.5]),
+                                sigma=1.0, power=0.8, max_n=40, max_iter=25),
+            formula="~ 1 + A + B + A:B",
+        )
+        multi = MultiResponseOptions([r1, r2], power_combination="min")
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        design_df = mr["design"]
+        X_lin, _ = build_model_matrix("~ 1 + A", design_df)
+        X_inter, _ = build_model_matrix("~ 1 + A + B + A:B", design_df)
+        assert np.linalg.matrix_rank(X_lin) == X_lin.shape[1]
+        assert np.linalg.matrix_rank(X_inter) == X_inter.shape[1]
+
+    def test_s5_hotelling_joint_power_in_unit_interval(self):
+        """Joint T2 power is in [0, 1] with identity sigma_joint."""
+        opts = _mr10_opts()
+        L = np.array([[0, 1, 0]])
+        r1 = ResponseSpec("Y1", PowerContrastConfig(
+            L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(
+            L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
+        multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        assert 0.0 <= mr["joint_power"] <= 1.0
+
+    def test_s5_hotelling_joint_power_geq_min_per_response(self):
+        """Joint T2 power >= min(per-response powers) with identity sigma_joint."""
+        opts = _mr10_opts()
+        L = np.array([[0, 1, 0]])
+        r1 = ResponseSpec("Y1", PowerContrastConfig(
+            L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(
+            L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
+        multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        per = [rd["power"] for rd in mr["responses"]]
+        assert mr["joint_power"] >= min(per) - 1e-9
+
+    def test_s6_split_plot_multi_response_valid_result(self):
+        """SplitPlotOptions + MultiResponseOptions produces valid result."""
+        sp = SplitPlotOptions(htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0)
+        opts = DesignOptions(candidate_points=120, starts=2, max_iter=20, random_state=31, split_plot=sp)
+        L = np.array([[0, 1, 0]])
+        r1 = ResponseSpec("Y1", PowerContrastConfig(
+            L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(
+            L=L, delta=np.array([2.0]), sigma=1.5, power=0.8, max_n=30, max_iter=20))
+        multi = MultiResponseOptions([r1, r2], power_combination="min")
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        assert isinstance(mr["design"], pd.DataFrame)
+        assert len(mr["responses"]) == 2
+        assert mr["n"] >= 1
+
+    def test_s6_split_plot_design_has_wp_column(self):
+        """Split-plot multi-response design includes __wp_id__ column."""
+        sp = SplitPlotOptions(htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0)
+        opts = DesignOptions(candidate_points=120, starts=2, max_iter=20, random_state=31, split_plot=sp)
+        L = np.array([[0, 1, 0]])
+        r1 = ResponseSpec("Y1", PowerContrastConfig(
+            L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(
+            L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20))
+        multi = MultiResponseOptions([r1, r2], power_combination="min")
+        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        assert "__wp_id__" in mr["design"].columns
+
+    def test_s7_combined_power_nondecreasing(self):
+        """combined_power is non-decreasing as n increases."""
+        r1 = ResponseSpec("Y1", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=25))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.5, power=0.8, max_n=60, max_iter=25))
+        multi = MultiResponseOptions([r1, r2], power_combination="min")
+        df = power_curve_by_n_multiresponse(
+            _MR10_FORMULA, _MR10_FACTORS, multi,
+            n_range=(8, 35), n_points=8, design_opts=_mr10_opts(),
+        )
+        powers = df["combined_power"].tolist()
+        violations = sum(1 for i in range(1, len(powers)) if powers[i] < powers[i - 1] - 0.05)
+        assert violations <= 1, f"Non-monotone steps > 0.05: {violations}"
+
+    def test_s7_power_curve_no_nan(self):
+        """power_curve_by_n_multiresponse returns no NaN values."""
+        r1 = ResponseSpec("Y1", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        multi = MultiResponseOptions([r1, r2], power_combination="min")
+        df = power_curve_by_n_multiresponse(
+            _MR10_FORMULA, _MR10_FACTORS, multi,
+            n_range=(8, 25), n_points=5, design_opts=_mr10_opts(),
+        )
+        assert not df.isnull().any().any(), "Got NaN in power curve"
+
+
+class TestMR10PropertyBased:
+    """MR-10: fast property-based tests for multi-response code paths."""
+
+    def test_identical_responses_min_n_matches_single(self):
+        """Two identical responses under min => same n as single (+/-1)."""
+        opts = _mr10_opts()
+        cfg = PowerContrastConfig(L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25)
+        n_single = i_optimal_powered_design(_MR10_FORMULA, _MR10_FACTORS, cfg, opts)["report"]["n"]
+        r1 = ResponseSpec("Y1", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25))
+        mr = i_optimal_multiresponse_design(
+            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2], power_combination="min"), opts)
+        assert abs(mr["n"] - n_single) <= 1
+
+    def test_adding_harder_third_response_min_nondecreasing(self):
+        """Adding harder third response under min never decreases n."""
+        opts = _mr10_opts()
+        r1 = ResponseSpec("Y1", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.2, power=0.8, max_n=40, max_iter=25))
+        mr2 = i_optimal_multiresponse_design(
+            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2], power_combination="min"), opts)
+        r3 = ResponseSpec("Y3", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=2.0, power=0.8, max_n=40, max_iter=25))
+        mr3 = i_optimal_multiresponse_design(
+            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2, r3], power_combination="min"), opts)
+        assert mr3["n"] >= mr2["n"] - 1
+
+    def test_power_curve_no_nan_fast(self):
+        """power_curve_by_n_multiresponse: no NaN (small range)."""
+        r1 = ResponseSpec("Y1", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r2 = ResponseSpec("Y2", PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        df = power_curve_by_n_multiresponse(
+            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2]),
+            n_range=(10, 20), n_points=3, design_opts=_mr10_opts(),
+        )
+        assert not df.isnull().any().any()
+
+    def test_r2_product_achieved_leq_individual(self):
+        """Product <= min(per-response powers)."""
+        r1 = _mr10_r2rs("Y1", r2=0.30, max_n=40)
+        r2 = _mr10_r2rs("Y2", r2=0.30, max_n=40)
+        mr = i_optimal_multiresponse_design(
+            _MR10_FORMULA, _MR10_FACTORS,
+            MultiResponseOptions([r1, r2], power_combination="product"), _mr10_opts())
+        per = [rd["power"] for rd in mr["responses"]]
+        assert mr["achieved_power"] <= min(per) + 1e-9
+
+    def test_response_names_preserved(self):
+        """Response names in result match names in MultiResponseOptions."""
+        names = ["Alpha", "Beta"]
+        responses = [
+            ResponseSpec(n, PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=30, max_iter=20))
+            for n in names
+        ]
+        mr = i_optimal_multiresponse_design(
+            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions(responses), _mr10_opts())
+        assert [rd["name"] for rd in mr["responses"]] == names
+
+    def test_shared_formula_compound_criterion_false(self):
+        """Shared global formula => compound_criterion=False."""
+        mr = i_optimal_multiresponse_design(
+            _MR10_FORMULA, _MR10_FACTORS,
+            MultiResponseOptions([_mr10_crs("Y1"), _mr10_crs("Y2")]), _mr10_opts())
+        assert mr["compound_criterion"] is False
+
+    def test_warnings_key_is_list(self):
+        """warnings key is always a list."""
+        mr = i_optimal_multiresponse_design(
+            _MR10_FORMULA, _MR10_FACTORS,
+            MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]), _mr10_opts())
+        assert isinstance(mr["warnings"], list)
+
+    def test_elapsed_sec_positive(self):
+        """elapsed_sec is positive."""
+        mr = i_optimal_multiresponse_design(
+            _MR10_FORMULA, _MR10_FACTORS,
+            MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]), _mr10_opts())
+        assert mr["elapsed_sec"] > 0

@@ -32,16 +32,17 @@ import pandas as pd
 import warnings
 
 from patsy import dmatrix
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions
+from .config import PowerContrastConfig, PowerR2Config, DesignOptions, MultiResponseOptions
 from .candidate import estimate_candidate_size, build_candidate, build_split_plot_candidate
 from .model_matrix import build_model_matrix
-from .iopt_search import build_i_opt_design_with_idx, build_split_plot_design
+from .iopt_search import build_i_opt_design_with_idx, build_split_plot_design, build_compound_design
 from .split_plot import build_whole_plot_indicator, htc_factor_cols_from_names
 from .diag_metrics import compute_design_metrics
 from .diag_export import export_diagnostics
 from .power import (
     contrast_power, global_r2_power, _r2_df_num,
     contrast_power_sp, global_r2_power_sp,
+    eval_response_power, combine_powers, hotelling_t2_power,
 )
 from .utils import validate_factors, initial_n_guess
 from .blocked import blocked_formula, build_blocked_design
@@ -921,4 +922,592 @@ def i_optimal_powered_design(
     return best
 
 
-__all__ = ["i_optimal_powered_design"]
+def i_optimal_multiresponse_design(
+    formula: str,
+    factors: Dict[str, Any],
+    multi_cfg: MultiResponseOptions,
+    design_opts: Optional[DesignOptions] = None,
+) -> Dict[str, Any]:
+    """Find the minimum-n I-optimal design achieving target power for all responses.
+
+    Parameters
+    ----------
+    formula : str
+        Global Patsy formula (right-hand side, e.g. ``"~ 1 + A + B + A:B"``).
+        Individual responses may override this via ``ResponseSpec.formula``
+        (compound path, MR-5).
+    factors : dict
+        Factor definitions (same format as ``i_optimal_powered_design``).
+    multi_cfg : MultiResponseOptions
+        Per-response power requirements and combination rule.
+    design_opts : DesignOptions or None
+        Design search options.  Defaults to ``DesignOptions()`` when None.
+
+    Returns
+    -------
+    dict
+        Keys: ``"design"``, ``"n"``, ``"achieved_power"``, ``"responses"``,
+        ``"combination_rule"``, ``"compound_criterion"``, ``"elapsed_sec"``,
+        ``"buckets"``, ``"warnings"``, ``"p"``, ``"iteration"``,
+        ``"search_strategy"``.
+    """
+    # 1. Detect compound path — any response formula differs from the global formula.
+    _compound = any(
+        r.formula is not None and r.formula != formula
+        for r in multi_cfg.responses
+    )
+
+    if design_opts is None:
+        design_opts = DesignOptions()
+
+    validate_factors(factors)
+    is_sp = _is_split_plot(design_opts)
+
+    # 2. Candidate set
+    if design_opts.auto_candidate:
+        candidate_points = estimate_candidate_size(
+            formula=formula, factors=factors,
+            cand_min=design_opts.cand_min, cand_max=design_opts.cand_max,
+            cat_cells_cap=design_opts.cat_cells_cap,
+            per_cell_alpha=design_opts.per_cell_alpha,
+            per_cell_min=design_opts.per_cell_min,
+            per_cell_max=design_opts.per_cell_max,
+            seed=design_opts.random_state,
+        )
+    else:
+        candidate_points = int(design_opts.candidate_points)
+
+    cand = build_candidate(
+        factors=factors, candidate_points=candidate_points,
+        seed=design_opts.random_state,
+        constraint_func=design_opts.constraint_func,
+        cat_cells_cap=design_opts.cat_cells_cap,
+    )
+    X_cand, p_names_global = build_model_matrix(formula, cand)
+    p = X_cand.shape[1]
+
+    # 3. Bisection parameters — drive by the hardest individual target.
+    target = max(r.power_cfg.power for r in multi_cfg.responses)
+    tol = min(r.power_cfg.tol_power for r in multi_cfg.responses)
+    max_iter = min(r.power_cfg.max_iter for r in multi_cfg.responses)
+    max_n = min(r.power_cfg.max_n for r in multi_cfg.responses)
+
+    rule = multi_cfg.power_combination
+    weights = [r.weight for r in multi_cfg.responses]
+    sp_opts = design_opts.split_plot if is_sp else None
+
+    if _compound and design_opts.criterion == "A":
+        raise NotImplementedError("A-compound not supported; use 'I' or 'D'.")
+
+    if _compound and is_sp:
+        raise NotImplementedError(
+            "Compound criterion with split-plot designs is not yet supported."
+        )
+
+    # Validate sigma_joint usage: only supported for shared-formula contrast path.
+    _use_hotelling = multi_cfg.sigma_joint is not None
+    if _use_hotelling:
+        if _compound:
+            raise NotImplementedError(
+                "sigma_joint (Hotelling T²) is not supported with the compound "
+                "criterion path (different response formulas)."
+            )
+        if is_sp:
+            raise NotImplementedError(
+                "sigma_joint (Hotelling T²) is not supported with split-plot designs."
+            )
+        from .config import PowerR2Config as _PowerR2Config
+        for r in multi_cfg.responses:
+            if isinstance(r.power_cfg, _PowerR2Config):
+                raise NotImplementedError(
+                    f"sigma_joint (Hotelling T²) is not supported for R²-mode "
+                    f"response '{r.name}'. Use PowerContrastConfig for all responses."
+                )
+        # All L matrices must be identical (same contrast for all responses).
+        _L0 = np.asarray(multi_cfg.responses[0].power_cfg.L)
+        for r in multi_cfg.responses[1:]:
+            _Lr = np.asarray(r.power_cfg.L)
+            if _Lr.shape != _L0.shape or not np.allclose(_Lr, _L0):
+                raise ValueError(
+                    f"All responses must share the same contrast matrix L when "
+                    f"sigma_joint is provided. Response '{r.name}' has L with "
+                    f"shape {_Lr.shape} or different values from response "
+                    f"'{multi_cfg.responses[0].name}'."
+                )
+
+    # =========================================================================
+    # Split-plot path
+    # =========================================================================
+    if is_sp:
+        _validate_htc_factors(sp_opts.htc_factors, factors)
+        subplots_per_wp = (
+            sp_opts.subplots_per_wp
+            if sp_opts.subplots_per_wp is not None
+            else _auto_subplots_per_wp(p, sp_opts.n_whole_plots)
+        )
+        etc_factors = [f for f in factors if f not in sp_opts.htc_factors]
+        _n_htc = len(sp_opts.htc_factors)
+        _n_etc = len(etc_factors)
+        _n_all = max(1, _n_htc + _n_etc)
+        _n_wp_cand = max(10, int(candidate_points * _n_htc / _n_all))
+        _n_sp_cand = max(10, int(candidate_points * _n_etc / _n_all)) if _n_etc > 0 else 1
+
+        max_n_wp = max_n // subplots_per_wp
+        lo_wp = sp_opts.n_whole_plots
+        hi_wp = max_n_wp + 1
+
+        best: Optional[Dict[str, Any]] = None
+        it = 0
+        _run_warnings: List[str] = []
+        _strategy_parts: List[str] = ["bisection"]
+        _ran_phase2 = False
+        _verify_window = 0
+        t_start = time.perf_counter()
+
+        def _sp_eval_mr(n_wp_: int) -> Optional[Dict[str, Any]]:
+            n_total_ = n_wp_ * subplots_per_wp
+            sp_cand_ = build_split_plot_candidate(
+                factors, sp_opts.htc_factors, n_wp_, subplots_per_wp,
+                random_state=design_opts.random_state,
+                candidate_points=candidate_points,
+                constraint_func=design_opts.constraint_func,
+            )
+            design_df_, X_ = build_split_plot_design(
+                sp_cand_, formula, n_wp_, subplots_per_wp,
+                sp_opts.htc_factors, sp_opts.eta,
+                factors=factors,
+                criterion=design_opts.criterion,
+                starts=design_opts.starts,
+                max_iter=design_opts.max_iter,
+                random_state=design_opts.random_state,
+                jitter=design_opts.xtx_jitter,
+                constraint_func=design_opts.constraint_func,
+                n_wp_cand=_n_wp_cand,
+                n_sp_cand=_n_sp_cand,
+            )
+            Z_ = build_whole_plot_indicator(n_total_, n_wp_, subplots_per_wp)
+            _, p_names_ = build_model_matrix(formula, design_df_)
+            all_fcols_ = [c for c in design_df_.columns if c != "__wp_id__"]
+            per_r_ = [
+                eval_response_power(
+                    r, X_, p_names_,
+                    jitter=design_opts.xtx_jitter,
+                    split_plot_opts=sp_opts,
+                    Z=Z_,
+                    all_factor_names=all_fcols_,
+                )
+                for r in multi_cfg.responses
+            ]
+            combined_ = combine_powers([d["power"] for d in per_r_], weights, rule)
+            if np.isnan(combined_):
+                return None
+            return {
+                "_design_df": design_df_, "_X": X_,
+                "_n_wp": n_wp_, "_n_total": n_total_,
+                "_per_r": per_r_, "_combined": combined_,
+            }
+
+        while lo_wp < hi_wp and it < max_iter:
+            n_wp = (lo_wp + hi_wp) // 2
+            it += 1
+            ev = _sp_eval_mr(n_wp)
+            if ev is None:
+                _run_warnings.append(f"Combined power is NaN at n_wp={n_wp}. Searching higher.")
+                lo_wp = n_wp + 1
+                continue
+            if ev["_combined"] + tol >= target:
+                if best is None or n_wp <= best["_n_wp"]:
+                    best = ev
+                hi_wp = n_wp
+            else:
+                if best is None or (
+                    best["_combined"] + tol < target
+                    and ev["_combined"] > best["_combined"]
+                ):
+                    best = ev
+                lo_wp = n_wp + 1
+
+        if best is not None and best["_combined"] + tol >= target:
+            n_wp_star = best["_n_wp"]
+            verify_window = min(max(3, n_wp_star // 5), max(0, max_iter - it))
+            _verify_window = verify_window
+            for n_wp_chk in range(
+                n_wp_star - 1,
+                max(max(2, sp_opts.n_whole_plots), n_wp_star - verify_window - 1),
+                -1,
+            ):
+                if it >= max_iter:
+                    break
+                _ran_phase2 = True
+                it += 1
+                ev = _sp_eval_mr(n_wp_chk)
+                if ev is None or ev["_combined"] + tol < target:
+                    continue
+                best = ev
+
+        if _ran_phase2:
+            _strategy_parts.append("verification")
+        elapsed_sec = time.perf_counter() - t_start
+
+        if best is None:
+            raise RuntimeError(
+                "Failed to generate a valid split-plot multi-response design. "
+                "Try increasing max_n or max_iter in the power configs."
+            )
+
+        n_final = best["_n_total"]
+        combined_final = best["_combined"]
+        _per_r_final = best["_per_r"]
+
+        if combined_final + tol < target:
+            _msg = (
+                f"Multi-response split-plot design did not converge to target power "
+                f"{target:.4f}. Final combined power: {combined_final:.4f}."
+            )
+            warnings.warn(_msg, RuntimeWarning)
+            _run_warnings.append(_msg)
+
+        for resp, rd in zip(multi_cfg.responses, _per_r_final):
+            if rd["power"] > resp.power_cfg.power + 0.1:
+                _run_warnings.append(
+                    f"Response '{rd['name']}' achieved power {rd['power']:.3f}, "
+                    f"well above its individual target {resp.power_cfg.power:.3f}. "
+                    "A smaller n may suffice for this response alone."
+                )
+
+        return {
+            "design": best["_design_df"],
+            "n": int(n_final),
+            "achieved_power": float(combined_final),
+            "responses": [
+                {"name": rd["name"], "power": rd["power"], "lam": rd["lam"], "n": int(n_final)}
+                for rd in _per_r_final
+            ],
+            "combination_rule": rule,
+            "compound_criterion": False,
+            "buckets": _buckets_df(best["_design_df"]),
+            "elapsed_sec": round(float(elapsed_sec), 4),
+            "search_strategy": "+".join(_strategy_parts),
+            "n_whole_plots": int(best["_n_wp"]),
+            "subplots_per_wp": int(subplots_per_wp),
+            "p": int(p),
+            "iteration": int(it),
+            "warnings": list(_run_warnings),
+        }
+
+    # =========================================================================
+    # OLS compound-criterion path (responses with different formulas)
+    # =========================================================================
+    if _compound:
+        # Build per-formula model matrices from the shared candidate set.
+        candidates_list: List[np.ndarray] = []
+        p_names_list: List[List[str]] = []
+        for r in multi_cfg.responses:
+            f_k = r.formula if r.formula is not None else formula
+            try:
+                X_cand_k, p_names_k = build_model_matrix(f_k, cand)
+            except Exception as exc:
+                raise ValueError(
+                    f"Response '{r.name}': formula {f_k!r} could not be evaluated "
+                    f"over the candidate set. "
+                    f"Check that all factors in the formula exist in 'factors'. "
+                    f"Original error: {exc}"
+                ) from exc
+            candidates_list.append(X_cand_k)
+            p_names_list.append(list(p_names_k))
+
+        # Lower bound: must be estimable under the largest formula.
+        p_compound = max(X_cand_k.shape[1] for X_cand_k in candidates_list)
+        lo_c = p_compound + 1
+        hi_c = max_n + 1
+        best_c: Optional[Dict[str, Any]] = None
+        it_c = 0
+        _run_warnings_c: List[str] = []
+        _strategy_parts_c: List[str] = ["bisection"]
+        _ran_phase2_c = False
+        _verify_window_c = 0
+        t_start_c = time.perf_counter()
+
+        def _compound_eval_mr(n_: int) -> Optional[Dict[str, Any]]:
+            idx_ = build_compound_design(
+                candidates_list,
+                weights,
+                n_,
+                criterion=design_opts.criterion,
+                n_start=design_opts.starts,
+                max_iter=design_opts.max_iter,
+                random_state=design_opts.random_state,
+                jitter=design_opts.xtx_jitter,
+            )
+            df_ = cand.iloc[idx_].reset_index(drop=True)
+            per_r_: List[Dict[str, Any]] = []
+            for r_k, X_cand_k, p_names_k in zip(multi_cfg.responses, candidates_list, p_names_list):
+                X_k = X_cand_k[idx_]
+                per_r_.append(eval_response_power(r_k, X_k, p_names_k, jitter=design_opts.xtx_jitter))
+            combined_ = combine_powers([d["power"] for d in per_r_], weights, rule)
+            if np.isnan(combined_):
+                return None
+            return {"_design_df": df_, "_idx": idx_, "_per_r": per_r_, "_combined": combined_}
+
+        # Phase 1 — bisection
+        while lo_c < hi_c and it_c < max_iter:
+            n_c = (lo_c + hi_c) // 2
+            if n_c > max_n:
+                lo_c = hi_c
+                break
+            it_c += 1
+            ev_c = _compound_eval_mr(n_c)
+            if ev_c is None:
+                _msg = f"Combined power is NaN at n={n_c} (compound path). Searching higher."
+                warnings.warn(_msg, RuntimeWarning)
+                _run_warnings_c.append(_msg)
+                lo_c = n_c + 1
+                continue
+            ev_c["_n"] = n_c
+            if ev_c["_combined"] + tol >= target:
+                if best_c is None or n_c <= best_c["_n"]:
+                    best_c = ev_c
+                hi_c = n_c
+            else:
+                if best_c is None or (
+                    best_c["_combined"] + tol < target
+                    and ev_c["_combined"] > best_c["_combined"]
+                ):
+                    best_c = ev_c
+                lo_c = n_c + 1
+
+        # Phase 2 — linear verification scan
+        if best_c is not None and best_c["_combined"] + tol >= target:
+            n_star_c = best_c["_n"]
+            verify_window_c = min(max(5, n_star_c // 10), max(0, max_iter - it_c))
+            _verify_window_c = verify_window_c
+            for n_check_c in range(n_star_c - 1, max(p_compound, n_star_c - verify_window_c - 1), -1):
+                if it_c >= max_iter:
+                    break
+                _ran_phase2_c = True
+                it_c += 1
+                ev_c = _compound_eval_mr(n_check_c)
+                if ev_c is None or ev_c["_combined"] + tol < target:
+                    continue
+                ev_c["_n"] = n_check_c
+                best_c = ev_c
+
+        if _ran_phase2_c:
+            _strategy_parts_c.append("verification")
+        elapsed_sec_c = time.perf_counter() - t_start_c
+
+        if best_c is None:
+            raise RuntimeError(
+                "Failed to generate any valid compound multi-response design. "
+                "Try increasing max_n or max_iter in the power configs."
+            )
+
+        n_final_c = best_c["_n"]
+        combined_final_c = best_c["_combined"]
+        _per_r_final_c = best_c["_per_r"]
+
+        if combined_final_c + tol < target:
+            _msg = (
+                f"Multi-response compound design did not converge to target power {target:.4f}. "
+                f"Final combined power: {combined_final_c:.4f}."
+            )
+            warnings.warn(_msg, RuntimeWarning)
+            _run_warnings_c.append(_msg)
+
+        for resp, rd in zip(multi_cfg.responses, _per_r_final_c):
+            if rd["power"] > resp.power_cfg.power + 0.1:
+                _run_warnings_c.append(
+                    f"Response '{rd['name']}' achieved power {rd['power']:.3f}, "
+                    f"well above its individual target {resp.power_cfg.power:.3f}. "
+                    "A smaller n may suffice for this response alone."
+                )
+
+        return {
+            "design": best_c["_design_df"],
+            "n": int(n_final_c),
+            "achieved_power": float(combined_final_c),
+            "responses": [
+                {"name": rd["name"], "power": rd["power"], "lam": rd["lam"], "n": int(n_final_c)}
+                for rd in _per_r_final_c
+            ],
+            "combination_rule": rule,
+            "compound_criterion": True,
+            "buckets": _buckets_df(best_c["_design_df"]),
+            "elapsed_sec": round(float(elapsed_sec_c), 4),
+            "search_strategy": "+".join(_strategy_parts_c),
+            "p": int(p_compound),
+            "iteration": int(it_c),
+            "warnings": list(_run_warnings_c),
+        }
+
+    # =========================================================================
+    # OLS path (shared formula)
+    # =========================================================================
+    _search_kwargs: Dict[str, Any] = dict(
+        cand=cand,
+        formula=formula,
+        criterion=design_opts.criterion,
+        n_start=design_opts.starts,
+        algo=design_opts.algo,
+        max_iter=design_opts.max_iter,
+        random_state=design_opts.random_state,
+        workers=design_opts.workers,
+        parallel_seed_stride=design_opts.parallel_seed_stride,
+        jitter=design_opts.xtx_jitter,
+        preallocate_categorical=design_opts.preallocate_categorical,
+        alloc_min_per_cell=design_opts.alloc_min_per_cell,
+        alloc_max_per_cell=design_opts.alloc_max_per_cell,
+        alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
+        alloc_wynn_tol=design_opts.alloc_wynn_tol,
+        cat_cells_cap=design_opts.cat_cells_cap,
+    )
+
+    # Hotelling T² pre-computation: extract shared L and joint Delta
+    if _use_hotelling:
+        _L_common = np.asarray(multi_cfg.responses[0].power_cfg.L)
+        _Delta_joint = np.column_stack(
+            [np.asarray(r.power_cfg.delta) for r in multi_cfg.responses]
+        )
+        _sigma_joint_arr = np.asarray(multi_cfg.sigma_joint)
+    else:
+        _L_common = _Delta_joint = _sigma_joint_arr = None  # type: ignore[assignment]
+
+    lo = p + 1
+    hi = max_n + 1
+    best = None
+    it = 0
+    _run_warnings = []
+    _strategy_parts = ["bisection"]
+    _ran_phase2 = False
+    _verify_window = 0
+    t_start = time.perf_counter()
+
+    def _ols_eval_mr(n_: int) -> Optional[Dict[str, Any]]:
+        df_, idx_, _ = build_i_opt_design_with_idx(n=n_, **_search_kwargs)
+        X_ = X_cand[idx_, :]
+        per_r_ = [
+            eval_response_power(r, X_, p_names_global, jitter=design_opts.xtx_jitter)
+            for r in multi_cfg.responses
+        ]
+        if _use_hotelling:
+            try:
+                ht2_ = hotelling_t2_power(
+                    _L_common, _Delta_joint, X_, _sigma_joint_arr,
+                    alpha=multi_cfg.responses[0].power_cfg.alpha,
+                    jitter=design_opts.xtx_jitter,
+                )
+                combined_ = ht2_.power
+                _ht2_result = ht2_
+            except Exception:
+                combined_ = combine_powers([d["power"] for d in per_r_], weights, rule)
+                _ht2_result = None
+        else:
+            combined_ = combine_powers([d["power"] for d in per_r_], weights, rule)
+            _ht2_result = None
+        if np.isnan(combined_):
+            return None
+        return {
+            "_design_df": df_, "_idx": idx_, "_X": X_,
+            "_per_r": per_r_, "_combined": combined_, "_ht2": _ht2_result,
+        }
+
+    # Phase 1 — bisection
+    while lo < hi and it < max_iter:
+        n = (lo + hi) // 2
+        if n > max_n:
+            lo = hi
+            break
+        it += 1
+        ev = _ols_eval_mr(n)
+        if ev is None:
+            _msg = f"Combined power is NaN at n={n}. Searching higher."
+            warnings.warn(_msg, RuntimeWarning)
+            _run_warnings.append(_msg)
+            lo = n + 1
+            continue
+        ev["_n"] = n
+        if ev["_combined"] + tol >= target:
+            if best is None or n <= best["_n"]:
+                best = ev
+            hi = n
+        else:
+            if best is None or (
+                best["_combined"] + tol < target
+                and ev["_combined"] > best["_combined"]
+            ):
+                best = ev
+            lo = n + 1
+
+    # Phase 2 — linear verification scan
+    if best is not None and best["_combined"] + tol >= target:
+        n_star = best["_n"]
+        verify_window = min(max(5, n_star // 10), max(0, max_iter - it))
+        _verify_window = verify_window
+        for n_check in range(n_star - 1, max(p, n_star - verify_window - 1), -1):
+            if it >= max_iter:
+                break
+            _ran_phase2 = True
+            it += 1
+            ev = _ols_eval_mr(n_check)
+            if ev is None or ev["_combined"] + tol < target:
+                continue
+            ev["_n"] = n_check
+            best = ev
+
+    if _ran_phase2:
+        _strategy_parts.append("verification")
+    elapsed_sec = time.perf_counter() - t_start
+
+    if best is None:
+        raise RuntimeError(
+            "Failed to generate any valid multi-response design. "
+            "Try increasing max_n or max_iter in the power configs."
+        )
+
+    n_final = best["_n"]
+    combined_final = best["_combined"]
+    _per_r_final = best["_per_r"]
+
+    if combined_final + tol < target:
+        _msg = (
+            f"Multi-response design did not converge to target power {target:.4f}. "
+            f"Final combined power: {combined_final:.4f}."
+        )
+        warnings.warn(_msg, RuntimeWarning)
+        _run_warnings.append(_msg)
+
+    for resp, rd in zip(multi_cfg.responses, _per_r_final):
+        if rd["power"] > resp.power_cfg.power + 0.1:
+            _run_warnings.append(
+                f"Response '{rd['name']}' achieved power {rd['power']:.3f}, "
+                f"well above its individual target {resp.power_cfg.power:.3f}. "
+                "A smaller n may suffice for this response alone."
+            )
+
+    _ht2_final = best.get("_ht2")
+    _out: Dict[str, Any] = {
+        "design": best["_design_df"],
+        "n": int(n_final),
+        "achieved_power": float(combined_final),
+        "responses": [
+            {"name": rd["name"], "power": rd["power"], "lam": rd["lam"], "n": int(n_final)}
+            for rd in _per_r_final
+        ],
+        "combination_rule": rule,
+        "compound_criterion": False,
+        "buckets": _buckets_df(best["_design_df"]),
+        "elapsed_sec": round(float(elapsed_sec), 4),
+        "search_strategy": "+".join(_strategy_parts),
+        "p": int(p),
+        "iteration": int(it),
+        "warnings": list(_run_warnings),
+    }
+    if _use_hotelling and _ht2_final is not None:
+        _out["joint_power"] = float(_ht2_final.power)
+        _out["joint_lam"] = float(_ht2_final.lam)
+        _out["joint_df1"] = int(_ht2_final.df1)
+        _out["joint_df2"] = int(_ht2_final.df2)
+    return _out
+
+
+__all__ = ["i_optimal_powered_design", "i_optimal_multiresponse_design"]

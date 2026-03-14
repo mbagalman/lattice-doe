@@ -40,7 +40,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions
+from .config import (
+    PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions,
+    MultiResponseOptions, ResponseSpec,
+)
 
 # ---------------------------------------------------------------------------
 # Soft dependency guard
@@ -59,9 +62,10 @@ _INSTALL_HINT = 'pip install "iopt-power-design[extras]"'
 # ---------------------------------------------------------------------------
 # Section sentinels (must match sheets.py constants for consistency)
 # ---------------------------------------------------------------------------
-_SENTINEL_SETTINGS = "[SETTINGS]"
-_SENTINEL_CONTRAST = "[CONTRAST]"
-_SENTINEL_FACTORS  = "[FACTORS]"
+_SENTINEL_SETTINGS  = "[SETTINGS]"
+_SENTINEL_CONTRAST  = "[CONTRAST]"
+_SENTINEL_FACTORS   = "[FACTORS]"
+_SENTINEL_RESPONSES = "[RESPONSES]"
 
 # ---------------------------------------------------------------------------
 # Custom exception
@@ -125,8 +129,8 @@ def _add_dropdown(ws: Any, formula: str, row: int, col: int = 2) -> None:
 # ---------------------------------------------------------------------------
 def _read_config_sheet(
     ws: Any,
-) -> Tuple[str, Dict[str, Any], Union[PowerContrastConfig, PowerR2Config], DesignOptions]:
-    """Parse the Config worksheet and return ``(formula, factors, power_cfg, design_opts)``.
+) -> Tuple[str, Dict[str, Any], Optional[Union[PowerContrastConfig, PowerR2Config]], DesignOptions, Optional[MultiResponseOptions]]:
+    """Parse the Config worksheet and return ``(formula, factors, power_cfg, design_opts, multi_cfg)``.
 
     Raises
     ------
@@ -139,9 +143,10 @@ def _read_config_sheet(
         rows.append([str(c).strip() if c is not None else "" for c in row])
 
     # Locate sentinels
-    idx_settings: Optional[int] = None
-    idx_contrast: Optional[int] = None
-    idx_factors:  Optional[int] = None
+    idx_settings:  Optional[int] = None
+    idx_contrast:  Optional[int] = None
+    idx_factors:   Optional[int] = None
+    idx_responses: Optional[int] = None
 
     for i, row in enumerate(rows):
         col_a = row[0] if row else ""
@@ -151,6 +156,8 @@ def _read_config_sheet(
             idx_contrast = i
         elif col_a == _SENTINEL_FACTORS:
             idx_factors = i
+        elif col_a == _SENTINEL_RESPONSES:
+            idx_responses = i
 
     if idx_settings is None:
         raise ExcelError(
@@ -164,7 +171,8 @@ def _read_config_sheet(
 
     # --- Parse [SETTINGS] ---
     sentinels_after = sorted(
-        j for j in (idx_contrast, idx_factors) if j is not None and j > idx_settings
+        j for j in (idx_contrast, idx_factors, idx_responses)
+        if j is not None and j > idx_settings
     )
     settings_end = sentinels_after[0] if sentinels_after else len(rows)
 
@@ -175,18 +183,22 @@ def _read_config_sheet(
         if col_a:
             settings[col_a] = col_b
 
-    for required in ("formula", "power_mode"):
-        if not settings.get(required):
-            raise ExcelError(
-                f"Config sheet [SETTINGS] is missing the required '{required}' key."
-            )
+    if not settings.get("formula"):
+        raise ExcelError(
+            "Config sheet [SETTINGS] is missing the required 'formula' key."
+        )
+    # power_mode is required unless a [RESPONSES] section is present
+    if idx_responses is None and not settings.get("power_mode"):
+        raise ExcelError(
+            "Config sheet [SETTINGS] is missing the required 'power_mode' key."
+        )
 
     formula = settings["formula"]
-    power_mode = settings["power_mode"].strip().lower()
+    power_mode = settings.get("power_mode", "").strip().lower()
 
-    if power_mode not in ("r2", "contrast"):
+    if power_mode and power_mode not in ("r2", "contrast"):
         raise ExcelError(
-            f"[SETTINGS] power_mode must be 'r2' or 'contrast'; got {settings['power_mode']!r}."
+            f"[SETTINGS] power_mode must be 'r2' or 'contrast'; got {settings.get('power_mode')!r}."
         )
 
     def _float(key: str, default: float) -> float:
@@ -279,11 +291,11 @@ def _read_config_sheet(
     except (ValueError, TypeError) as e:
         raise ExcelError(f"Config sheet produced invalid DesignOptions: {e}") from e
 
-    # --- Parse [CONTRAST] (if present) ---
+    # --- Parse [CONTRAST] (if present and single-response mode) ---
     L: Optional[np.ndarray] = None
     delta: Optional[np.ndarray] = None
 
-    if power_mode == "contrast":
+    if idx_responses is None and power_mode == "contrast":
         if idx_contrast is None:
             raise ExcelError(
                 f"power_mode is 'contrast' but the '{_SENTINEL_CONTRAST}' sentinel "
@@ -328,8 +340,10 @@ def _read_config_sheet(
     # --- Parse [FACTORS] ---
     factors: Dict[str, Any] = {}
     factors_data_start = idx_factors + 2  # +1 sentinel, +1 header
+    # Stop at [RESPONSES] if present
+    factors_end = idx_responses if idx_responses is not None and idx_responses > idx_factors else len(rows)
 
-    for row in rows[factors_data_start:]:
+    for row in rows[factors_data_start:factors_end]:
         col_a = row[0] if len(row) > 0 else ""
         col_b = row[1] if len(row) > 1 else ""
         values = [row[c] for c in range(2, len(row)) if row[c]]
@@ -365,32 +379,127 @@ def _read_config_sheet(
     if not factors:
         raise ExcelError("[FACTORS] section contains no factor definitions.")
 
-    # --- Build power_cfg ---
-    if power_mode == "r2":
-        try:
-            power_cfg: Union[PowerContrastConfig, PowerR2Config] = PowerR2Config(
-                r2_target=r2_target,
-                alpha=alpha,
-                power=power_target,
-                sigma=sigma,
-                max_n=max_n,
-            )
-        except (ValueError, TypeError) as e:
-            raise ExcelError(f"Config sheet produced invalid PowerR2Config: {e}") from e
-    else:
-        try:
-            power_cfg = PowerContrastConfig(
-                L=L,
-                delta=delta,
-                alpha=alpha,
-                power=power_target,
-                sigma=sigma,
-                max_n=max_n,
-            )
-        except (ValueError, TypeError) as e:
-            raise ExcelError(f"Config sheet produced invalid PowerContrastConfig: {e}") from e
+    # --- Build power_cfg (single-response mode only) ---
+    power_cfg: Optional[Union[PowerContrastConfig, PowerR2Config]] = None
+    if idx_responses is None:
+        if power_mode == "r2":
+            try:
+                power_cfg = PowerR2Config(
+                    r2_target=r2_target,
+                    alpha=alpha,
+                    power=power_target,
+                    sigma=sigma,
+                    max_n=max_n,
+                )
+            except (ValueError, TypeError) as e:
+                raise ExcelError(f"Config sheet produced invalid PowerR2Config: {e}") from e
+        else:
+            try:
+                power_cfg = PowerContrastConfig(
+                    L=L,
+                    delta=delta,
+                    alpha=alpha,
+                    power=power_target,
+                    sigma=sigma,
+                    max_n=max_n,
+                )
+            except (ValueError, TypeError) as e:
+                raise ExcelError(f"Config sheet produced invalid PowerContrastConfig: {e}") from e
 
-    return formula, factors, power_cfg, design_opts
+    # --- Parse [RESPONSES] section (optional — multi-response mode) ---
+    multi_cfg: Optional[MultiResponseOptions] = None
+
+    if idx_responses is not None:
+        responses_data_start = idx_responses + 2
+        specs: List[ResponseSpec] = []
+        power_combination = "min"
+
+        for row in rows[responses_data_start:]:
+            col_a = row[0] if len(row) > 0 else ""
+            col_b = row[1] if len(row) > 1 else ""
+            if not col_a:
+                continue
+            if col_a == "power_combination":
+                power_combination = col_b or "min"
+                continue
+
+            def _rcell(idx: int) -> str:
+                return row[idx] if len(row) > idx else ""
+
+            r_name = col_a
+            r_mode = col_b.lower()
+            r_sigma = float(_rcell(2)) if _rcell(2) else sigma
+            r_alpha = float(_rcell(3)) if _rcell(3) else alpha
+            r_power_v = float(_rcell(4)) if _rcell(4) else power_target
+            r_weight = float(_rcell(5)) if _rcell(5) else 1.0
+            r_L_str  = _rcell(6)
+            r_d_str  = _rcell(7)
+            r_r2_str = _rcell(8)
+            r_formula_str = _rcell(9) or None
+
+            if r_mode == "contrast":
+                if not r_L_str or not r_d_str:
+                    raise ExcelError(
+                        f"[RESPONSES] row '{r_name}': contrast mode requires "
+                        "L_row (col 7) and delta (col 8) values."
+                    )
+                try:
+                    L_vals = [float(v.strip()) for v in r_L_str.split(",") if v.strip()]
+                    d_vals = [float(v.strip()) for v in r_d_str.split(",") if v.strip()]
+                except ValueError as e:
+                    raise ExcelError(
+                        f"[RESPONSES] row '{r_name}': non-numeric L_row or delta: {e}"
+                    ) from e
+                r_L = np.array([L_vals], dtype=float)
+                r_d = np.array(d_vals, dtype=float)
+                try:
+                    pcfg: Union[PowerContrastConfig, PowerR2Config] = PowerContrastConfig(
+                        L=r_L, delta=r_d, alpha=r_alpha, power=r_power_v, sigma=r_sigma,
+                    )
+                except (ValueError, TypeError) as e:
+                    raise ExcelError(
+                        f"[RESPONSES] row '{r_name}': invalid PowerContrastConfig: {e}"
+                    ) from e
+            elif r_mode == "r2":
+                if not r_r2_str:
+                    raise ExcelError(
+                        f"[RESPONSES] row '{r_name}': r2 mode requires r2_target (col 9)."
+                    )
+                try:
+                    pcfg = PowerR2Config(
+                        r2_target=float(r_r2_str),
+                        alpha=r_alpha, power=r_power_v, sigma=r_sigma,
+                    )
+                except (ValueError, TypeError) as e:
+                    raise ExcelError(
+                        f"[RESPONSES] row '{r_name}': invalid PowerR2Config: {e}"
+                    ) from e
+            else:
+                raise ExcelError(
+                    f"[RESPONSES] row '{r_name}': power_mode must be 'contrast' or 'r2'; "
+                    f"got {col_b!r}."
+                )
+
+            try:
+                specs.append(ResponseSpec(
+                    name=r_name, power_cfg=pcfg,
+                    formula=r_formula_str, weight=r_weight,
+                ))
+            except (ValueError, TypeError) as e:
+                raise ExcelError(f"[RESPONSES] row '{r_name}': {e}") from e
+
+        if len(specs) < 2:
+            raise ExcelError(
+                f"[RESPONSES] section must define at least 2 responses; found {len(specs)}."
+            )
+        try:
+            multi_cfg = MultiResponseOptions(
+                responses=specs, power_combination=power_combination,
+            )
+        except (ValueError, TypeError) as e:
+            raise ExcelError(f"Config sheet produced invalid MultiResponseOptions: {e}") from e
+
+    return formula, factors, power_cfg, design_opts, multi_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -639,7 +748,7 @@ def excel_run(
         )
 
     try:
-        formula, factors, power_cfg, design_opts = _read_config_sheet(wb["Config"])
+        formula, factors, power_cfg, design_opts, multi_cfg = _read_config_sheet(wb["Config"])
     except ExcelError:
         raise
     except Exception as e:
@@ -652,12 +761,21 @@ def excel_run(
     # 2. Run design search
     # ------------------------------------------------------------------
     try:
-        result = i_optimal_powered_design(
-            formula=formula,
-            factors=factors,
-            power_cfg=power_cfg,
-            design_opts=design_opts,
-        )
+        if multi_cfg is not None:
+            from .api import i_optimal_multiresponse_design  # noqa: PLC0415
+            result = i_optimal_multiresponse_design(
+                formula=formula,
+                factors=factors,
+                multi_cfg=multi_cfg,
+                design_opts=design_opts,
+            )
+        else:
+            result = i_optimal_powered_design(
+                formula=formula,
+                factors=factors,
+                power_cfg=power_cfg,
+                design_opts=design_opts,
+            )
     except Exception as e:
         raise ExcelError(f"Design search failed: {e}") from e
 

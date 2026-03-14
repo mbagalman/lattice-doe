@@ -386,6 +386,126 @@ render_power_params()
 st.markdown("---")
 
 # ===========================================================================
+# MR — Multi-response (optional)
+# ===========================================================================
+with st.expander("Multi-response (optional)"):
+    st.markdown(
+        "Optimise a **single** design that simultaneously achieves adequate power "
+        "for multiple response variables.  Each response may have its own sigma, "
+        "contrast or R² criterion, and relative weight."
+    )
+    st.checkbox(
+        "Enable multi-response mode",
+        key="mr_enabled",
+        help=(
+            "When enabled, the Run page will call the compound multi-response "
+            "optimiser instead of the single-response path."
+        ),
+    )
+
+    if st.session_state.get("mr_enabled", False):
+        ss = st.session_state
+
+        # Combination rule
+        _MR_COMB_KEYS = ["min", "product", "weighted_mean"]
+        _MR_COMB_LABELS = [
+            "min — all responses must reach target (recommended)",
+            "product — joint probability (assumes independence)",
+            "weighted_mean — weighted average power",
+        ]
+        _comb_idx = _MR_COMB_KEYS.index(ss.get("mr_combination", "min"))
+        _sel_comb = st.radio(
+            "Power combination rule",
+            _MR_COMB_LABELS,
+            index=_comb_idx,
+            help="How per-response powers are aggregated into a single scalar for the n-search.",
+        )
+        ss["mr_combination"] = _MR_COMB_KEYS[_MR_COMB_LABELS.index(_sel_comb)]
+
+        st.markdown("---")
+        st.markdown("**Response list**")
+
+        mr_responses: list = ss.get("mr_responses", [])
+
+        # Add response button
+        if st.button("+ Add response"):
+            mr_responses.append({
+                "name": f"Response{len(mr_responses) + 1}",
+                "power_mode": "contrast",
+                "sigma": float(ss.get("sigma", 1.0)),
+                "alpha": float(ss.get("alpha", 0.05)),
+                "power": float(ss.get("power_target", 0.80)),
+                "weight": 1.0,
+                "L_text": ss.get("L_text", ""),
+                "delta_text": ss.get("delta_text", ""),
+                "r2_target": float(ss.get("r2_target", 0.15)),
+            })
+            ss["mr_responses"] = mr_responses
+            st.rerun()
+
+        if not mr_responses:
+            st.info("Click **+ Add response** to add at least 2 response variables.")
+        else:
+            for i, r in enumerate(mr_responses):
+                with st.expander(f"Response {i + 1}: {r.get('name', '')}"):
+                    r["name"] = st.text_input(
+                        "Name", value=r.get("name", ""), key=f"mr_name_{i}"
+                    )
+                    r_mode_opts = ["contrast", "r2"]
+                    r_mode_idx = r_mode_opts.index(r.get("power_mode", "contrast"))
+                    r["power_mode"] = st.radio(
+                        "Power mode", r_mode_opts, index=r_mode_idx,
+                        horizontal=True, key=f"mr_mode_{i}",
+                    )
+                    c_sigma, c_alpha, c_power, c_weight = st.columns(4)
+                    r["sigma"] = c_sigma.number_input(
+                        "σ", value=r.get("sigma", 1.0), min_value=1e-6,
+                        format="%.4g", key=f"mr_sigma_{i}",
+                    )
+                    r["alpha"] = c_alpha.number_input(
+                        "α", value=r.get("alpha", 0.05), min_value=1e-4,
+                        max_value=0.5, format="%.3f", key=f"mr_alpha_{i}",
+                    )
+                    r["power"] = c_power.number_input(
+                        "Target power", value=r.get("power", 0.80),
+                        min_value=0.01, max_value=0.9999, format="%.2f",
+                        key=f"mr_power_{i}",
+                    )
+                    r["weight"] = c_weight.number_input(
+                        "Weight", value=r.get("weight", 1.0), min_value=0.01,
+                        format="%.3g", key=f"mr_weight_{i}",
+                    )
+                    if r["power_mode"] == "contrast":
+                        r["L_text"] = st.text_area(
+                            "Contrast matrix L (one row; space/comma-separated)",
+                            value=r.get("L_text", ""),
+                            height=80, key=f"mr_L_{i}",
+                        )
+                        r["delta_text"] = st.text_input(
+                            "δ (effect size)", value=r.get("delta_text", ""),
+                            key=f"mr_delta_{i}",
+                        )
+                    else:
+                        r["r2_target"] = st.number_input(
+                            "R² target", value=r.get("r2_target", 0.15),
+                            min_value=0.01, max_value=0.99, format="%.3f",
+                            key=f"mr_r2_{i}",
+                        )
+                    if st.button(f"Remove response {i + 1}", key=f"mr_remove_{i}"):
+                        mr_responses.pop(i)
+                        ss["mr_responses"] = mr_responses
+                        st.rerun()
+
+            ss["mr_responses"] = mr_responses
+
+        if len(mr_responses) >= 2:
+            st.success(f"{len(mr_responses)} responses configured.")
+        elif len(mr_responses) == 1:
+            st.warning("Add at least one more response (minimum 2 required).")
+
+st.markdown("---")
+
+# ===========================================================================
 # D1 + D2 + D3 — Advanced design options
 # ===========================================================================
 with st.expander("Advanced design options"):

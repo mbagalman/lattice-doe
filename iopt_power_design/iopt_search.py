@@ -1501,6 +1501,285 @@ def build_split_plot_design(
     return best_design_df.reset_index(drop=True), best_X
 
 
+# =====================================================================
+# Compound criterion Fedorov exchange  (MR-5)
+# =====================================================================
+
+def compound_i_criterion(
+    indices: np.ndarray,
+    candidates_list: List[np.ndarray],
+    weights: List[float],
+    jitter: float = 1e-8,
+) -> float:
+    """Weighted sum of per-formula I-criterion scores over shared run indices.
+
+    score_k = trace[(X_k' X_k)^-1 M_k] / N_cand
+    where M_k = X_cand_k' X_cand_k (pre-computed candidate moment matrix).
+
+    Returns
+    -------
+    float
+        Σ_k (w_k / Σw) · score_k   (lower is better, consistent with I-criterion).
+    """
+    w_total = sum(weights)
+    score = 0.0
+    for X_cand_k, w_k in zip(candidates_list, weights):
+        score += (w_k / w_total) * _i_criterion_for_indices(X_cand_k, indices, jitter=jitter)
+    return score
+
+
+def _compound_criterion_score(
+    criterion: str,
+    candidates_list: List[np.ndarray],
+    weights: List[float],
+    idx: np.ndarray,
+    jitter: float = 1e-8,
+) -> float:
+    """Weighted compound criterion score (I or D); lower is better."""
+    w_total = sum(weights)
+    score = 0.0
+    for X_cand_k, w_k in zip(candidates_list, weights):
+        if criterion == "I":
+            score += (w_k / w_total) * _i_criterion_for_indices(X_cand_k, idx, jitter=jitter)
+        else:  # D
+            score += (w_k / w_total) * _d_criterion_for_indices(X_cand_k, idx, jitter=jitter)
+    return score
+
+
+def _compound_fedorov_single(
+    candidates_list: List[np.ndarray],
+    weights: List[float],
+    n: int,
+    *,
+    criterion: str,
+    max_iter: int,
+    seed: int,
+    jitter: float = 1e-8,
+) -> np.ndarray:
+    """Single-start Fedorov exchange for compound I/D criterion across multiple formulas.
+
+    Operates on a **shared** index set (same rows for all formulas).  At every
+    candidate swap, per-formula gains are weight-summed to obtain a single
+    compound gain, enabling the exchange to simultaneously optimise all
+    formula-specific I (or D) criteria.
+
+    Parameters
+    ----------
+    candidates_list : list of ndarray (n_cand, p_k)
+        One pre-built model matrix per formula; all must have the same row
+        count n_cand.
+    weights : list of float
+        Per-formula weights (need not sum to 1; normalised internally).
+    n : int
+        Number of design rows to select.
+    criterion : {"I", "D"}
+        Compound optimality criterion.  "A" is not supported.
+    max_iter : int
+        Maximum exchange-iteration rounds.
+    seed : int
+        Random seed for the initial random selection.
+    jitter : float
+        Diagonal ridge for numerical stability.
+
+    Returns
+    -------
+    idx : ndarray[int] of shape (n,)
+        Row indices into the shared candidate set.
+    """
+    rng = np.random.default_rng(seed)
+    n_cand = candidates_list[0].shape[0]
+    w_total = sum(weights)
+    w_norm = [w / w_total for w in weights]
+
+    if n > n_cand:
+        raise ValueError(f"n={n} exceeds candidate set size n_cand={n_cand}.")
+
+    idx = rng.choice(n_cand, size=n, replace=False)
+    in_design = np.zeros(n_cand, dtype=bool)
+    in_design[idx] = True
+
+    # Precompute candidate moment matrices (I-criterion only; unchanged across iterations)
+    Mcand_list: Optional[List[np.ndarray]] = (
+        [X_cand_k.T @ X_cand_k for X_cand_k in candidates_list]
+        if criterion == "I" else None
+    )
+
+    for _iter in range(max_iter):
+        non_idx = np.where(~in_design)[0]
+        if len(non_idx) == 0:
+            break
+
+        # ------------------------------------------------------------------
+        # Precompute per-formula quantities for this iteration
+        # ------------------------------------------------------------------
+        per_k_data: List[Dict] = []
+        skip_iter = False
+        for k_idx, (X_cand_k, w_k) in enumerate(zip(candidates_list, w_norm)):
+            p_k = X_cand_k.shape[1]
+            X_d_k = X_cand_k[idx]
+            M_k = X_d_k.T @ X_d_k + jitter * np.eye(p_k)
+            try:
+                M_inv_k = np.linalg.inv(M_k)
+            except np.linalg.LinAlgError:
+                skip_iter = True
+                break
+
+            H_k = M_inv_k @ X_cand_k.T          # p_k × n_cand
+            leverages_k = np.einsum("pt,pt->t", X_cand_k.T, H_k)   # (n_cand,)
+            X_non_k = X_cand_k[non_idx]          # n_non × p_k
+            H_non_k = H_k[:, non_idx]            # p_k × n_non
+            lev_non_k = leverages_k[non_idx]     # (n_non,)
+
+            if criterion == "I":
+                Mcand_k = Mcand_list[k_idx]
+                current_score_k = float(np.trace(M_inv_k @ Mcand_k))
+            else:  # D
+                sign_k, logdet_k = np.linalg.slogdet(M_k)
+                current_score_k = -float(logdet_k) if sign_k > 0 else float("inf")
+
+            per_k_data.append({
+                "H_k": H_k,
+                "leverages_k": leverages_k,
+                "X_non_k": X_non_k,
+                "H_non_k": H_non_k,
+                "lev_non_k": lev_non_k,
+                "current_score_k": current_score_k,
+                "Mcand_k": Mcand_list[k_idx] if criterion == "I" else None,
+                "w_k": w_k,
+            })
+
+        if skip_iter:
+            break  # singular formula matrix — cannot safely continue
+
+        best_gain = 0.0
+        best_s_pos = -1
+        best_t_local = -1
+
+        for s_pos in range(len(idx)):
+            s = idx[s_pos]
+            compound_gains = np.zeros(len(non_idx))
+            denom_bad = False
+
+            for pk in per_k_data:
+                d_s_k = float(pk["leverages_k"][s])
+                h_s_k = pk["H_k"][:, s]           # (p_k,)
+                denom_s_k = 1.0 - d_s_k
+                if denom_s_k < 1e-10:
+                    denom_bad = True
+                    break
+
+                w_s_all_k = pk["X_non_k"] @ h_s_k  # (n_non,)
+
+                if criterion == "D":
+                    v_t_prime_k = pk["lev_non_k"] + w_s_all_k * w_s_all_k / denom_s_k
+                    gains_k = denom_s_k * (1.0 + v_t_prime_k) - 1.0
+                else:  # I
+                    Mcand_hs_k = pk["Mcand_k"] @ h_s_k                               # (p_k,)
+                    trace_I_minus_k = (
+                        pk["current_score_k"] + float(h_s_k @ Mcand_hs_k) / denom_s_k
+                    )
+                    mp_inv_xnon_k = (
+                        pk["H_non_k"] + np.outer(h_s_k, w_s_all_k) / denom_s_k
+                    )                                                                  # p_k × n_non
+                    d_t_prime_k = np.einsum(
+                        "pt,pt->t", pk["X_non_k"].T, mp_inv_xnon_k
+                    )                                                                  # (n_non,)
+                    Mcand_mp_k = pk["Mcand_k"] @ mp_inv_xnon_k                        # p_k × n_non
+                    delta_I_k = (
+                        np.einsum("pt,pt->t", mp_inv_xnon_k, Mcand_mp_k)
+                        / (1.0 + d_t_prime_k)
+                    )                                                                  # (n_non,)
+                    gains_k = pk["current_score_k"] - (trace_I_minus_k - delta_I_k)
+
+                compound_gains += pk["w_k"] * gains_k
+
+            if denom_bad:
+                continue  # skip near-degenerate design point
+
+            local_best = int(np.argmax(compound_gains))
+            if compound_gains[local_best] > best_gain:
+                best_gain = float(compound_gains[local_best])
+                best_s_pos = s_pos
+                best_t_local = local_best
+
+        if best_s_pos == -1:
+            break  # converged — no improving swap found
+
+        old_pt = idx[best_s_pos]
+        new_pt = non_idx[best_t_local]
+        in_design[old_pt] = False
+        in_design[new_pt] = True
+        idx[best_s_pos] = new_pt
+
+    return idx
+
+
+def build_compound_design(
+    candidates_list: List[np.ndarray],
+    weights: List[float],
+    n: int,
+    *,
+    criterion: str = "I",
+    n_start: int = 5,
+    max_iter: int = 100,
+    random_state: Optional[int] = None,
+    jitter: float = 1e-8,
+) -> np.ndarray:
+    """Multi-start compound Fedorov exchange for responses with different formulas.
+
+    Runs ``n_start`` independent random starts of :func:`_compound_fedorov_single`
+    and returns the index set with the best compound criterion score.
+
+    Parameters
+    ----------
+    candidates_list : list of ndarray (n_cand, p_k)
+        One pre-built model matrix per response formula.  All arrays must
+        share the same number of rows (the candidate set size).
+    weights : list of float
+        Per-formula importance weights (normalised internally).
+    n : int
+        Number of design rows to select.
+    criterion : {"I", "D"}
+        Compound optimality criterion.  "A" is not supported.
+    n_start : int
+        Number of independent random starts.
+    max_iter : int
+        Maximum Fedorov exchange iterations per start.
+    random_state : int or None
+        Base random seed; start k uses seed ``base + k * 1337``.
+    jitter : float
+        Diagonal ridge added to X'X for numerical stability.
+
+    Returns
+    -------
+    ndarray[int] of shape (n,)
+        Row indices into the shared candidate set.
+    """
+    if criterion == "A":
+        raise NotImplementedError("A-compound not supported; use 'I' or 'D'.")
+
+    base = int(random_state) if random_state is not None else 0
+    best_score = float("inf")
+    best_idx: Optional[np.ndarray] = None
+
+    for k in range(max(1, n_start)):
+        seed = base + k * 1337
+        idx = _compound_fedorov_single(
+            candidates_list, weights, n,
+            criterion=criterion, max_iter=max_iter, seed=seed, jitter=jitter,
+        )
+        score = _compound_criterion_score(
+            criterion, candidates_list, weights, idx, jitter=jitter
+        )
+        if score < best_score:
+            best_score = score
+            best_idx = idx
+
+    if best_idx is None:  # pragma: no cover
+        raise RuntimeError("build_compound_design: no valid design found.")
+    return best_idx
+
+
 __all__ = [
     "build_i_opt_design",
     "build_i_opt_design_with_idx",
@@ -1511,4 +1790,6 @@ __all__ = [
     "_gls_d_criterion",
     "_gls_a_criterion",
     "augment_design",
+    "compound_i_criterion",
+    "build_compound_design",
 ]
