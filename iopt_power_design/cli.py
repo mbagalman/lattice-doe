@@ -63,7 +63,8 @@ import pandas as pd
 
 from .api import i_optimal_powered_design, i_optimal_multiresponse_design
 from .config import (
-    PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions,
+    PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
+    DesignOptions, SplitPlotOptions,
     MultiResponseOptions, ResponseSpec,
 )
 from .contrasts import contrast_from_scenarios
@@ -111,10 +112,10 @@ def _validate_config_keys(cfg: Dict[str, Any]) -> None:
     if "factors" not in cfg:
         raise KeyError("Config validation failed: 'factors' key is required.")
         
-    if "responses" not in cfg and "contrast" not in cfg and "r2_target" not in cfg:
+    if "responses" not in cfg and "contrast" not in cfg and "r2_target" not in cfg and "family" not in cfg:
         raise KeyError(
             "Config validation failed: Must contain either a 'responses' list (multi-response), "
-            "a 'contrast' block, or an 'r2_target' key."
+            "a 'contrast' block, an 'r2_target' key, or a 'family' key (GLM mode)."
         )
         
     if "contrast" in cfg:
@@ -186,6 +187,37 @@ def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
     alpha = float(cfg.get("alpha", 0.05))
     power = float(cfg.get("power", 0.8))
     sigma = float(cfg.get("sigma", 1.0))
+
+    # GLM path — triggered by presence of 'family' key
+    family = cfg.get("family")
+    if family is not None:
+        import numpy as np  # local import
+        baseline = cfg.get("baseline")
+        if baseline is None:
+            raise ValueError("'baseline' is required when 'family' is set.")
+        link = cfg.get("link", None)
+        max_n = int(cfg.get("max_n", 500))
+        c = cfg.get("contrast") or {}
+        if {"scenario_a", "scenario_b", "sesoi"} <= c.keys():
+            L, delta = contrast_from_scenarios(
+                formula,
+                factors,
+                c["scenario_a"],
+                c["scenario_b"],
+                float(c["sesoi"]),
+            )
+        elif "L" in c and "delta" in c:
+            L = np.asarray(c["L"], dtype=float)
+            delta = np.asarray(c["delta"], dtype=float)
+        else:
+            raise ValueError(
+                "GLM mode requires a 'contrast' block with "
+                "[scenario_a, scenario_b, sesoi] or explicit [L, delta]."
+            )
+        return PowerGLMContrastConfig(
+            L=L, delta=delta, baseline=float(baseline),
+            family=str(family), link=link, alpha=alpha, power=power, max_n=max_n,
+        )
 
     if "contrast" in cfg:
         c = cfg["contrast"] or {}
@@ -314,6 +346,24 @@ def _apply_sp_cli_args(cfg: Dict[str, Any], args) -> Dict[str, Any]:
     if args.df_method is not None:
         sp_block["df_method"] = args.df_method
     cfg["split_plot"] = sp_block
+    return cfg
+
+
+def _apply_glm_cli_args(cfg: Dict[str, Any], args) -> Dict[str, Any]:
+    """Merge CLI GLM flags (``--family``, ``--link``, ``--baseline``) into *cfg*.
+
+    Returns a shallow copy of *cfg* with updated keys; the original is never mutated.
+    """
+    if not any(x is not None for x in (args.family, args.link, args.baseline)):
+        return cfg
+
+    cfg = dict(cfg)
+    if args.family is not None:
+        cfg["family"] = args.family
+    if args.link is not None:
+        cfg["link"] = args.link
+    if args.baseline is not None:
+        cfg["baseline"] = args.baseline
     return cfg
 
 
@@ -489,12 +539,109 @@ output:
 """
 
 
+_TEMPLATE_GLM_BINOMIAL = """\
+# iopt-design config — GLM binomial/logistic mode
+# Generate with: iopt-design --template glm-binomial > config.yml
+
+formula: "~ 1 + A + B + A:B"
+
+factors:
+  A: [low, high]      # categorical: list of levels
+  B: [0.0, 10.0]      # continuous:  [low, high] (two numeric values)
+
+# Power mode: Wald chi-square for a binomial (logistic) GLM contrast
+family: binomial       # binomial | poisson
+link: logit            # logit (default for binomial) | log | identity
+baseline: 0.30         # baseline response probability p₀  (0 < p₀ < 1)
+
+contrast:
+  # Option 1 — scenario-based (recommended)
+  scenario_a: {{A: low,  B: 5.0}}
+  scenario_b: {{A: high, B: 5.0}}
+  sesoi: 0.15          # smallest effect of interest on the LP scale
+
+  # Option 2 — explicit L matrix and delta vector (advanced users)
+  # L: [[0, 0, 1, 0]]
+  # delta: [0.15]
+
+alpha: 0.05
+power: 0.80
+
+design:
+  auto_candidate: true           # adaptive candidate sizing (recommended)
+  candidate_points: 2000
+  cand_min: 1000
+  cand_max: 10000
+  starts: 5
+  algo: fedorov
+  criterion: I
+  max_iter: 1000
+  random_state: 123
+  xtx_jitter: 1.0e-8
+  workers: null
+
+output:
+  basename: design
+  excel: false
+"""
+
+_TEMPLATE_GLM_POISSON = """\
+# iopt-design config — GLM Poisson/log mode
+# Generate with: iopt-design --template glm-poisson > config.yml
+
+formula: "~ 1 + A + B + A:B"
+
+factors:
+  A: [low, high]      # categorical: list of levels
+  B: [0.0, 10.0]      # continuous:  [low, high] (two numeric values)
+
+# Power mode: Wald chi-square for a Poisson (log-linear) GLM contrast
+family: poisson        # binomial | poisson
+link: log              # log (default for Poisson) | identity | sqrt
+baseline: 2.0          # baseline expected count μ₀  (> 0)
+
+contrast:
+  # Option 1 — scenario-based (recommended)
+  scenario_a: {{A: low,  B: 5.0}}
+  scenario_b: {{A: high, B: 5.0}}
+  sesoi: 0.30          # smallest effect of interest on the LP scale
+
+  # Option 2 — explicit L matrix and delta vector (advanced users)
+  # L: [[0, 0, 1, 0]]
+  # delta: [0.30]
+
+alpha: 0.05
+power: 0.80
+
+design:
+  auto_candidate: true
+  candidate_points: 2000
+  cand_min: 1000
+  cand_max: 10000
+  starts: 5
+  algo: fedorov
+  criterion: I
+  max_iter: 1000
+  random_state: 123
+  xtx_jitter: 1.0e-8
+  workers: null
+
+output:
+  basename: design
+  excel: false
+"""
+
+
 def _print_template(mode: str) -> None:
     """Print a fully-commented YAML config template to stdout."""
     if mode == "contrast":
         print(_TEMPLATE_CONTRAST)
     elif mode == "r2":
         print(_TEMPLATE_R2)
+    elif mode == "glm-binomial":
+        print(_TEMPLATE_GLM_BINOMIAL)
+    elif mode == "glm-poisson":
+        print(_TEMPLATE_GLM_POISSON)
     else:
         raise ValueError(f"Unknown template mode: {mode!r}")
 
@@ -524,9 +671,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--template",
-        choices=["contrast", "r2"],
+        choices=["contrast", "r2", "glm-binomial", "glm-poisson"],
         metavar="MODE",
-        help="Print a commented example config (contrast | r2) to stdout and exit.",
+        help="Print a commented example config (contrast | r2 | glm-binomial | glm-poisson) to stdout and exit.",
     )
     # ADDED: Verbose flag
     parser.add_argument(
@@ -566,9 +713,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--template-mode",
-        choices=["r2", "contrast"],
+        choices=["r2", "contrast", "glm-binomial", "glm-poisson"],
         default="r2",
-        help="Example mode for --excel-template: 'r2' (default) or 'contrast'.",
+        help="Example mode for --excel-template: 'r2' (default), 'contrast', 'glm-binomial', or 'glm-poisson'.",
     )
     parser.add_argument(
         "--excel-run",
@@ -598,6 +745,31 @@ def main(argv: Optional[List[str]] = None) -> int:
             "After running the design search, print a compact robustness summary "
             "showing how power changes across ranges of sigma, effect size, and alpha. "
             "No additional dependencies required."
+        ),
+    )
+    # GLM flags (override YAML family / link / baseline keys)
+    parser.add_argument(
+        "--family",
+        choices=["binomial", "poisson"],
+        default=None,
+        metavar="FAMILY",
+        help="GLM response family (binomial | poisson). Overrides 'family' in the config.",
+    )
+    parser.add_argument(
+        "--link",
+        choices=["logit", "log", "identity", "sqrt"],
+        default=None,
+        metavar="LINK",
+        help="GLM link function (logit | log | identity | sqrt). Overrides 'link' in the config.",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=float,
+        default=None,
+        metavar="B",
+        help=(
+            "Baseline response value for GLM power (p₀ for binomial, μ₀ for Poisson). "
+            "Overrides 'baseline' in the config."
         ),
     )
     # Split-plot / hard-to-change factor flags (override YAML split_plot: block)
@@ -739,7 +911,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.config is None:
         parser.error(
             "--config is required. Alternatives: "
-            "--template {r2,contrast} to print a YAML scaffold, "
+            "--template {r2,contrast,glm-binomial,glm-poisson} to print a YAML scaffold, "
             "--sheets URL to run from a Google Sheet, "
             "--excel-template PATH to create an Excel workbook, or "
             "--excel-run PATH to run from an existing Excel workbook."
@@ -775,6 +947,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.debug("Parsing config sections...")
         formula = str(cfg["formula"])
         factors = _as_factors(cfg["factors"])
+
+        # Merge CLI GLM flags into cfg before power config is built (CLI takes priority over YAML)
+        cfg = _apply_glm_cli_args(cfg, args)
 
         _is_multiresponse = bool(args.multi_response) or "responses" in cfg
         if _is_multiresponse:
