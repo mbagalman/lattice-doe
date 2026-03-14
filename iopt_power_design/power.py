@@ -1,20 +1,25 @@
 # power.py
 # License: MIT
 """
-Power calculations for linear models (F-tests)
-=============================================
+Power calculations for linear models (F-tests and GLM Wald chi-square)
+=======================================================================
 
 This module provides power calculations for:
-  - Linear contrasts (Wald test on Lβ = δ)
+  - Linear contrasts (Wald F-test on Lβ = δ)
   - Global R² (full model F-test)
+  - GLM contrasts (Wald chi-square test, null-based locally optimal)
 
 Core steps:
 -----------
 1. Compute noncentrality parameter λ based on the model matrix X
-   and effect size specification (contrast or R²).
-2. Compute power using the noncentral F distribution:
-      power = 1 - F_{df1, df2, λ}(Fcrit)
-   where Fcrit is the critical value at significance level α.
+   and effect size specification (contrast, R², or GLM contrast).
+2. Compute power using:
+   - Noncentral F distribution for OLS/GLS tests:
+       power = 1 - F_{df1, df2, λ}(Fcrit)
+   - Noncentral chi-square for GLM Wald tests:
+       power = 1 - χ²_{q, λ}(χ²crit)
+     where the noncentrality λ = w · δᵀ [L(X'X)⁻¹Lᵀ]⁺ δ
+     and w = glm_fisher_weight(cfg) (scalar Fisher information weight).
 
 Notes:
 ------
@@ -35,10 +40,14 @@ try:
     # Only import when actually computing power
     from scipy.stats import ncf as ncf_dist
     from scipy.stats import f as f_dist
+    from scipy.stats import ncx2 as ncx2_dist
+    from scipy.stats import chi2 as chi2_dist
 except Exception as e:  # pragma: no cover
     # Delay the error until one of the functions is actually used.
     ncf_dist = None
     f_dist = None
+    ncx2_dist = None
+    chi2_dist = None
     _scipy_import_error = e
 else:
     _scipy_import_error = None
@@ -235,6 +244,85 @@ def contrast_power(
 
     # ADDED: Clip power values to [0, 1] range
     power = np.clip(power, 0.0, 1.0)
+
+    return ContrastPowerResult(power=power, lam=lam)
+
+
+# ---------------------------------------------------------------------
+def glm_contrast_power(
+    cfg: "PowerGLMContrastConfig",
+    X: np.ndarray,
+    jitter: float = 1e-8,
+) -> ContrastPowerResult:
+    """Power for a GLM linear contrast via Wald chi-square test.
+
+    Uses a null-based locally optimal approximation: the Fisher information
+    weight ``w = glm_fisher_weight(cfg)`` is a positive scalar evaluated at
+    the null (baseline), so noncentrality is:
+
+        λ = w · δᵀ [L (X'X)⁻¹ Lᵀ]⁺ δ
+
+    Power is then computed from the noncentral chi-square distribution:
+
+        χ²_crit = χ²_{1−α}(q)
+        power   = 1 − χ²_{q, λ}(χ²_crit)
+
+    where ``q = rank(L)``.  This is equivalent to OLS contrast power with
+    effective residual std ``σ_eff = 1/√w``.
+
+    Parameters
+    ----------
+    cfg : PowerGLMContrastConfig
+        GLM contrast specification (family, link, baseline, L, delta, alpha).
+    X : ndarray (n, p)
+        Model/design matrix corresponding to the fitted model.
+    jitter : float
+        Small ridge added to X'X before pseudo-inversion.
+
+    Returns
+    -------
+    ContrastPowerResult
+        NamedTuple with ``power`` (float) and ``lam`` (float).
+    """
+    _require_scipy()
+    from .config import glm_fisher_weight  # avoid circular at module level
+
+    X = np.asarray(X)
+    if X.ndim != 2:
+        raise ValueError(f"Design matrix X must be 2D; got {X.ndim} dimensions.")
+    n, p = X.shape
+
+    L = np.asarray(cfg.L)
+    if L.ndim == 1:
+        L = L.reshape(1, -1)
+    delta = np.asarray(cfg.delta).reshape(-1)
+
+    q = int(np.linalg.matrix_rank(L))
+    if q <= 0:
+        raise ValueError("Contrast matrix L has rank 0; must have rank > 0.")
+
+    # Fisher information weight at null (scalar)
+    w = glm_fisher_weight(cfg)
+
+    # Weighted XtX inverse (w cancels in ratio, kept for clarity)
+    XtX_inv = _pinv_xtx(X, jitter=jitter)
+    V_unscaled = _symmetrize(L @ XtX_inv @ L.T)
+
+    rank_V = np.linalg.matrix_rank(V_unscaled)
+    if rank_V == 0:
+        raise ValueError(
+            "Contrast variance matrix L @ (X'X)⁻¹ @ Lᵀ has rank 0; "
+            "the contrast is not testable."
+        )
+
+    V_inv = np.linalg.pinv(V_unscaled)
+    lam = float(w * (delta @ V_inv @ delta))
+    lam = max(0.0, lam)
+
+    # Critical chi-square value and power
+    chi2_crit = float(chi2_dist.isf(cfg.alpha, q))
+    power = float(1.0 - ncx2_dist.cdf(chi2_crit, q, lam))
+    power = float(np.clip(power, 0.0, 1.0))
 
     return ContrastPowerResult(power=power, lam=lam)
 
@@ -655,13 +743,24 @@ def eval_response_power(
         Keys: ``"name"``, ``"power"``, ``"lam"``, ``"df2"``,
         and ``"df1"`` (contrast mode only).
     """
-    from .config import PowerContrastConfig, PowerR2Config  # avoid circular at module level
+    from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig  # avoid circular at module level
 
     cfg = response.power_cfg
     n, p = X.shape
     df2 = int(n - int(np.linalg.matrix_rank(X)))
 
-    if isinstance(cfg, PowerContrastConfig):
+    if isinstance(cfg, PowerGLMContrastConfig):
+        result = glm_contrast_power(cfg, X, jitter=jitter)
+        return {
+            "name": response.name,
+            "power": result.power,
+            "lam": result.lam,
+            "df1": int(np.linalg.matrix_rank(np.asarray(cfg.L))),
+            "df2": None,
+            "family": cfg.family,
+            "baseline": cfg.baseline,
+        }
+    elif isinstance(cfg, PowerContrastConfig):
         if split_plot_opts is not None:
             if Z is None:
                 raise ValueError(
@@ -691,7 +790,7 @@ def eval_response_power(
             "df1": int(np.linalg.matrix_rank(cfg.L)),
             "df2": df2,
         }
-    else:  # PowerR2Config
+    else:  # PowerR2Config (fallback)
         if split_plot_opts is not None:
             if Z is None:
                 raise ValueError(

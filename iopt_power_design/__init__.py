@@ -36,7 +36,7 @@ from .analysis import (  # noqa: F401
     power_curve_by_n_multiresponse,
     multiresponse_sensitivity,
 )
-from .power import contrast_power_sp, global_r2_power_sp, eval_response_power, combine_powers, hotelling_t2_power  # noqa: F401
+from .power import contrast_power_sp, global_r2_power_sp, eval_response_power, combine_powers, hotelling_t2_power, glm_contrast_power  # noqa: F401
 from .allocation import i_optimal_allocation  # noqa: F401
 from .candidate import build_candidate, build_split_plot_candidate  # noqa: F401
 from .model_matrix import build_model_matrix  # noqa: F401
@@ -112,6 +112,8 @@ __all__ = [
     # Split-plot power functions
     "contrast_power_sp",
     "global_r2_power_sp",
+    # GLM power
+    "glm_contrast_power",
     # Multi-response power wrapper
     "eval_response_power",
     "combine_powers",

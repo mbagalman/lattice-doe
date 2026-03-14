@@ -3,9 +3,10 @@
 import numpy as np
 import pytest
 
-from iopt_power_design.power import contrast_power, global_r2_power, eval_response_power, combine_powers, hotelling_t2_power
+from iopt_power_design.power import contrast_power, global_r2_power, eval_response_power, combine_powers, hotelling_t2_power, glm_contrast_power
 from iopt_power_design.config import (
     PowerContrastConfig, PowerR2Config, ResponseSpec, SplitPlotOptions,
+    PowerGLMContrastConfig, glm_fisher_weight,
 )
 
 
@@ -656,3 +657,250 @@ class TestMR10HotellingT2Properties:
         Delta = np.ones((q, k))
         result = hotelling_t2_power(L, Delta, X, np.eye(k))
         assert result.df1 == q * k
+
+
+# ---------------------------------------------------------------------------
+# GLM contrast power (GL-2)
+# ---------------------------------------------------------------------------
+
+def _glm_X(n: int = 40, p: int = 3, seed: int = 0) -> np.ndarray:
+    """Full-rank design matrix for GLM tests."""
+    rng = np.random.default_rng(seed)
+    X = np.ones((n, p))
+    X[:, 1:] = rng.standard_normal((n, p - 1))
+    return X
+
+
+def _binomial_cfg(**kwargs) -> PowerGLMContrastConfig:
+    defaults = dict(
+        L=np.array([[0.0, 1.0, 0.0]]),
+        delta=np.array([0.3]),
+        baseline=0.5,
+        family="binomial",
+        alpha=0.05,
+    )
+    defaults.update(kwargs)
+    return PowerGLMContrastConfig(**defaults)
+
+
+def _poisson_cfg(**kwargs) -> PowerGLMContrastConfig:
+    defaults = dict(
+        L=np.array([[0.0, 1.0, 0.0]]),
+        delta=np.array([0.5]),
+        baseline=2.0,
+        family="poisson",
+        alpha=0.05,
+    )
+    defaults.update(kwargs)
+    return PowerGLMContrastConfig(**defaults)
+
+
+class TestGLMContrastPower:
+    # --- Return type and basic properties ---
+
+    def test_returns_contrast_power_result(self):
+        cfg = _binomial_cfg()
+        result = glm_contrast_power(cfg, _glm_X())
+        assert hasattr(result, "power")
+        assert hasattr(result, "lam")
+
+    def test_power_in_unit_interval_binomial(self):
+        result = glm_contrast_power(_binomial_cfg(), _glm_X())
+        assert 0.0 <= result.power <= 1.0
+
+    def test_power_in_unit_interval_poisson(self):
+        result = glm_contrast_power(_poisson_cfg(), _glm_X())
+        assert 0.0 <= result.power <= 1.0
+
+    def test_lam_nonneg_binomial(self):
+        result = glm_contrast_power(_binomial_cfg(), _glm_X())
+        assert result.lam >= 0.0
+
+    def test_lam_nonneg_poisson(self):
+        result = glm_contrast_power(_poisson_cfg(), _glm_X())
+        assert result.lam >= 0.0
+
+    # --- Power increases with n ---
+
+    def test_power_increases_with_n_binomial(self):
+        cfg = _binomial_cfg(delta=np.array([0.4]))
+        L_row = cfg.L
+        powers = [
+            glm_contrast_power(
+                PowerGLMContrastConfig(L=L_row, delta=np.array([0.4]), baseline=0.5,
+                                       family="binomial"),
+                _glm_X(n=n),
+            ).power
+            for n in [10, 40, 120]
+        ]
+        assert powers[0] < powers[1] < powers[2]
+
+    def test_power_increases_with_n_poisson(self):
+        powers = [
+            glm_contrast_power(
+                PowerGLMContrastConfig(L=np.array([[0.0, 1.0, 0.0]]),
+                                       delta=np.array([0.2]), baseline=1.0,
+                                       family="poisson"),
+                _glm_X(n=n),
+            ).power
+            for n in [10, 40, 120]
+        ]
+        assert powers[0] < powers[1] < powers[2]
+
+    # --- Power increases with delta ---
+
+    def test_power_increases_with_delta_binomial(self):
+        X = _glm_X(n=50)
+        L = np.array([[0.0, 1.0, 0.0]])
+        powers = [
+            glm_contrast_power(
+                PowerGLMContrastConfig(L=L, delta=np.array([d]), baseline=0.5,
+                                       family="binomial"),
+                X,
+            ).power
+            for d in [0.1, 0.5, 1.5]
+        ]
+        assert powers[0] < powers[1] < powers[2]
+
+    def test_power_increases_with_delta_poisson(self):
+        X = _glm_X(n=50)
+        L = np.array([[0.0, 1.0, 0.0]])
+        powers = [
+            glm_contrast_power(
+                PowerGLMContrastConfig(L=L, delta=np.array([d]), baseline=2.0,
+                                       family="poisson"),
+                X,
+            ).power
+            for d in [0.1, 0.5, 2.0]
+        ]
+        assert powers[0] < powers[1] < powers[2]
+
+    # --- Equivalence to OLS with sigma_eff = 1/sqrt(w) ---
+
+    def test_glm_binomial_matches_ols_sigma_eff(self):
+        """GLM binomial power == OLS contrast power with sigma = 1/sqrt(w)."""
+        X = _glm_X(n=60)
+        L = np.array([[0.0, 1.0, 0.0]])
+        delta = np.array([0.5])
+        cfg = PowerGLMContrastConfig(L=L, delta=delta, baseline=0.4, family="binomial")
+        w = glm_fisher_weight(cfg)
+        sigma_eff = 1.0 / np.sqrt(w)
+        glm_result = glm_contrast_power(cfg, X)
+        ols_result = contrast_power(L, delta, X, sigma=sigma_eff, alpha=cfg.alpha)
+        # Power should match (noncentral chi-square vs noncentral F differ slightly
+        # in small samples but are asymptotically equivalent; check lambda instead)
+        assert glm_result.lam == pytest.approx(ols_result.lam, rel=1e-6)
+
+    def test_glm_poisson_matches_ols_sigma_eff(self):
+        """GLM Poisson power == OLS contrast power with sigma = 1/sqrt(mu0)."""
+        X = _glm_X(n=60)
+        L = np.array([[0.0, 1.0, 0.0]])
+        delta = np.array([0.5])
+        cfg = PowerGLMContrastConfig(L=L, delta=delta, baseline=3.0, family="poisson")
+        w = glm_fisher_weight(cfg)
+        sigma_eff = 1.0 / np.sqrt(w)
+        glm_result = glm_contrast_power(cfg, X)
+        ols_result = contrast_power(L, delta, X, sigma=sigma_eff, alpha=cfg.alpha)
+        assert glm_result.lam == pytest.approx(ols_result.lam, rel=1e-6)
+
+    # --- Zero delta → power ≈ alpha ---
+    # PowerGLMContrastConfig rejects delta=0 at construction, so we build a valid
+    # config then overwrite delta to exercise the power function directly.
+
+    def test_zero_delta_power_equals_alpha_binomial(self):
+        cfg = _binomial_cfg()
+        object.__setattr__(cfg, "delta", np.array([0.0]))
+        result = glm_contrast_power(cfg, _glm_X(n=100))
+        assert result.power == pytest.approx(0.05, abs=0.01)
+
+    def test_zero_delta_power_equals_alpha_poisson(self):
+        cfg = _poisson_cfg()
+        object.__setattr__(cfg, "delta", np.array([0.0]))
+        result = glm_contrast_power(cfg, _glm_X(n=100))
+        assert result.power == pytest.approx(0.05, abs=0.01)
+
+    # --- 1-D L treated as single-row ---
+
+    def test_1d_L_treated_as_single_row(self):
+        X = _glm_X()
+        cfg_2d = _binomial_cfg(L=np.array([[0.0, 1.0, 0.0]]))
+        cfg_1d = _binomial_cfg(L=np.array([0.0, 1.0, 0.0]))
+        r_2d = glm_contrast_power(cfg_2d, X)
+        r_1d = glm_contrast_power(cfg_1d, X)
+        assert r_2d.lam == pytest.approx(r_1d.lam, rel=1e-10)
+
+    # --- Multi-row contrast (q > 1) ---
+
+    def test_multirow_contrast_binomial(self):
+        X = _glm_X(n=60, p=4)
+        L = np.array([[0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]])
+        delta = np.array([0.4, 0.4])
+        cfg = PowerGLMContrastConfig(L=L, delta=delta, baseline=0.5, family="binomial")
+        result = glm_contrast_power(cfg, X)
+        assert 0.0 <= result.power <= 1.0
+        assert result.lam >= 0.0
+
+    # --- Higher baseline Poisson → higher weight → higher power ---
+
+    def test_higher_baseline_poisson_increases_power(self):
+        X = _glm_X(n=40)
+        L = np.array([[0.0, 1.0, 0.0]])
+        delta = np.array([0.5])
+        r_low = glm_contrast_power(
+            PowerGLMContrastConfig(L=L, delta=delta, baseline=1.0, family="poisson"), X
+        )
+        r_high = glm_contrast_power(
+            PowerGLMContrastConfig(L=L, delta=delta, baseline=10.0, family="poisson"), X
+        )
+        assert r_high.power >= r_low.power
+
+    # --- Stricter alpha → less power ---
+
+    def test_stricter_alpha_decreases_power(self):
+        X = _glm_X(n=50)
+        cfg_lenient = _binomial_cfg(alpha=0.10)
+        cfg_strict = _binomial_cfg(alpha=0.01)
+        r_lenient = glm_contrast_power(cfg_lenient, X)
+        r_strict = glm_contrast_power(cfg_strict, X)
+        assert r_lenient.power >= r_strict.power
+
+    # --- eval_response_power dispatches GLM correctly ---
+
+    def test_eval_response_power_dispatches_glm(self):
+        X = _glm_X(n=50)
+        p_names = ["(Intercept)", "x1", "x2"]
+        cfg = _binomial_cfg()
+        spec = ResponseSpec(name="y", formula="~x1+x2", power_cfg=cfg)
+        result = eval_response_power(spec, X, p_names)
+        assert result["name"] == "y"
+        assert 0.0 <= result["power"] <= 1.0
+        assert result["lam"] >= 0.0
+        assert result["df2"] is None
+        assert result["family"] == "binomial"
+        assert result["baseline"] == pytest.approx(0.5)
+
+    def test_eval_response_power_glm_poisson(self):
+        X = _glm_X(n=50)
+        p_names = ["(Intercept)", "x1", "x2"]
+        cfg = _poisson_cfg()
+        spec = ResponseSpec(name="counts", formula="~x1+x2", power_cfg=cfg)
+        result = eval_response_power(spec, X, p_names)
+        assert result["family"] == "poisson"
+        assert result["df2"] is None
+
+    # --- Bad input errors ---
+
+    def test_bad_X_ndim_raises(self):
+        cfg = _binomial_cfg()
+        with pytest.raises(ValueError, match="2D"):
+            glm_contrast_power(cfg, np.ones(10))
+
+    def test_zero_rank_L_raises(self):
+        """A zero L matrix has rank 0 — should raise."""
+        L = np.zeros((1, 3))
+        # PowerGLMContrastConfig validates L at construction; bypass by patching
+        cfg = _binomial_cfg()
+        object.__setattr__(cfg, "L", L)
+        # V_unscaled will be zero-matrix → rank 0
+        with pytest.raises(ValueError):
+            glm_contrast_power(cfg, _glm_X())
