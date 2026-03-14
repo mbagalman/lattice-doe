@@ -1009,8 +1009,8 @@ def sheets_run(
             result = i_optimal_powered_design(
                 formula=formula,
                 factors=factors,
-                power_config=power_cfg,
-                design_options=design_opts,
+                power_cfg=power_cfg,
+                design_opts=design_opts,
             )
     except Exception as e:
         raise SheetsError(
