@@ -410,21 +410,41 @@ def _read_config_sheet(
     multi_cfg: Optional[MultiResponseOptions] = None
 
     if idx_responses is not None:
+        # Column order: name|power_mode|sigma|alpha|power|weight|L_row|delta|r2_target|
+        #               formula|lambda_mode|max_n|max_iter|tol_power
+        # Special key rows (interleaved): power_combination, sigma_joint
         responses_data_start = idx_responses + 2
         specs: List[ResponseSpec] = []
         power_combination = "min"
+        sigma_joint_arr: Optional[np.ndarray] = None
 
         for row in rows[responses_data_start:]:
-            col_a = row[0] if len(row) > 0 else ""
-            col_b = row[1] if len(row) > 1 else ""
+            col_a = str(row[0]) if len(row) > 0 and row[0] is not None else ""
+            col_b = str(row[1]) if len(row) > 1 and row[1] is not None else ""
             if not col_a:
                 continue
             if col_a == "power_combination":
                 power_combination = col_b or "min"
                 continue
+            if col_a == "sigma_joint":
+                # Format: semicolon-separated matrix rows, comma-separated values.
+                if col_b:
+                    try:
+                        _sj_rows = []
+                        for _line in col_b.split(";"):
+                            _line = _line.strip()
+                            if _line:
+                                _sj_rows.append([float(x) for x in _line.replace(",", " ").split()])
+                        sigma_joint_arr = np.array(_sj_rows, dtype=float)
+                    except (ValueError, TypeError) as e:
+                        raise ExcelError(
+                            f"[RESPONSES] sigma_joint: invalid matrix format: {e}"
+                        ) from e
+                continue
 
             def _rcell(idx: int) -> str:
-                return row[idx] if len(row) > idx else ""
+                v = row[idx] if len(row) > idx else None
+                return str(v) if v is not None else ""
 
             r_name = col_a
             r_mode = col_b.lower()
@@ -436,6 +456,10 @@ def _read_config_sheet(
             r_d_str  = _rcell(7)
             r_r2_str = _rcell(8)
             r_formula_str = _rcell(9) or None
+            r_lambda_mode = _rcell(10) or "n"
+            r_max_n   = int(float(_rcell(11))) if _rcell(11) else 2000
+            r_max_iter = int(float(_rcell(12))) if _rcell(12) else 200
+            r_tol_power = float(_rcell(13)) if _rcell(13) else 1e-3
 
             if r_mode == "contrast":
                 if not r_L_str or not r_d_str:
@@ -455,6 +479,7 @@ def _read_config_sheet(
                 try:
                     pcfg: Union[PowerContrastConfig, PowerR2Config] = PowerContrastConfig(
                         L=r_L, delta=r_d, alpha=r_alpha, power=r_power_v, sigma=r_sigma,
+                        max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power,
                     )
                 except (ValueError, TypeError) as e:
                     raise ExcelError(
@@ -469,6 +494,8 @@ def _read_config_sheet(
                     pcfg = PowerR2Config(
                         r2_target=float(r_r2_str),
                         alpha=r_alpha, power=r_power_v, sigma=r_sigma,
+                        lambda_mode=r_lambda_mode,
+                        max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power,
                     )
                 except (ValueError, TypeError) as e:
                     raise ExcelError(
@@ -494,7 +521,9 @@ def _read_config_sheet(
             )
         try:
             multi_cfg = MultiResponseOptions(
-                responses=specs, power_combination=power_combination,
+                responses=specs,
+                power_combination=power_combination,
+                sigma_joint=sigma_joint_arr,
             )
         except (ValueError, TypeError) as e:
             raise ExcelError(f"Config sheet produced invalid MultiResponseOptions: {e}") from e
@@ -574,12 +603,14 @@ def create_excel_template(
     ----------
     path : str or Path, default ``"iopt_template.xlsx"``
         Destination file path.  Existing files are overwritten.
-    example : {"r2", "contrast"}, default ``"r2"``
+    example : {"r2", "contrast", "multiresponse"}, default ``"r2"``
         Which pre-filled example to write.
 
-        * ``"r2"``       — global R² power config with two continuous factors.
-        * ``"contrast"`` — single contrast (L matrix + delta) with two
+        * ``"r2"``            — global R² power config with two continuous factors.
+        * ``"contrast"``      — single contrast (L matrix + delta) with two
           continuous factors.
+        * ``"multiresponse"`` — two-response R² joint design with a ``[RESPONSES]``
+          section demonstrating all per-response and ``sigma_joint`` fields.
 
     Returns
     -------
@@ -591,13 +622,13 @@ def create_excel_template(
     ImportError
         If ``openpyxl`` is not installed.
     ValueError
-        If *example* is not ``"r2"`` or ``"contrast"``.
+        If *example* is not ``"r2"``, ``"contrast"``, or ``"multiresponse"``.
     """
     _require_openpyxl()
 
-    if example not in ("r2", "contrast"):
+    if example not in ("r2", "contrast", "multiresponse"):
         raise ValueError(
-            f"Unknown example {example!r}. Supported values: 'r2', 'contrast'."
+            f"Unknown example {example!r}. Supported values: 'r2', 'contrast', 'multiresponse'."
         )
 
     wb = openpyxl.Workbook()
@@ -611,22 +642,21 @@ def create_excel_template(
     # ------------------------------------------------------------------ #
     _sentinel_style(ws, r, _SENTINEL_SETTINGS); r += 1
 
-    _key_cell(ws, r, "formula",
-              "~ 1 + A + B" if example == "r2" else "~ 1 + A + B"); r += 1
-    _key_cell(ws, r, "power_mode", example); r += 1
-    _add_dropdown(ws, '"r2,contrast"', row=r - 1)
+    _key_cell(ws, r, "formula", "~ 1 + A + B"); r += 1
+    # power_mode is omitted for multiresponse (overridden by [RESPONSES] section)
+    if example != "multiresponse":
+        _key_cell(ws, r, "power_mode", example); r += 1
+        _add_dropdown(ws, '"r2,contrast"', row=r - 1)
+        _key_cell(ws, r, "alpha",        0.05);  r += 1
+        _key_cell(ws, r, "power",        0.80);  r += 1
+        if example == "r2":
+            _key_cell(ws, r, "r2_target",  0.25); r += 1
+            _key_cell(ws, r, "sigma",      "");   r += 1   # not used in R² mode
+        else:
+            _key_cell(ws, r, "sigma",      1.0);  r += 1
+            _key_cell(ws, r, "r2_target",  "");   r += 1   # not used in contrast mode
+        _key_cell(ws, r, "max_n",        500);   r += 1
 
-    _key_cell(ws, r, "alpha",        0.05);  r += 1
-    _key_cell(ws, r, "power",        0.80);  r += 1
-
-    if example == "r2":
-        _key_cell(ws, r, "r2_target",  0.25); r += 1
-        _key_cell(ws, r, "sigma",      "");   r += 1   # not used in R² mode
-    else:
-        _key_cell(ws, r, "sigma",      1.0);  r += 1
-        _key_cell(ws, r, "r2_target",  "");   r += 1   # not used in contrast mode
-
-    _key_cell(ws, r, "max_n",        500);   r += 1
     _key_cell(ws, r, "criterion",    "I");   r += 1
     _add_dropdown(ws, '"I,D,A"', row=r - 1)
 
@@ -677,6 +707,34 @@ def create_excel_template(
     ws.cell(row=r, column=3, value=-1.0)
     ws.cell(row=r, column=4, value=1.0)
     r += 1
+
+    # ------------------------------------------------------------------ #
+    # [RESPONSES] — only for multiresponse example
+    # Column order: name|power_mode|sigma|alpha|power|weight|L_row|delta|
+    #               r2_target|formula|lambda_mode|max_n|max_iter|tol_power
+    # ------------------------------------------------------------------ #
+    if example == "multiresponse":
+        r += 1  # blank separator
+        _sentinel_style(ws, r, _SENTINEL_RESPONSES); r += 1
+        # Header row (informational — not parsed by _read_config_sheet)
+        _header_row(ws, r, [
+            "name", "power_mode", "sigma", "alpha", "power", "weight",
+            "L_row", "delta", "r2_target", "formula",
+            "lambda_mode", "max_n", "max_iter", "tol_power",
+        ]); r += 1
+        # Special key rows
+        _key_cell(ws, r, "power_combination", "min"); r += 1
+        # sigma_joint: leave blank to disable; fill as "1,0.3; 0.3,1" to enable Hotelling T²
+        _key_cell(ws, r, "sigma_joint", ""); r += 1
+        # Per-response data rows
+        for _rname, _r2t in (("Y1", 0.15), ("Y2", 0.20)):
+            ws.cell(row=r, column=1, value=_rname)
+            ws.cell(row=r, column=2, value="r2")
+            # sigma/alpha/power/weight — blank = use global defaults
+            ws.cell(row=r, column=6, value=1.0)   # weight
+            ws.cell(row=r, column=9, value=_r2t)  # r2_target
+            ws.cell(row=r, column=11, value="n")   # lambda_mode
+            r += 1
 
     _set_column_widths(ws, [20, 16, 12, 12])
 

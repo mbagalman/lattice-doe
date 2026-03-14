@@ -493,11 +493,15 @@ def _parse_config_sheet(
     multi_cfg: Optional[MultiResponseOptions] = None
 
     if idx_responses is not None:
-        # Header row at idx_responses + 1: name|power_mode|sigma|alpha|power|weight|L_row|delta|r2_target
+        # Header row at idx_responses + 1:
+        #   name|power_mode|sigma|alpha|power|weight|L_row|delta|r2_target|formula|
+        #   lambda_mode|max_n|max_iter|tol_power
+        # Special key rows (before/after response data): power_combination, sigma_joint
         # Data rows start at idx_responses + 2
         responses_data_start = idx_responses + 2
         specs: List[ResponseSpec] = []
         power_combination = "min"
+        sigma_joint_arr: Optional[np.ndarray] = None
 
         for row in rows[responses_data_start:]:
             col_a = row[0].strip() if len(row) > 0 else ""
@@ -507,8 +511,25 @@ def _parse_config_sheet(
             if col_a == "power_combination":
                 power_combination = col_b or "min"
                 continue
+            if col_a == "sigma_joint":
+                # Format: semicolon-separated matrix rows, comma-separated values.
+                # E.g. "1.0,0.3; 0.3,1.0"
+                if col_b:
+                    try:
+                        _sj_rows = []
+                        for _line in col_b.split(";"):
+                            _line = _line.strip()
+                            if _line:
+                                _sj_rows.append([float(x) for x in _line.replace(",", " ").split()])
+                        sigma_joint_arr = np.array(_sj_rows, dtype=float)
+                    except (ValueError, TypeError) as e:
+                        raise SheetsError(
+                            f"[RESPONSES] sigma_joint: invalid matrix format: {e}"
+                        ) from e
+                continue
 
-            # Data columns: name|power_mode|sigma|alpha|power|weight|L_row|delta|r2_target
+            # Data columns: name|power_mode|sigma|alpha|power|weight|L_row|delta|r2_target|
+            #               formula|lambda_mode|max_n|max_iter|tol_power
             def _rcell(idx: int) -> str:
                 return row[idx].strip() if len(row) > idx else ""
 
@@ -522,6 +543,10 @@ def _parse_config_sheet(
             r_d_str  = _rcell(7)
             r_r2_str = _rcell(8)
             r_formula_str = _rcell(9) or None
+            r_lambda_mode = _rcell(10) or "n"
+            r_max_n   = int(_rcell(11)) if _rcell(11) else 2000
+            r_max_iter = int(_rcell(12)) if _rcell(12) else 200
+            r_tol_power = float(_rcell(13)) if _rcell(13) else 1e-3
 
             if r_mode == "contrast":
                 if not r_L_str or not r_d_str:
@@ -541,6 +566,7 @@ def _parse_config_sheet(
                 try:
                     pcfg: Union[PowerContrastConfig, PowerR2Config] = PowerContrastConfig(
                         L=r_L, delta=r_d, alpha=r_alpha, power=r_power_v, sigma=r_sigma,
+                        max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power,
                     )
                 except (ValueError, TypeError) as e:
                     raise SheetsError(
@@ -555,6 +581,8 @@ def _parse_config_sheet(
                     pcfg = PowerR2Config(
                         r2_target=float(r_r2_str),
                         alpha=r_alpha, power=r_power_v, sigma=r_sigma,
+                        lambda_mode=r_lambda_mode,
+                        max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power,
                     )
                 except (ValueError, TypeError) as e:
                     raise SheetsError(
@@ -581,7 +609,9 @@ def _parse_config_sheet(
             )
         try:
             multi_cfg = MultiResponseOptions(
-                responses=specs, power_combination=power_combination,
+                responses=specs,
+                power_combination=power_combination,
+                sigma_joint=sigma_joint_arr,
             )
         except (ValueError, TypeError) as e:
             raise SheetsError(f"Config sheet produced invalid MultiResponseOptions: {e}") from e
@@ -805,6 +835,48 @@ _TEMPLATE_ROWS: Dict[str, List[List[str]]] = {
         ["x1",          "continuous", "-1.0",   "1.0"],
         ["x2",          "continuous", "-1.0",   "1.0"],
     ],
+    # Multi-response example: two R² responses, joint optimisation.
+    # [RESPONSES] replaces [power_mode/r2_target/sigma] from [SETTINGS].
+    # Column order: name|power_mode|sigma|alpha|power|weight|L_row|delta|r2_target|
+    #               formula|lambda_mode|max_n|max_iter|tol_power
+    # Special rows before/after data: power_combination, sigma_joint
+    "multiresponse": [
+        [_SENTINEL_SETTINGS, ""],
+        ["formula",      "x1 + x2"],
+        ["criterion",    "I"],
+        ["starts",       "5"],
+        ["max_iter",     "1000"],
+        ["random_state", "123"],
+        ["n_blocks",                "0"],
+        ["block_factor_name",       "Block"],
+        ["preallocate_categorical", "false"],
+        ["alloc_min_per_cell",      "1"],
+        ["alloc_max_per_cell",      "0"],
+        ["htc_factors",             ""],
+        ["n_whole_plots",           "0"],
+        ["eta",                     "1.0"],
+        ["subplots_per_wp",         "0"],
+        ["df_method",               "auto"],
+        ["", ""],
+        [_SENTINEL_FACTORS, ""],
+        ["factor_name", "type",       "value1", "value2"],
+        ["x1",          "continuous", "-1.0",   "1.0"],
+        ["x2",          "continuous", "-1.0",   "1.0"],
+        ["", ""],
+        [_SENTINEL_RESPONSES, ""],
+        # Header (informational — not parsed):
+        ["name", "power_mode", "sigma", "alpha", "power", "weight",
+         "L_row", "delta", "r2_target", "formula",
+         "lambda_mode", "max_n", "max_iter", "tol_power"],
+        # Special rows:
+        ["power_combination", "min"],
+        # sigma_joint: semicolon-separated rows, comma-separated values.
+        # Leave blank to disable Hotelling T² joint-power calculation.
+        ["sigma_joint", ""],
+        # Per-response data rows:
+        ["Y1", "r2", "", "", "", "1.0", "", "", "0.15", "", "n", "", "", ""],
+        ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "n", "", "", ""],
+    ],
 }
 
 
@@ -834,12 +906,14 @@ def create_sheet_template(
     credentials : str or None
         Path to a service account JSON credentials file, or ``None`` to use
         the OAuth2 browser flow (opens a browser tab on first use).
-    example : {"r2", "contrast"}, default "r2"
+    example : {"r2", "contrast", "multiresponse"}, default "r2"
         Which working example to pre-populate in the Config sheet.
 
-        * ``"r2"``       — global R² power config with two continuous factors.
-        * ``"contrast"`` — single contrast (L matrix + delta) with two
+        * ``"r2"``            — global R² power config with two continuous factors.
+        * ``"contrast"``      — single contrast (L matrix + delta) with two
           continuous factors.
+        * ``"multiresponse"`` — two-response R² joint design with a ``[RESPONSES]``
+          section demonstrating all per-response and ``sigma_joint`` fields.
     share_anyone : bool, default False
         If ``True``, share the new spreadsheet with anyone who has the link
         (writer access).  Disabled by default to avoid accidental data exposure.
@@ -854,7 +928,7 @@ def create_sheet_template(
     ImportError
         If ``gspread`` / ``google-auth`` are not installed.
     ValueError
-        If *example* is not ``"r2"`` or ``"contrast"``.
+        If *example* is not ``"r2"``, ``"contrast"``, or ``"multiresponse"``.
     SheetsError
         If spreadsheet creation or population fails.
     """

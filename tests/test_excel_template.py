@@ -510,13 +510,154 @@ class TestCR22BlockedPreAllocFields:
                     )
 
     def test_template_still_parseable(self):
-        """Both templates must round-trip through _read_config_sheet cleanly."""
+        """All templates must round-trip through _read_config_sheet cleanly."""
         with tempfile.TemporaryDirectory() as tmp:
-            for example in ("r2", "contrast"):
+            for example in ("r2", "contrast", "multiresponse"):
                 p = Path(tmp) / f"tpl_{example}.xlsx"
                 create_excel_template(p, example=example)
                 import openpyxl
                 wb = openpyxl.load_workbook(p)
-                formula, factors, power_cfg, design_opts, _ = _read_config_sheet(wb["Config"])
+                formula, factors, power_cfg, design_opts, multi_cfg = _read_config_sheet(wb["Config"])
                 assert formula
                 assert factors
+                if example == "multiresponse":
+                    assert multi_cfg is not None
+                else:
+                    assert power_cfg is not None
+
+
+# ---------------------------------------------------------------------------
+# TestCR34ExcelMultiResponseAdvancedFields
+# ---------------------------------------------------------------------------
+
+class TestCR34ExcelMultiResponseAdvancedFields:
+    """CR-34: [RESPONSES] parser must accept sigma_joint and advanced per-response knobs."""
+
+    def _base_rows(self, response_rows: list) -> list:
+        return [
+            ("[SETTINGS]", None),
+            ("formula", "x1 + x2"),
+            ("[FACTORS]", None),
+            ("factor_name", "type", "value1", "value2"),
+            ("x1", "continuous", -1.0, 1.0),
+            ("x2", "continuous", -1.0, 1.0),
+            ("[RESPONSES]", None),
+            ("name", "power_mode", "sigma", "alpha", "power", "weight",
+             "L_row", "delta", "r2_target", "formula",
+             "lambda_mode", "max_n", "max_iter", "tol_power"),
+        ] + [tuple(r) if isinstance(r, list) else r for r in response_rows]
+
+    def _ws(self, response_rows: list):
+        return _make_ws(self._base_rows(response_rows))
+
+    def test_lambda_mode_forwarded(self):
+        ws = self._ws([
+            ("Y1", "r2", None, None, None, 1.0, None, None, 0.15, None, "n_minus_p", None, None, None),
+            ("Y2", "r2", None, None, None, 1.0, None, None, 0.20, None, "n", None, None, None),
+        ])
+        _, _, _, _, multi_cfg = _read_config_sheet(ws)
+        assert multi_cfg.responses[0].power_cfg.lambda_mode == "n_minus_p"
+        assert multi_cfg.responses[1].power_cfg.lambda_mode == "n"
+
+    def test_max_n_forwarded(self):
+        ws = self._ws([
+            ("Y1", "r2", None, None, None, 1.0, None, None, 0.15, None, None, 300, None, None),
+            ("Y2", "r2", None, None, None, 1.0, None, None, 0.20, None, None, 400, None, None),
+        ])
+        _, _, _, _, multi_cfg = _read_config_sheet(ws)
+        assert multi_cfg.responses[0].power_cfg.max_n == 300
+        assert multi_cfg.responses[1].power_cfg.max_n == 400
+
+    def test_max_iter_forwarded(self):
+        ws = self._ws([
+            ("Y1", "r2", None, None, None, 1.0, None, None, 0.15, None, None, None, 50, None),
+            ("Y2", "r2", None, None, None, 1.0, None, None, 0.20, None, None, None, 100, None),
+        ])
+        _, _, _, _, multi_cfg = _read_config_sheet(ws)
+        assert multi_cfg.responses[0].power_cfg.max_iter == 50
+
+    def test_tol_power_forwarded(self):
+        ws = self._ws([
+            ("Y1", "r2", None, None, None, 1.0, None, None, 0.15, None, None, None, None, 0.005),
+            ("Y2", "r2", None, None, None, 1.0, None, None, 0.20, None, None, None, None, 0.002),
+        ])
+        _, _, _, _, multi_cfg = _read_config_sheet(ws)
+        assert multi_cfg.responses[0].power_cfg.tol_power == pytest.approx(0.005)
+
+    def test_contrast_response_advanced_knobs(self):
+        ws = self._ws([
+            ("Y1", "contrast", 1.0, None, None, 1.0, "0,1,0", "1.0", None, None, None, 200, 50, 0.002),
+            ("Y2", "r2", None, None, None, 1.0, None, None, 0.20, None, None, None, None, None),
+        ])
+        _, _, _, _, multi_cfg = _read_config_sheet(ws)
+        assert isinstance(multi_cfg.responses[0].power_cfg, PowerContrastConfig)
+        assert multi_cfg.responses[0].power_cfg.max_n == 200
+        assert multi_cfg.responses[0].power_cfg.tol_power == pytest.approx(0.002)
+
+    def test_sigma_joint_parsed_2x2(self):
+        ws = self._ws([
+            ("power_combination", "min"),
+            ("sigma_joint", "1.0,0.3; 0.3,1.0"),
+            ("Y1", "r2", None, None, None, 1.0, None, None, 0.15, None, None, None, None, None),
+            ("Y2", "r2", None, None, None, 1.0, None, None, 0.20, None, None, None, None, None),
+        ])
+        _, _, _, _, multi_cfg = _read_config_sheet(ws)
+        assert multi_cfg.sigma_joint is not None
+        assert multi_cfg.sigma_joint.shape == (2, 2)
+        assert multi_cfg.sigma_joint[0, 1] == pytest.approx(0.3)
+
+    def test_sigma_joint_none_gives_none(self):
+        ws = self._ws([
+            ("sigma_joint", None),
+            ("Y1", "r2", None, None, None, 1.0, None, None, 0.15, None, None, None, None, None),
+            ("Y2", "r2", None, None, None, 1.0, None, None, 0.20, None, None, None, None, None),
+        ])
+        _, _, _, _, multi_cfg = _read_config_sheet(ws)
+        assert multi_cfg.sigma_joint is None
+
+    def test_sigma_joint_invalid_raises(self):
+        ws = self._ws([
+            ("sigma_joint", "1.0,abc; 0.3,1.0"),
+            ("Y1", "r2", None, None, None, 1.0, None, None, 0.15, None, None, None, None, None),
+            ("Y2", "r2", None, None, None, 1.0, None, None, 0.20, None, None, None, None, None),
+        ])
+        with pytest.raises(ExcelError, match="sigma_joint"):
+            _read_config_sheet(ws)
+
+    def test_defaults_when_advanced_cols_absent(self):
+        ws = self._ws([
+            ("Y1", "r2", None, None, None, 1.0, None, None, 0.15),
+            ("Y2", "r2", None, None, None, 1.0, None, None, 0.20),
+        ])
+        _, _, _, _, multi_cfg = _read_config_sheet(ws)
+        assert multi_cfg.responses[0].power_cfg.lambda_mode == "n"
+        assert multi_cfg.responses[0].power_cfg.max_n == 2000
+        assert multi_cfg.responses[0].power_cfg.max_iter == 200
+        assert multi_cfg.responses[0].power_cfg.tol_power == pytest.approx(1e-3)
+
+    def test_multiresponse_template_round_trips(self):
+        """The multiresponse Excel template must parse correctly."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "mr_template.xlsx"
+            create_excel_template(p, example="multiresponse")
+            import openpyxl
+            wb = openpyxl.load_workbook(p)
+            _, _, power_cfg, _, multi_cfg = _read_config_sheet(wb["Config"])
+            assert power_cfg is None
+            assert multi_cfg is not None
+            assert len(multi_cfg.responses) == 2
+
+    def test_multiresponse_template_sigma_joint_none(self):
+        """Built-in multiresponse template has blank sigma_joint → None."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "mr_template.xlsx"
+            create_excel_template(p, example="multiresponse")
+            import openpyxl
+            wb = openpyxl.load_workbook(p)
+            _, _, _, _, multi_cfg = _read_config_sheet(wb["Config"])
+            assert multi_cfg.sigma_joint is None
+
+    def test_unknown_multiresponse_example_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with pytest.raises(ValueError, match="multiresponse"):
+                create_excel_template(Path(tmp) / "x.xlsx", example="bayesian")

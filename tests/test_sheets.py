@@ -632,10 +632,164 @@ class TestCR21BlockedPreAllocFields:
             assert "alloc_max_per_cell" in keys, f"{template_name!r} missing alloc_max_per_cell"
 
     def test_template_is_still_parseable_after_additions(self):
-        """Both templates must still parse cleanly end-to-end."""
+        """All templates must still parse cleanly end-to-end."""
         for example, rows in _TEMPLATE_ROWS.items():
             ws = _make_mock_worksheet(rows)
             # Should not raise
-            formula, factors, power_cfg, design_opts, _ = _parse_config_sheet(ws)
+            formula, factors, power_cfg, design_opts, multi_cfg = _parse_config_sheet(ws)
             assert formula
             assert factors
+            # multiresponse template has multi_cfg, not power_cfg
+            if example == "multiresponse":
+                assert multi_cfg is not None
+            else:
+                assert power_cfg is not None
+
+
+# ---------------------------------------------------------------------------
+# TestCR34SheetsMultiResponseAdvancedFields
+# ---------------------------------------------------------------------------
+
+class TestCR34SheetsMultiResponseAdvancedFields:
+    """CR-34: [RESPONSES] parser must accept sigma_joint and advanced per-response knobs."""
+
+    def _base_rows(self, response_rows: list) -> list:
+        """Minimal [SETTINGS]+[FACTORS]+[RESPONSES] config."""
+        return [
+            ["[SETTINGS]", ""],
+            ["formula", "x1 + x2"],
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+            ["x2", "continuous", "-1.0", "1.0"],
+            ["[RESPONSES]", ""],
+            ["name", "power_mode", "sigma", "alpha", "power", "weight",
+             "L_row", "delta", "r2_target", "formula",
+             "lambda_mode", "max_n", "max_iter", "tol_power"],
+        ] + response_rows
+
+    def test_basic_r2_responses_parse(self):
+        rows = self._base_rows([
+            ["power_combination", "min"],
+            ["Y1", "r2", "", "", "", "1.0", "", "", "0.15", "", "", "", "", ""],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "", "", "", ""],
+        ])
+        _, _, _, _, multi_cfg = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert multi_cfg is not None
+        assert len(multi_cfg.responses) == 2
+        assert multi_cfg.power_combination == "min"
+
+    def test_lambda_mode_forwarded_to_r2_config(self):
+        rows = self._base_rows([
+            ["Y1", "r2", "", "", "", "1.0", "", "", "0.15", "", "n_minus_p", "", "", ""],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "n", "", "", ""],
+        ])
+        _, _, _, _, multi_cfg = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert multi_cfg.responses[0].power_cfg.lambda_mode == "n_minus_p"
+        assert multi_cfg.responses[1].power_cfg.lambda_mode == "n"
+
+    def test_max_n_forwarded(self):
+        rows = self._base_rows([
+            ["Y1", "r2", "", "", "", "1.0", "", "", "0.15", "", "", "300", "", ""],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "", "400", "", ""],
+        ])
+        _, _, _, _, multi_cfg = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert multi_cfg.responses[0].power_cfg.max_n == 300
+        assert multi_cfg.responses[1].power_cfg.max_n == 400
+
+    def test_max_iter_forwarded(self):
+        rows = self._base_rows([
+            ["Y1", "r2", "", "", "", "1.0", "", "", "0.15", "", "", "", "50", ""],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "", "", "100", ""],
+        ])
+        _, _, _, _, multi_cfg = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert multi_cfg.responses[0].power_cfg.max_iter == 50
+        assert multi_cfg.responses[1].power_cfg.max_iter == 100
+
+    def test_tol_power_forwarded(self):
+        rows = self._base_rows([
+            ["Y1", "r2", "", "", "", "1.0", "", "", "0.15", "", "", "", "", "0.005"],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "", "", "", "0.001"],
+        ])
+        _, _, _, _, multi_cfg = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert multi_cfg.responses[0].power_cfg.tol_power == pytest.approx(0.005)
+        assert multi_cfg.responses[1].power_cfg.tol_power == pytest.approx(0.001)
+
+    def test_contrast_response_advanced_knobs(self):
+        rows = self._base_rows([
+            ["Y1", "contrast", "1.0", "", "", "1.0", "0,1,0", "1.0", "", "", "", "200", "50", "0.002"],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "", "", "", ""],
+        ])
+        _, _, _, _, multi_cfg = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert isinstance(multi_cfg.responses[0].power_cfg, PowerContrastConfig)
+        assert multi_cfg.responses[0].power_cfg.max_n == 200
+        assert multi_cfg.responses[0].power_cfg.max_iter == 50
+        assert multi_cfg.responses[0].power_cfg.tol_power == pytest.approx(0.002)
+
+    def test_sigma_joint_parsed_2x2(self):
+        rows = self._base_rows([
+            ["power_combination", "min"],
+            ["sigma_joint", "1.0,0.3; 0.3,1.0"],
+            ["Y1", "r2", "", "", "", "1.0", "", "", "0.15", "", "", "", "", ""],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "", "", "", ""],
+        ])
+        _, _, _, _, multi_cfg = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert multi_cfg.sigma_joint is not None
+        assert multi_cfg.sigma_joint.shape == (2, 2)
+        assert multi_cfg.sigma_joint[0, 1] == pytest.approx(0.3)
+
+    def test_sigma_joint_blank_gives_none(self):
+        rows = self._base_rows([
+            ["sigma_joint", ""],
+            ["Y1", "r2", "", "", "", "1.0", "", "", "0.15", "", "", "", "", ""],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "", "", "", ""],
+        ])
+        _, _, _, _, multi_cfg = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert multi_cfg.sigma_joint is None
+
+    def test_sigma_joint_invalid_raises(self):
+        rows = self._base_rows([
+            ["sigma_joint", "1.0,abc; 0.3,1.0"],
+            ["Y1", "r2", "", "", "", "1.0", "", "", "0.15", "", "", "", "", ""],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "", "", "", ""],
+        ])
+        with pytest.raises(SheetsError, match="sigma_joint"):
+            _parse_config_sheet(_make_mock_worksheet(rows))
+
+    def test_power_combination_weighted_mean(self):
+        rows = self._base_rows([
+            ["power_combination", "weighted_mean"],
+            ["Y1", "r2", "", "", "", "2.0", "", "", "0.15", "", "", "", "", ""],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20", "", "", "", "", ""],
+        ])
+        _, _, _, _, multi_cfg = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert multi_cfg.power_combination == "weighted_mean"
+        assert multi_cfg.responses[0].weight == pytest.approx(2.0)
+
+    def test_defaults_when_advanced_cols_absent(self):
+        """Rows with only basic columns still produce default advanced knob values."""
+        rows = self._base_rows([
+            # Only 9 columns — no formula, lambda_mode, max_n, max_iter, tol_power
+            ["Y1", "r2", "", "", "", "1.0", "", "", "0.15"],
+            ["Y2", "r2", "", "", "", "1.0", "", "", "0.20"],
+        ])
+        _, _, _, _, multi_cfg = _parse_config_sheet(_make_mock_worksheet(rows))
+        assert multi_cfg.responses[0].power_cfg.lambda_mode == "n"
+        assert multi_cfg.responses[0].power_cfg.max_n == 2000
+        assert multi_cfg.responses[0].power_cfg.max_iter == 200
+        assert multi_cfg.responses[0].power_cfg.tol_power == pytest.approx(1e-3)
+
+    def test_multiresponse_template_parses(self):
+        """The built-in 'multiresponse' template must parse without errors."""
+        ws = _make_mock_worksheet(_TEMPLATE_ROWS["multiresponse"])
+        _, _, power_cfg, _, multi_cfg = _parse_config_sheet(ws)
+        assert power_cfg is None
+        assert multi_cfg is not None
+        assert len(multi_cfg.responses) == 2
+        assert multi_cfg.power_combination == "min"
+
+    def test_multiresponse_template_sigma_joint_is_none(self):
+        """Built-in template has blank sigma_joint — should parse to None."""
+        ws = _make_mock_worksheet(_TEMPLATE_ROWS["multiresponse"])
+        _, _, _, _, multi_cfg = _parse_config_sheet(ws)
+        assert multi_cfg.sigma_joint is None
