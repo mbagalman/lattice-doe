@@ -13,6 +13,7 @@ from iopt_power_design import (
     DesignOptions,
     PowerContrastConfig,
     PowerR2Config,
+    PowerGLMContrastConfig,
     SplitPlotOptions,
     ResponseSpec,
     MultiResponseOptions,
@@ -2258,3 +2259,229 @@ class TestMR10PropertyBased:
             _MR10_FORMULA, _MR10_FACTORS,
             MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]), _mr10_opts())
         assert mr["elapsed_sec"] > 0
+
+
+# ---------------------------------------------------------------------------
+# GL-3 — GLM Design API Integration
+# ---------------------------------------------------------------------------
+
+_GLM_FORMULA = "~ 1 + A + B"
+_GLM_FACTORS = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+_GLM_L = np.array([[0.0, 1.0, 0.0]])  # test main effect of A
+
+
+def _glm_opts(starts: int = 1, max_iter: int = 8) -> DesignOptions:
+    return DesignOptions(starts=starts, random_state=0, max_iter=max_iter)
+
+
+def _binomial_cfg(
+    delta: float = 0.5,
+    baseline: float = 0.4,
+    power: float = 0.70,
+    max_n: int = 60,
+    max_iter: int = 12,
+    **kwargs,
+) -> PowerGLMContrastConfig:
+    return PowerGLMContrastConfig(
+        L=_GLM_L,
+        delta=np.array([delta]),
+        baseline=baseline,
+        family="binomial",
+        power=power,
+        max_n=max_n,
+        max_iter=max_iter,
+        **kwargs,
+    )
+
+
+def _poisson_cfg(
+    delta: float = 0.4,
+    baseline: float = 2.0,
+    power: float = 0.70,
+    max_n: int = 60,
+    max_iter: int = 12,
+    **kwargs,
+) -> PowerGLMContrastConfig:
+    return PowerGLMContrastConfig(
+        L=_GLM_L,
+        delta=np.array([delta]),
+        baseline=baseline,
+        family="poisson",
+        power=power,
+        max_n=max_n,
+        max_iter=max_iter,
+        **kwargs,
+    )
+
+
+@pytest.mark.slow
+class TestGLMDesignAPI:
+    """GL-3: GLM configs accepted by i_optimal_powered_design."""
+
+    # --- Happy path ---
+
+    def test_binomial_runs_without_error(self):
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
+        )
+        assert "design_df" in result
+        assert "report" in result
+
+    def test_binomial_report_has_family_key(self):
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
+        )
+        assert result["report"]["family"] == "binomial"
+
+    def test_binomial_report_has_test_type_wald_chi2(self):
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
+        )
+        assert result["report"]["test_type"] == "wald_chi2"
+
+    def test_binomial_design_df_has_factor_columns(self):
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
+        )
+        df = result["design_df"]
+        assert "A" in df.columns
+        assert "B" in df.columns
+
+    def test_binomial_achieved_power_between_0_and_1(self):
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
+        )
+        p = result["report"]["achieved_power"]
+        assert 0.0 <= p <= 1.0
+
+    def test_poisson_runs_without_error(self):
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts()
+        )
+        assert "report" in result
+
+    def test_poisson_report_has_baseline_key(self):
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts()
+        )
+        assert result["report"]["baseline"] == pytest.approx(2.0)
+
+    # --- Report structure ---
+
+    def test_glm_report_df2_is_none(self):
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
+        )
+        assert result["report"]["df2"] is None
+
+    def test_glm_report_glm_weight_close_to_p0_times_1_minus_p0(self):
+        p0 = 0.4
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(baseline=p0), _glm_opts()
+        )
+        expected_w = p0 * (1 - p0)
+        assert result["report"]["glm_weight"] == pytest.approx(expected_w, rel=1e-6)
+
+    def test_glm_report_has_link_key(self):
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
+        )
+        assert result["report"]["link"] == "logit"
+
+    def test_poisson_report_link_is_log(self):
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts()
+        )
+        assert result["report"]["link"] == "log"
+
+    # --- OLS backward compat: test_type == "f" ---
+
+    def test_ols_contrast_report_has_test_type_f(self):
+        cfg = PowerContrastConfig(
+            L=_GLM_L, delta=np.array([0.5]), sigma=1.0,
+            alpha=0.05, power=0.70, max_n=60, max_iter=12,
+        )
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
+        )
+        assert result["report"]["test_type"] == "f"
+
+    def test_ols_r2_report_has_test_type_f(self):
+        cfg = PowerR2Config(
+            r2_target=0.5, sigma=1.0, alpha=0.05,
+            power=0.70, max_n=60, max_iter=12,
+        )
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
+        )
+        assert result["report"]["test_type"] == "f"
+
+    # --- Design options ---
+
+    def test_glm_with_d_criterion(self):
+        opts = DesignOptions(criterion="D", starts=1, random_state=0, max_iter=8)
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), opts
+        )
+        assert result["report"]["criterion"] == "D"
+
+    def test_glm_with_a_criterion(self):
+        opts = DesignOptions(criterion="A", starts=1, random_state=0, max_iter=8)
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), opts
+        )
+        assert result["report"]["criterion"] == "A"
+
+    def test_glm_with_categorical_factor(self):
+        # "~ 1 + A + C" with C=["low","mid","high"] → intercept, A, C[T.mid], C[T.high] = 4 cols
+        factors = {"A": (-1.0, 1.0), "C": ["low", "mid", "high"]}
+        L = np.zeros((1, 4))
+        L[0, 1] = 1.0  # A coefficient
+        cfg = PowerGLMContrastConfig(
+            L=L, delta=np.array([0.5]), baseline=0.4, family="binomial",
+            alpha=0.05, power=0.70, max_n=80, max_iter=12,
+        )
+        result = i_optimal_powered_design("~ 1 + A + C", factors, cfg, _glm_opts())
+        assert "design_df" in result
+
+    # --- Error handling ---
+
+    def test_glm_split_plot_raises(self):
+        cfg = _binomial_cfg()
+        opts = DesignOptions(
+            split_plot=SplitPlotOptions(htc_factors=["A"], n_whole_plots=3),
+            starts=1, random_state=0,
+        )
+        with pytest.raises(ValueError, match="GLM"):
+            i_optimal_powered_design(_GLM_FORMULA, _GLM_FACTORS, cfg, opts)
+
+    def test_glm_config_wrong_family_raises(self):
+        with pytest.raises((ValueError, TypeError)):
+            PowerGLMContrastConfig(
+                L=_GLM_L, delta=np.array([0.5]), baseline=0.4,
+                family="gaussian",  # invalid
+            )
+
+    # --- Backward compat ---
+
+    def test_ols_contrast_api_result_shape_unchanged(self):
+        """OLS contrast API still returns design_df, buckets_df, report."""
+        cfg = PowerContrastConfig(
+            L=_GLM_L, delta=np.array([0.5]), sigma=1.0,
+            alpha=0.05, power=0.70, max_n=60, max_iter=12,
+        )
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
+        )
+        assert set(["design_df", "buckets_df", "report"]).issubset(result.keys())
+
+    def test_ols_r2_api_result_shape_unchanged(self):
+        """OLS R² API still returns design_df, buckets_df, report."""
+        cfg = PowerR2Config(
+            r2_target=0.5, sigma=1.0, alpha=0.05,
+            power=0.70, max_n=60, max_iter=12,
+        )
+        result = i_optimal_powered_design(
+            _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
+        )
+        assert set(["design_df", "buckets_df", "report"]).issubset(result.keys())

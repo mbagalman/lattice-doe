@@ -32,7 +32,8 @@ import pandas as pd
 import warnings
 
 from patsy import dmatrix
-from .config import PowerContrastConfig, PowerR2Config, DesignOptions, MultiResponseOptions
+from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions, MultiResponseOptions
+from .config import glm_fisher_weight
 from .candidate import estimate_candidate_size, build_candidate, build_split_plot_candidate
 from .model_matrix import build_model_matrix
 from .iopt_search import build_i_opt_design_with_idx, build_split_plot_design, build_compound_design
@@ -43,6 +44,7 @@ from .power import (
     contrast_power, global_r2_power, _r2_df_num,
     contrast_power_sp, global_r2_power_sp,
     eval_response_power, combine_powers, hotelling_t2_power,
+    glm_contrast_power,
 )
 from .utils import validate_factors, initial_n_guess
 from .blocked import blocked_formula, build_blocked_design
@@ -63,7 +65,7 @@ def _buckets_df(design_df: pd.DataFrame) -> pd.DataFrame:
 def _validate_api_inputs(
     formula: str,
     factors: Dict[str, Any],
-    power_cfg: Union[PowerContrastConfig, PowerR2Config],
+    power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
 ) -> int:
     """
     Validate formula, factors, and configuration before expensive computations.
@@ -126,7 +128,7 @@ def _is_split_plot(design_opts: Optional[DesignOptions]) -> bool:
 def i_optimal_powered_design(
     formula: str,
     factors: Dict[str, Any],
-    power_cfg: Union[PowerContrastConfig, PowerR2Config],
+    power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     design_opts: Optional[DesignOptions] = None,
     export_diagnostics_to: Optional[str] = None,
     export_report_to: Optional[str] = None,
@@ -279,12 +281,17 @@ def i_optimal_powered_design(
     # I-optimal design via random starts, achieved power can be non-monotone.
     # After bisection finds a candidate n*, we scan linearly downward through a
     # small window to catch any smaller feasible n that bisection may have jumped.
-    mode: Literal["contrast", "r2"] = "contrast" if isinstance(power_cfg, PowerContrastConfig) else "r2"
+    if isinstance(power_cfg, PowerGLMContrastConfig):
+        mode: Literal["contrast", "r2", "glm"] = "glm"
+    elif isinstance(power_cfg, PowerContrastConfig):
+        mode = "contrast"
+    else:
+        mode = "r2"
     target = power_cfg.power
     tol = power_cfg.tol_power
 
     # Validate mode-specific contrast dimensions up front (before the loop)
-    if mode == "contrast":
+    if mode in ("contrast", "glm"):
         if power_cfg.L.shape[1] != p_treat:
             raise ValueError(
                 f"Contrast L has {power_cfg.L.shape[1]} columns but model has "
@@ -304,6 +311,12 @@ def i_optimal_powered_design(
     # =========================================================================
     # Split-plot path — bisection over n_whole_plots, then Phase 2 scan
     # =========================================================================
+    if is_sp and mode == "glm":
+        raise ValueError(
+            "GLM power configs (PowerGLMContrastConfig) are not supported with "
+            "split-plot designs in Phase 1. Use a non-split-plot design, or "
+            "await Phase 2 support (weighted GLS exchange)."
+        )
     if is_sp:
         sp_opts = design_opts.split_plot
         _validate_htc_factors(sp_opts.htc_factors, factors)
@@ -602,7 +615,11 @@ def i_optimal_powered_design(
             X = X_cand[selected_idx, :]
 
         # 2) Compute power
-        if mode == "contrast":
+        if mode == "glm":
+            _glm_res = glm_contrast_power(power_cfg, X, jitter=design_opts.xtx_jitter)
+            power, lam = _glm_res.power, _glm_res.lam
+            df_num = int(np.linalg.matrix_rank(power_cfg.L))
+        elif mode == "contrast":
             power, lam = contrast_power(
                 L=L_eff, delta=power_cfg.delta, X=X,
                 sigma=power_cfg.sigma, alpha=power_cfg.alpha,
@@ -658,7 +675,11 @@ def i_optimal_powered_design(
                 n=n, **_search_kwargs
             )
             X = X_cand[selected_idx, :]
-            if mode == "contrast":
+            if mode == "glm":
+                _glm_res = glm_contrast_power(power_cfg, X, jitter=design_opts.xtx_jitter)
+                power, lam = _glm_res.power, _glm_res.lam
+                df_num = int(np.linalg.matrix_rank(power_cfg.L))
+            elif mode == "contrast":
                 power, lam = contrast_power(
                     L=L_eff, delta=power_cfg.delta, X=X,
                     sigma=power_cfg.sigma, alpha=power_cfg.alpha,
@@ -691,6 +712,7 @@ def i_optimal_powered_design(
             "target_power": float(target),
             "achieved_power": float(power),
             "noncentrality_lambda": float(lam),
+            "test_type": "wald_chi2" if mode == "glm" else "f",
             "diagnostics": diags,
             "criterion": design_opts.criterion,
             "algo": design_opts.algo,
@@ -703,6 +725,12 @@ def i_optimal_powered_design(
             } if is_blocked else None,
             "p_treat": int(p_treat),
         }
+        if mode == "glm":
+            report["family"] = power_cfg.family
+            report["link"] = power_cfg.link
+            report["baseline"] = float(power_cfg.baseline)
+            report["glm_weight"] = float(glm_fisher_weight(power_cfg))
+            report["df2"] = None
 
         if progress_callback:
             try:
@@ -758,7 +786,11 @@ def i_optimal_powered_design(
                     n=n_check, **_search_kwargs
                 )
                 X_v = X_cand[sel_idx_v, :]
-            if mode == "contrast":
+            if mode == "glm":
+                _glm_res_v = glm_contrast_power(power_cfg, X_v, jitter=design_opts.xtx_jitter)
+                power_v, lam_v = _glm_res_v.power, _glm_res_v.lam
+                df_num_v = int(np.linalg.matrix_rank(power_cfg.L))
+            elif mode == "contrast":
                 power_v, lam_v = contrast_power(
                     L=L_eff, delta=power_cfg.delta, X=X_v,
                     sigma=power_cfg.sigma, alpha=power_cfg.alpha,
@@ -785,6 +817,7 @@ def i_optimal_powered_design(
                 "target_power": float(target),
                 "achieved_power": float(power_v),
                 "noncentrality_lambda": float(lam_v),
+                "test_type": "wald_chi2" if mode == "glm" else "f",
                 "diagnostics": diags_v,
                 "criterion": design_opts.criterion,
                 "algo": design_opts.algo,
@@ -797,6 +830,12 @@ def i_optimal_powered_design(
                 } if is_blocked else None,
                 "p_treat": int(p_treat),
             }
+            if mode == "glm":
+                report_v["family"] = power_cfg.family
+                report_v["link"] = power_cfg.link
+                report_v["baseline"] = float(power_cfg.baseline)
+                report_v["glm_weight"] = float(glm_fisher_weight(power_cfg))
+                report_v["df2"] = None
             if progress_callback:
                 try:
                     progress_callback(report_v)
