@@ -14,7 +14,9 @@ __version__ = "0.1.0"
 # Re-export primary API and configuration types
 from .api import i_optimal_powered_design, i_optimal_multiresponse_design  # noqa: F401
 from .config import (  # noqa: F401
-    PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions,
+    PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
+    glm_fisher_weight,
+    DesignOptions, SplitPlotOptions,
     ResponseSpec, MultiResponseOptions,
 )
 
@@ -72,6 +74,8 @@ __all__ = [
     # Config / options
     "PowerContrastConfig",
     "PowerR2Config",
+    "PowerGLMContrastConfig",
+    "glm_fisher_weight",
     "DesignOptions",
     "SplitPlotOptions",
     "ResponseSpec",

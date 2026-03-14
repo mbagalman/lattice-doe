@@ -708,11 +708,195 @@ class DesignOptions:
 
 
 # ---------------------------------------------------------------------
+# GLM (logistic / Poisson) power configuration
+# ---------------------------------------------------------------------
+
+@dataclass
+class PowerGLMContrastConfig:
+    """Power configuration for GLM contrast tests using the Wald chi-square test.
+
+    Supports binomial (logistic) and Poisson families with their canonical
+    link functions (logit and log respectively).
+
+    The design search uses a **null-based locally optimal** information matrix:
+
+        M = w · X′X    where  w = p₀(1 − p₀)  [binomial]
+                               w = μ₀          [Poisson]
+
+    Because ``w`` is a positive scalar it cancels from I/D/A criteria, so
+    the Fedorov exchange is structurally identical to OLS.  Only the power
+    calculation differs — the test statistic follows a noncentral chi-square
+    distribution (df = number of contrast rows) rather than a noncentral F.
+
+    Parameters
+    ----------
+    L : ndarray, shape (q, p)
+        Contrast matrix.  Same semantics as ``PowerContrastConfig.L``.
+        Must be 2-D; all-zero rows are rejected.
+    delta : ndarray, shape (q,)
+        Effect sizes on the **linear predictor (LP) scale**.
+
+        * Binomial (logit link): difference in log-odds, e.g. ``0.5`` means a
+          0.5-nat increase in logit P(Y=1).  Equivalent to log(OR) where OR is
+          the odds ratio; ``delta = log(1.65) ≈ 0.5``.
+        * Poisson (log link): difference in log-rate, e.g. ``0.3`` means a
+          ≈ 30 % increase in the expected count.
+
+        Zero or near-zero values are rejected.
+    baseline : float
+        Baseline mean on the **response scale** at the null / reference point.
+
+        * Binomial: event probability ∈ (0, 1), e.g. ``0.20`` for 20 % baseline.
+        * Poisson: expected count > 0, e.g. ``2.5`` events per unit.
+
+        The Fisher information weight is derived from this value:
+        ``w = baseline*(1 − baseline)`` (binomial) or ``w = baseline`` (Poisson).
+    family : {'binomial', 'poisson'}, default 'binomial'
+        Distributional family.
+    link : {'logit', 'log'} or None, default None
+        Link function.  ``None`` selects the canonical link for the family
+        (``'logit'`` for binomial, ``'log'`` for Poisson).
+    alpha : float, default 0.05
+        Significance level for the Wald chi-square test.
+    power : float, default 0.80
+        Desired statistical power.
+    tol_power : float, default 1e-3
+        Convergence tolerance for the n-search.
+    max_iter : int, default 200
+        Maximum n-search iterations.
+    max_n : int, default 2000
+        Hard cap on sample size.
+    """
+
+    L: np.ndarray
+    delta: np.ndarray
+    baseline: float
+    family: Literal["binomial", "poisson"] = "binomial"
+    link: Optional[Literal["logit", "log"]] = None
+    alpha: float = 0.05
+    power: float = 0.80
+    tol_power: float = 1e-3
+    max_iter: int = 200
+    max_n: int = 2000
+
+    def __post_init__(self) -> None:
+        # --- Type and shape normalisation ---
+        self.L = np.atleast_2d(self.L)
+        self.delta = np.atleast_1d(self.delta)
+
+        # --- Shape validation ---
+        if self.L.ndim != 2:
+            raise ValueError(f"L must be a 2-D array, got ndim={self.L.ndim}")
+        if self.delta.ndim != 1:
+            raise ValueError(f"delta must be a 1-D array, got ndim={self.delta.ndim}")
+        if self.L.shape[0] != len(self.delta):
+            raise ValueError(
+                f"L has {self.L.shape[0]} rows but delta has {len(self.delta)} elements"
+            )
+
+        # --- Family and link validation ---
+        if self.family not in ("binomial", "poisson"):
+            raise ValueError(
+                f"family must be 'binomial' or 'poisson', got {self.family!r}"
+            )
+        _canonical = {"binomial": "logit", "poisson": "log"}
+        if self.link is None:
+            # Store the canonical link explicitly so callers never see None.
+            object.__setattr__(self, "link", _canonical[self.family])
+        else:
+            _allowed = {
+                "binomial": ("logit",),
+                "poisson":  ("log",),
+            }
+            if self.link not in _allowed[self.family]:
+                raise ValueError(
+                    f"link {self.link!r} is not valid for family {self.family!r}. "
+                    f"Allowed: {_allowed[self.family]}"
+                )
+
+        # --- Baseline validation ---
+        if self.family == "binomial":
+            if not (0.0 < self.baseline < 1.0):
+                raise ValueError(
+                    f"baseline must be in (0, 1) for binomial family, "
+                    f"got {self.baseline}"
+                )
+            if min(self.baseline, 1.0 - self.baseline) < 0.05:
+                _warnings.warn(
+                    f"GLM baseline {self.baseline:.3f} is near a boundary; "
+                    "required sample size may be very large.",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+        else:  # poisson
+            if self.baseline <= 0.0:
+                raise ValueError(
+                    f"baseline must be > 0 for Poisson family, got {self.baseline}"
+                )
+
+        # --- Numeric range validation ---
+        if not (0.0 < self.alpha < 1.0):
+            raise ValueError(f"alpha must be in (0, 1), got {self.alpha}")
+        if not (0.0 < self.power < 1.0):
+            raise ValueError(f"power must be in (0, 1), got {self.power}")
+        if self.tol_power <= 0:
+            raise ValueError(f"tol_power must be > 0, got {self.tol_power}")
+        if self.max_iter <= 0:
+            raise ValueError(f"max_iter must be > 0, got {self.max_iter}")
+        if self.max_n <= 0:
+            raise ValueError(f"max_n must be > 0, got {self.max_n}")
+
+        # --- Contrast content validation ---
+        if np.any(np.all(self.L == 0, axis=1)):
+            raise ValueError("L matrix contains at least one all-zero row.")
+        if np.any(np.isclose(self.delta, 0)):
+            raise ValueError(
+                "delta vector contains zero or near-zero values on the LP scale."
+            )
+
+    def __str__(self) -> str:
+        return (
+            f"PowerGLMContrastConfig(family={self.family!r}, link={self.link!r}, "
+            f"baseline={self.baseline}, L.shape={self.L.shape}, "
+            f"alpha={self.alpha}, power={self.power})"
+        )
+
+
+def glm_fisher_weight(cfg: "PowerGLMContrastConfig") -> float:
+    """Return the scalar Fisher information weight at the null-model baseline.
+
+    This is the per-observation variance-function value evaluated at the
+    baseline mean:
+
+    * Binomial: ``w = p₀ · (1 − p₀)``
+    * Poisson:  ``w = μ₀``
+
+    The locally optimal information matrix under the null is ``M = w · X′X``.
+    Because ``w`` is a positive scalar it does not affect I/D/A design
+    criteria, but it does scale the Wald chi-square noncentrality parameter:
+
+        λ = w · δᵀ [L · (X′X)⁻¹ · Lᵀ]⁻¹ δ
+
+    Parameters
+    ----------
+    cfg : PowerGLMContrastConfig
+
+    Returns
+    -------
+    float
+        Strictly positive Fisher weight.
+    """
+    if cfg.family == "binomial":
+        return cfg.baseline * (1.0 - cfg.baseline)
+    return float(cfg.baseline)  # Poisson: w = μ₀
+
+
+# ---------------------------------------------------------------------
 # Multi-response design configuration
 # ---------------------------------------------------------------------
 
 #: Type alias for the per-response power configuration discriminated union.
-PowerCfg = Union["PowerContrastConfig", "PowerR2Config"]
+PowerCfg = Union["PowerContrastConfig", "PowerR2Config", "PowerGLMContrastConfig"]
 
 
 @dataclass
@@ -743,9 +927,10 @@ class ResponseSpec:
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("ResponseSpec.name must be a non-empty string.")
-        if not isinstance(self.power_cfg, (PowerContrastConfig, PowerR2Config)):
+        if not isinstance(self.power_cfg, (PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig)):
             raise TypeError(
-                "ResponseSpec.power_cfg must be a PowerContrastConfig or PowerR2Config."
+                "ResponseSpec.power_cfg must be a PowerContrastConfig, PowerR2Config, "
+                "or PowerGLMContrastConfig."
             )
         if self.weight <= 0:
             raise ValueError(f"ResponseSpec.weight must be > 0, got {self.weight}.")
@@ -805,6 +990,8 @@ class MultiResponseOptions:
 __all__ = [
     "PowerContrastConfig",
     "PowerR2Config",
+    "PowerGLMContrastConfig",
+    "glm_fisher_weight",
     "DesignOptions",
     "SplitPlotOptions",
     "ResponseSpec",

@@ -11,6 +11,8 @@ from iopt_power_design.config import (
     DesignOptions,
     PowerContrastConfig,
     PowerR2Config,
+    PowerGLMContrastConfig,
+    glm_fisher_weight,
     SplitPlotOptions,
     ResponseSpec,
     MultiResponseOptions,
@@ -591,7 +593,7 @@ class TestResponseSpec:
             ResponseSpec(name="", power_cfg=_contrast_cfg())
 
     def test_wrong_power_cfg_type_raises(self):
-        with pytest.raises(TypeError, match="PowerContrastConfig or PowerR2Config"):
+        with pytest.raises(TypeError, match="PowerContrastConfig"):
             ResponseSpec(name="Y1", power_cfg="not_a_config")
 
     def test_weight_zero_raises(self):
@@ -817,3 +819,251 @@ class TestMR10MultiResponseOptionsEdgeCases:
         responses = [ResponseSpec(f"Y{i}", _r2_cfg_simple()) for i in range(1, 5)]
         mro = MultiResponseOptions(responses)
         assert len(mro.responses) == 4
+
+
+# ---------------------------------------------------------------------------
+# GL-1: PowerGLMContrastConfig and glm_fisher_weight
+# ---------------------------------------------------------------------------
+
+def _glm_binomial_cfg(**kwargs):
+    """Minimal valid binomial GLM config."""
+    defaults = dict(L=[[0, 1]], delta=[0.5], baseline=0.20, family="binomial")
+    defaults.update(kwargs)
+    return PowerGLMContrastConfig(**defaults)
+
+
+def _glm_poisson_cfg(**kwargs):
+    """Minimal valid Poisson GLM config."""
+    defaults = dict(L=[[0, 1]], delta=[0.3], baseline=2.5, family="poisson")
+    defaults.update(kwargs)
+    return PowerGLMContrastConfig(**defaults)
+
+
+class TestPowerGLMContrastConfig:
+    # ------------------------------------------------------------------ #
+    # Construction and defaults
+    # ------------------------------------------------------------------ #
+    def test_valid_binomial_construction(self):
+        cfg = _glm_binomial_cfg()
+        assert cfg.family == "binomial"
+        assert cfg.link == "logit"          # canonical link resolved
+        assert cfg.baseline == pytest.approx(0.20)
+        assert cfg.L.shape == (1, 2)
+        assert cfg.delta.shape == (1,)
+
+    def test_valid_poisson_construction(self):
+        cfg = _glm_poisson_cfg()
+        assert cfg.family == "poisson"
+        assert cfg.link == "log"
+        assert cfg.baseline == pytest.approx(2.5)
+
+    def test_default_family_is_binomial(self):
+        cfg = PowerGLMContrastConfig(L=[[0, 1]], delta=[0.5], baseline=0.3)
+        assert cfg.family == "binomial"
+
+    def test_link_none_resolves_to_canonical_logit(self):
+        cfg = PowerGLMContrastConfig(L=[[0, 1]], delta=[0.5], baseline=0.3,
+                                      family="binomial", link=None)
+        assert cfg.link == "logit"
+
+    def test_link_none_resolves_to_canonical_log_for_poisson(self):
+        cfg = PowerGLMContrastConfig(L=[[0, 1]], delta=[0.3], baseline=1.0,
+                                      family="poisson", link=None)
+        assert cfg.link == "log"
+
+    def test_explicit_logit_link_accepted(self):
+        cfg = _glm_binomial_cfg(link="logit")
+        assert cfg.link == "logit"
+
+    def test_explicit_log_link_accepted_for_poisson(self):
+        cfg = _glm_poisson_cfg(link="log")
+        assert cfg.link == "log"
+
+    def test_alpha_default(self):
+        assert _glm_binomial_cfg().alpha == pytest.approx(0.05)
+
+    def test_power_default(self):
+        assert _glm_binomial_cfg().power == pytest.approx(0.80)
+
+    def test_max_n_default(self):
+        assert _glm_binomial_cfg().max_n == 2000
+
+    def test_max_iter_default(self):
+        assert _glm_binomial_cfg().max_iter == 200
+
+    def test_tol_power_default(self):
+        assert _glm_binomial_cfg().tol_power == pytest.approx(1e-3)
+
+    def test_multirow_L_accepted(self):
+        cfg = PowerGLMContrastConfig(
+            L=[[0, 1, 0], [0, 0, 1]], delta=[0.5, 0.4], baseline=0.3)
+        assert cfg.L.shape == (2, 3)
+        assert cfg.delta.shape == (2,)
+
+    # ------------------------------------------------------------------ #
+    # Family / link validation
+    # ------------------------------------------------------------------ #
+    def test_unknown_family_raises(self):
+        with pytest.raises(ValueError, match="family"):
+            PowerGLMContrastConfig(L=[[0, 1]], delta=[0.5], baseline=0.3,
+                                   family="gaussian")
+
+    def test_log_link_rejected_for_binomial(self):
+        with pytest.raises(ValueError, match="link"):
+            PowerGLMContrastConfig(L=[[0, 1]], delta=[0.5], baseline=0.3,
+                                   family="binomial", link="log")
+
+    def test_logit_link_rejected_for_poisson(self):
+        with pytest.raises(ValueError, match="link"):
+            PowerGLMContrastConfig(L=[[0, 1]], delta=[0.3], baseline=1.0,
+                                   family="poisson", link="logit")
+
+    # ------------------------------------------------------------------ #
+    # Baseline validation
+    # ------------------------------------------------------------------ #
+    def test_baseline_zero_raises_for_binomial(self):
+        with pytest.raises(ValueError, match="baseline"):
+            _glm_binomial_cfg(baseline=0.0)
+
+    def test_baseline_one_raises_for_binomial(self):
+        with pytest.raises(ValueError, match="baseline"):
+            _glm_binomial_cfg(baseline=1.0)
+
+    def test_baseline_negative_raises_for_poisson(self):
+        with pytest.raises(ValueError, match="baseline"):
+            _glm_poisson_cfg(baseline=-1.0)
+
+    def test_baseline_zero_raises_for_poisson(self):
+        with pytest.raises(ValueError, match="baseline"):
+            _glm_poisson_cfg(baseline=0.0)
+
+    def test_extreme_baseline_emits_warning(self):
+        with pytest.warns(RuntimeWarning, match="boundary"):
+            _glm_binomial_cfg(baseline=0.03)
+
+    def test_baseline_just_above_zero_ok_with_warning(self):
+        # 0.01 is extreme → warning but no error
+        with pytest.warns(RuntimeWarning):
+            cfg = _glm_binomial_cfg(baseline=0.01)
+        assert cfg.baseline == pytest.approx(0.01)
+
+    # ------------------------------------------------------------------ #
+    # Numeric range validation
+    # ------------------------------------------------------------------ #
+    def test_alpha_out_of_range_raises(self):
+        with pytest.raises(ValueError, match="alpha"):
+            _glm_binomial_cfg(alpha=1.5)
+
+    def test_power_out_of_range_raises(self):
+        with pytest.raises(ValueError, match="power"):
+            _glm_binomial_cfg(power=0.0)
+
+    def test_tol_power_nonpositive_raises(self):
+        with pytest.raises(ValueError, match="tol_power"):
+            _glm_binomial_cfg(tol_power=0.0)
+
+    def test_max_iter_zero_raises(self):
+        with pytest.raises(ValueError, match="max_iter"):
+            _glm_binomial_cfg(max_iter=0)
+
+    def test_max_n_zero_raises(self):
+        with pytest.raises(ValueError, match="max_n"):
+            _glm_binomial_cfg(max_n=0)
+
+    # ------------------------------------------------------------------ #
+    # Contrast content validation
+    # ------------------------------------------------------------------ #
+    def test_all_zero_L_row_raises(self):
+        with pytest.raises(ValueError, match="all-zero"):
+            PowerGLMContrastConfig(L=[[0, 0]], delta=[0.5], baseline=0.3)
+
+    def test_zero_delta_raises(self):
+        with pytest.raises(ValueError, match="zero"):
+            _glm_binomial_cfg(delta=[0.0])
+
+    # ------------------------------------------------------------------ #
+    # Dataclasses interop
+    # ------------------------------------------------------------------ #
+    def test_dataclasses_replace_safe(self):
+        cfg = _glm_binomial_cfg()
+        cfg2 = dataclasses.replace(cfg, alpha=0.01)
+        assert cfg2.alpha == pytest.approx(0.01)
+        assert cfg2.baseline == pytest.approx(cfg.baseline)
+
+    def test_str_representation_contains_family(self):
+        cfg = _glm_binomial_cfg()
+        assert "binomial" in str(cfg)
+        assert "logit" in str(cfg)
+
+    # ------------------------------------------------------------------ #
+    # Integration with ResponseSpec and union type
+    # ------------------------------------------------------------------ #
+    def test_response_spec_accepts_glm_config(self):
+        cfg = _glm_binomial_cfg()
+        spec = ResponseSpec("Y1", cfg)
+        assert spec.power_cfg is cfg
+
+    def test_response_spec_accepts_poisson_config(self):
+        cfg = _glm_poisson_cfg()
+        spec = ResponseSpec("Count", cfg)
+        assert spec.power_cfg is cfg
+
+    def test_response_spec_rejects_plain_object(self):
+        with pytest.raises(TypeError):
+            ResponseSpec("Y", object())
+
+    def test_glm_config_is_instance_of_expected_types(self):
+        cfg = _glm_binomial_cfg()
+        # Not an OLS config
+        assert not isinstance(cfg, PowerContrastConfig)
+        assert not isinstance(cfg, PowerR2Config)
+        assert isinstance(cfg, PowerGLMContrastConfig)
+
+    def test_public_export_accessible(self):
+        import iopt_power_design as pkg
+        assert hasattr(pkg, "PowerGLMContrastConfig")
+        assert pkg.PowerGLMContrastConfig is PowerGLMContrastConfig
+
+
+class TestGLMFisherWeight:
+    def test_binomial_half_gives_quarter(self):
+        cfg = _glm_binomial_cfg(baseline=0.5)
+        assert glm_fisher_weight(cfg) == pytest.approx(0.25)
+
+    def test_binomial_p0_formula(self):
+        p0 = 0.20
+        cfg = _glm_binomial_cfg(baseline=p0)
+        assert glm_fisher_weight(cfg) == pytest.approx(p0 * (1 - p0))
+
+    def test_binomial_asymmetric_baseline(self):
+        p0 = 0.1
+        cfg = _glm_binomial_cfg(baseline=p0)
+        assert glm_fisher_weight(cfg) == pytest.approx(0.09)
+
+    def test_binomial_weight_maximised_at_half(self):
+        w_half = glm_fisher_weight(_glm_binomial_cfg(baseline=0.5))
+        w_low  = glm_fisher_weight(_glm_binomial_cfg(baseline=0.2))
+        w_high = glm_fisher_weight(_glm_binomial_cfg(baseline=0.8))
+        assert w_half > w_low
+        assert w_half > w_high
+
+    def test_poisson_weight_equals_baseline(self):
+        mu0 = 3.7
+        cfg = _glm_poisson_cfg(baseline=mu0)
+        assert glm_fisher_weight(cfg) == pytest.approx(mu0)
+
+    def test_poisson_weight_increases_with_rate(self):
+        w1 = glm_fisher_weight(_glm_poisson_cfg(baseline=1.0))
+        w5 = glm_fisher_weight(_glm_poisson_cfg(baseline=5.0))
+        assert w5 > w1
+
+    def test_weight_is_strictly_positive_binomial(self):
+        assert glm_fisher_weight(_glm_binomial_cfg(baseline=0.3)) > 0
+
+    def test_weight_is_strictly_positive_poisson(self):
+        assert glm_fisher_weight(_glm_poisson_cfg(baseline=0.5)) > 0
+
+    def test_public_export_accessible(self):
+        import iopt_power_design as pkg
+        assert hasattr(pkg, "glm_fisher_weight")
+        assert pkg.glm_fisher_weight is glm_fisher_weight
