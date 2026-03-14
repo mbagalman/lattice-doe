@@ -423,6 +423,44 @@ with st.expander("Multi-response (optional)"):
         ss["mr_combination"] = _MR_COMB_KEYS[_MR_COMB_LABELS.index(_sel_comb)]
 
         st.markdown("---")
+        st.markdown("**Joint response covariance (optional)**")
+        st.caption(
+            "For Hotelling T² joint power (MR-3): enter a k×k symmetric positive-definite "
+            "covariance matrix σ_joint where k = number of responses. "
+            "Available only for shared-formula contrast-mode responses. Leave blank to use "
+            "independent per-response power (recommended in most cases)."
+        )
+        st.text_area(
+            "σ_joint matrix (space/comma-separated rows, one per line)",
+            key="mr_sigma_joint",
+            height=80,
+            placeholder="1.0  0.3\n0.3  1.0",
+            help=(
+                "k×k covariance matrix of the response residuals. "
+                "Enables Hotelling T² joint power calculation instead of independent combination."
+            ),
+        )
+        _sj_text = ss.get("mr_sigma_joint", "").strip()
+        if _sj_text:
+            try:
+                _sj_rows = []
+                for _line in _sj_text.splitlines():
+                    _line = _line.strip()
+                    if _line:
+                        _sj_rows.append([float(x) for x in _line.replace(",", " ").split()])
+                _sj_arr = np.array(_sj_rows)
+                k = len(mr_responses)
+                if _sj_arr.shape != (k, k):
+                    st.warning(
+                        f"σ_joint is {_sj_arr.shape[0]}×{_sj_arr.shape[1]} "
+                        f"but you have {k} response(s) — must be {k}×{k}."
+                    )
+                else:
+                    st.success(f"Valid {k}×{k} σ_joint matrix.")
+            except ValueError as _sj_err:
+                st.error(f"σ_joint parse error: {_sj_err}")
+
+        st.markdown("---")
         st.markdown("**Response list**")
 
         mr_responses: list = ss.get("mr_responses", [])
@@ -439,6 +477,7 @@ with st.expander("Multi-response (optional)"):
                 "L_text": ss.get("L_text", ""),
                 "delta_text": ss.get("delta_text", ""),
                 "r2_target": float(ss.get("r2_target", 0.15)),
+                "formula": "",
             })
             ss["mr_responses"] = mr_responses
             st.rerun()
@@ -450,6 +489,17 @@ with st.expander("Multi-response (optional)"):
                 with st.expander(f"Response {i + 1}: {r.get('name', '')}"):
                     r["name"] = st.text_input(
                         "Name", value=r.get("name", ""), key=f"mr_name_{i}"
+                    )
+                    r["formula"] = st.text_input(
+                        "Per-response formula (blank = use global formula)",
+                        value=r.get("formula", ""),
+                        key=f"mr_formula_{i}",
+                        placeholder="~ 1 + A + B  (leave blank for global formula)",
+                        help=(
+                            "Override the global model formula for this response. "
+                            "When any response has a different formula, the compound-criterion "
+                            "path is activated (MR-5). Leave blank to share the global formula."
+                        ),
                     )
                     r_mode_opts = ["contrast", "r2"]
                     r_mode_idx = r_mode_opts.index(r.get("power_mode", "contrast"))

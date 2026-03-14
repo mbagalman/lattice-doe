@@ -59,10 +59,11 @@ def init_state() -> None:
         "sp_subplots_per_wp": 0,   # 0 = auto-compute
         "sp_df_method": "auto",    # "auto" | "conservative" | "sp_only"
 
-        # --- Multi-response options (MR-8) ---
+        # --- Multi-response options (MR-8 / CR-32) ---
         "mr_enabled": False,          # enable multi-response mode
         "mr_combination": "min",      # "min" | "product" | "weighted_mean"
         "mr_responses": [],           # list of response dicts (see Page 2)
+        "mr_sigma_joint": "",         # optional k×k covariance matrix text (blank = None)
 
         # --- Results (populated after a successful run) ---
         "result": None,       # full dict from i_optimal_powered_design
@@ -103,8 +104,12 @@ def render_sidebar() -> None:
 
         st.markdown("---")
         if result is not None:
-            n = result["report"]["n"]
-            pwr = result["report"]["achieved_power"]
+            if "report" in result:
+                n = result["report"]["n"]
+                pwr = result["report"]["achieved_power"]
+            else:
+                n = result["n"]
+                pwr = result["achieved_power"]
             st.success(f"Result ready: n={n}, power={pwr:.3f}")
         else:
             st.info("No result yet — run a design on page 3.")

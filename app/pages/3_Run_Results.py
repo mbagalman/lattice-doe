@@ -120,6 +120,7 @@ def _build_multi_response_cfg(ss: dict) -> "MultiResponseOptions":
         r_power = float(r.get("power", ss.get("power_target", 0.80)))
         r_sigma = float(r.get("sigma", 1.0))
         r_weight = float(r.get("weight", 1.0))
+        r_formula = r.get("formula", "").strip() or None
         if r.get("power_mode", "contrast") == "contrast":
             L = _parse_matrix(r.get("L_text", ""))
             delta = _parse_vector(r.get("delta_text", ""))
@@ -135,10 +136,25 @@ def _build_multi_response_cfg(ss: dict) -> "MultiResponseOptions":
             name=str(r.get("name", f"R{len(specs) + 1}")),
             power_cfg=pcfg,
             weight=r_weight,
+            formula=r_formula,
         ))
+    # Parse optional sigma_joint matrix
+    sigma_joint = None
+    _sj_text = ss.get("mr_sigma_joint", "").strip()
+    if _sj_text:
+        try:
+            _sj_rows = []
+            for _line in _sj_text.splitlines():
+                _line = _line.strip()
+                if _line:
+                    _sj_rows.append([float(x) for x in _line.replace(",", " ").split()])
+            sigma_joint = np.array(_sj_rows)
+        except (ValueError, Exception):
+            sigma_joint = None
     return MultiResponseOptions(
         responses=specs,
         power_combination=ss.get("mr_combination", "min"),
+        sigma_joint=sigma_joint,
     )
 
 
