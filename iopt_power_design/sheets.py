@@ -661,8 +661,7 @@ def _write_results(
     clear_results : bool, default True
         Clear existing content in each output sheet before writing.
     """
-    report = result["report"]
-    diags  = report.get("diagnostics", {})
+    _is_mr = "report" not in result
 
     # ------------------------------------------------------------------
     # 1. Results sheet — key/value summary
@@ -671,23 +670,46 @@ def _write_results(
     if clear_results:
         ws_results.clear()
 
-    summary_rows: List[List[Any]] = [
-        ["n",               int(report["n"])],
-        ["p",               int(report["p"])],
-        ["df_num",          int(report["df_num"])],
-        ["df_denom",        int(report["df_denom"])],
-        ["alpha",           float(report["alpha"])],
-        ["target_power",    float(report["target_power"])],
-        ["achieved_power",  float(report["achieved_power"])],
-        ["noncentrality_λ", float(report["noncentrality_lambda"])],
-        ["i_criterion",     float(diags["i_criterion"])   if "i_criterion"   in diags else ""],
-        ["d_efficiency",    float(diags["d_efficiency"])  if "d_efficiency"  in diags else ""],
-        ["condition_number",float(diags["condition_number"]) if "condition_number" in diags else ""],
-        ["criterion",       str(report["criterion"])],
-        ["elapsed_sec",     float(report.get("elapsed_sec", 0.0))],
-        ["generated_at",    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")],
-        ["warnings",        "\n".join(report.get("warnings", []))],
-    ]
+    if _is_mr:
+        summary_rows: List[List[Any]] = [
+            ["n",                int(result["n"])],
+            ["achieved_power",   float(result["achieved_power"])],
+            ["combination_rule", str(result.get("combination_rule", "min"))],
+            ["compound_criterion", str(result.get("compound_criterion", False))],
+            ["elapsed_sec",      float(result.get("elapsed_sec", 0.0))],
+            ["search_strategy",  str(result.get("search_strategy", ""))],
+            ["generated_at",     datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")],
+            ["warnings",         "\n".join(result.get("warnings", []))],
+        ]
+        for _r in result.get("responses", []):
+            summary_rows.append([f"{_r['name']}_power", float(_r["power"])])
+        if "joint_power" in result:
+            summary_rows.append(["joint_power", float(result["joint_power"])])
+        design_df_val = result["design"]
+        buckets_df_val = result["buckets"]
+    else:
+        report = result["report"]
+        diags  = report.get("diagnostics", {})
+        summary_rows = [
+            ["n",               int(report["n"])],
+            ["p",               int(report["p"])],
+            ["df_num",          int(report["df_num"])],
+            ["df_denom",        int(report["df_denom"])],
+            ["alpha",           float(report["alpha"])],
+            ["target_power",    float(report["target_power"])],
+            ["achieved_power",  float(report["achieved_power"])],
+            ["noncentrality_λ", float(report["noncentrality_lambda"])],
+            ["i_criterion",     float(diags["i_criterion"])   if "i_criterion"   in diags else ""],
+            ["d_efficiency",    float(diags["d_efficiency"])  if "d_efficiency"  in diags else ""],
+            ["condition_number",float(diags["condition_number"]) if "condition_number" in diags else ""],
+            ["criterion",       str(report["criterion"])],
+            ["elapsed_sec",     float(report.get("elapsed_sec", 0.0))],
+            ["generated_at",    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")],
+            ["warnings",        "\n".join(report.get("warnings", []))],
+        ]
+        design_df_val = result["design_df"]
+        buckets_df_val = result["buckets_df"]
+
     ws_results.update("A1", summary_rows)
 
     # ------------------------------------------------------------------
@@ -697,7 +719,7 @@ def _write_results(
     if clear_results:
         ws_design.clear()
 
-    ws_design.update("A1", _df_to_rows(result["design_df"]))
+    ws_design.update("A1", _df_to_rows(design_df_val))
 
     # ------------------------------------------------------------------
     # 3. Buckets sheet — run-frequency buckets
@@ -706,7 +728,7 @@ def _write_results(
     if clear_results:
         ws_buckets.clear()
 
-    ws_buckets.update("A1", _df_to_rows(result["buckets_df"]))
+    ws_buckets.update("A1", _df_to_rows(buckets_df_val))
 
 
 # ---------------------------------------------------------------------------

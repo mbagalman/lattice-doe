@@ -779,9 +779,28 @@ def excel_run(
     except Exception as e:
         raise ExcelError(f"Design search failed: {e}") from e
 
-    design_df: pd.DataFrame = result["design_df"]
-    buckets_df: pd.DataFrame = result["buckets_df"]
-    report: Dict[str, Any] = result["report"]
+    if multi_cfg is not None:
+        design_df: pd.DataFrame = result["design"]
+        buckets_df: pd.DataFrame = result["buckets"]
+        _mr_report: Dict[str, Any] = {
+            "n": result["n"],
+            "achieved_power": result["achieved_power"],
+            "combination_rule": result.get("combination_rule", "min"),
+            "compound_criterion": result.get("compound_criterion", False),
+            "elapsed_sec": result.get("elapsed_sec", 0.0),
+            "search_strategy": result.get("search_strategy", ""),
+            "p": result.get("p", ""),
+            "warnings": result.get("warnings", []),
+        }
+        for _r in result.get("responses", []):
+            _mr_report[f"{_r['name']}_power"] = _r["power"]
+        if "joint_power" in result:
+            _mr_report["joint_power"] = result["joint_power"]
+        report: Dict[str, Any] = _mr_report
+    else:
+        design_df = result["design_df"]
+        buckets_df = result["buckets_df"]
+        report = result["report"]
 
     # ------------------------------------------------------------------
     # 3. Write output sheets back into the workbook
