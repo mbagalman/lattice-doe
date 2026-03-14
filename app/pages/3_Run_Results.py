@@ -238,15 +238,15 @@ def _approx_power_curve(
     return powers
 
 
-def _make_excel(result: dict) -> bytes:
+def _make_excel(design_df: pd.DataFrame, buckets_df: pd.DataFrame, report: dict) -> bytes:
     """Build an in-memory .xlsx workbook with design, buckets, and report sheets."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        result["design_df"].to_excel(writer, sheet_name="Design", index=False)
-        result["buckets_df"].to_excel(writer, sheet_name="Buckets", index=False)
+        design_df.to_excel(writer, sheet_name="Design", index=False)
+        buckets_df.to_excel(writer, sheet_name="Buckets", index=False)
         report_rows = [
             {"Key": k, "Value": str(_jsonify(v))}
-            for k, v in result["report"].items()
+            for k, v in report.items()
         ]
         pd.DataFrame(report_rows).to_excel(writer, sheet_name="Report", index=False)
     return output.getvalue()
@@ -399,7 +399,34 @@ if result is None:
         st.info("Click **Generate design** above to run.")
     st.stop()
 
-report = result["report"]
+# Detect multi-response result (flat dict) vs single-response (nested "report" dict).
+_is_mr = "report" not in result
+if _is_mr:
+    design_df = result["design"]
+    buckets_df = result["buckets"]
+    _mr_target = max(
+        (float(r.get("power", ss.get("power_target", 0.80))) for r in ss.get("mr_responses", [])),
+        default=float(ss.get("power_target", 0.80)),
+    )
+    report = {
+        "n": result["n"],
+        "achieved_power": result["achieved_power"],
+        "target_power": _mr_target,
+        "elapsed_sec": result.get("elapsed_sec", 0.0),
+        "criterion": "Compound" if result.get("compound_criterion") else ss.get("criterion", "I"),
+        "search_strategy": result.get("search_strategy", "—"),
+        "warnings": result.get("warnings", []),
+        "combination_rule": result.get("combination_rule", "min"),
+        "combined_power": result["achieved_power"],
+        "p": result.get("p"),
+        **{f"{r['name']}_power": r["power"] for r in result.get("responses", [])},
+    }
+    if "joint_power" in result:
+        report["joint_power"] = result["joint_power"]
+else:
+    report = result["report"]
+    design_df = result["design_df"]
+    buckets_df = result["buckets_df"]
 
 for w in report.get("warnings", []):
     st.warning(f"Run warning: {w}")
@@ -453,8 +480,6 @@ st.markdown("---")
 # ---------------------------------------------------------------------------
 # E3 — Design table + CSV
 # ---------------------------------------------------------------------------
-design_df: pd.DataFrame = result["design_df"]
-
 col_h, col_dl = st.columns([3, 1])
 col_h.subheader(f"Design matrix  ({len(design_df)} runs)")
 col_dl.download_button(
@@ -471,8 +496,6 @@ st.markdown("---")
 # ---------------------------------------------------------------------------
 # E4 — Buckets table + CSV
 # ---------------------------------------------------------------------------
-buckets_df: pd.DataFrame = result["buckets_df"]
-
 col_h2, col_dl2 = st.columns([3, 1])
 col_h2.subheader(f"Unique run allocations  ({len(buckets_df)} unique)")
 col_dl2.download_button(
@@ -487,79 +510,86 @@ st.dataframe(buckets_df, use_container_width=True, height=220)
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
-# E5 — Power curve (analytical approximation)
+# E5 — Power curve (analytical approximation) — single-response only
 # ---------------------------------------------------------------------------
-with st.expander("Power curve (n sweep)"):
-    n_result = int(report["n"])
-    max_n_cfg = int(ss.get("max_n", 500))
-    p_model = int(report["p"])
+if _is_mr:
+    with st.expander("Power curve (n sweep)"):
+        st.info(
+            "Analytical power curve approximation is not available for multi-response runs. "
+            "Use `power_curve_by_n_multiresponse()` from the Python API instead."
+        )
+else:
+    with st.expander("Power curve (n sweep)"):
+        n_result = int(report["n"])
+        max_n_cfg = int(ss.get("max_n", 500))
+        p_model = int(report["p"])
 
-    n_max_default = min(n_result * 2, max_n_cfg)
-    n_max_slider = st.slider(
-        "Upper n for sweep",
-        min_value=min(n_result, p_model + 2),
-        max_value=max_n_cfg,
-        value=n_max_default,
-        help="Right edge of the power curve. Drag to extend or narrow the range.",
-    )
+        n_max_default = min(n_result * 2, max_n_cfg)
+        n_max_slider = st.slider(
+            "Upper n for sweep",
+            min_value=min(n_result, p_model + 2),
+            max_value=max_n_cfg,
+            value=n_max_default,
+            help="Right edge of the power curve. Drag to extend or narrow the range.",
+        )
 
-    if st.button("Plot power curve"):
-        if not _HAS_PLOTLY:
-            st.warning("Plotly is not installed. Run `pip install -e '.[app]'`.")
-        else:
-            import plotly.graph_objects as go
-
-            n_vals = list(range(p_model + 1, n_max_slider + 1))
-            alpha = float(ss.get("alpha", 0.05))
-            power_mode_ss = ss.get("power_mode", "contrast")
-            lambda_mode_ss = ss.get("lambda_mode", "n")
-            powers = _approx_power_curve(
-                n_vals=n_vals,
-                report=report,
-                alpha=alpha,
-                power_mode=power_mode_ss,
-                lambda_mode=lambda_mode_ss,
-            )
-            target_power = float(report["target_power"])
-            actual_power = float(report["achieved_power"])
-
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=n_vals, y=powers, mode="lines", name="Approx. power",
-                line=dict(color="#1f77b4", width=2),
-                hovertemplate="n=%{x}<br>power=%{y:.3f}<extra></extra>",
-            ))
-            fig.add_trace(go.Scatter(
-                x=[n_result], y=[actual_power], mode="markers",
-                name=f"Result (n={n_result}, power={actual_power:.3f})",
-                marker=dict(color="#d62728", size=10),
-                hovertemplate=f"n={n_result}<br>power={actual_power:.3f}<extra></extra>",
-            ))
-            fig.add_hline(
-                y=target_power, line_dash="dash", line_color="grey",
-                annotation_text=f"Target {target_power:.0%}",
-                annotation_position="bottom right",
-            )
-            fig.add_vline(
-                x=n_result, line_dash="dot", line_color="#d62728",
-                annotation_text=f"n={n_result}",
-                annotation_position="top right",
-            )
-            fig.update_layout(
-                xaxis_title="Sample size n", yaxis_title="Power",
-                yaxis=dict(range=[0, 1.05]),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                margin=dict(t=40, b=40), height=400,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            if power_mode_ss == "r2" and lambda_mode_ss == "n_minus_p":
-                scale_note = "\u03bb scaled with (n - p) (R\u00b2 mode, n_minus_p)."
+        if st.button("Plot power curve"):
+            if not _HAS_PLOTLY:
+                st.warning("Plotly is not installed. Run `pip install -e '.[app]'`.")
             else:
-                scale_note = "\u03bb scaled with n."
-            st.caption(
-                f"Power approximated from the run result using noncentral-F scaling; {scale_note} "
-                "The red dot is the exact achieved power."
-            )
+                import plotly.graph_objects as go
+
+                n_vals = list(range(p_model + 1, n_max_slider + 1))
+                alpha = float(ss.get("alpha", 0.05))
+                power_mode_ss = ss.get("power_mode", "contrast")
+                lambda_mode_ss = ss.get("lambda_mode", "n")
+                powers = _approx_power_curve(
+                    n_vals=n_vals,
+                    report=report,
+                    alpha=alpha,
+                    power_mode=power_mode_ss,
+                    lambda_mode=lambda_mode_ss,
+                )
+                target_power = float(report["target_power"])
+                actual_power = float(report["achieved_power"])
+
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=n_vals, y=powers, mode="lines", name="Approx. power",
+                    line=dict(color="#1f77b4", width=2),
+                    hovertemplate="n=%{x}<br>power=%{y:.3f}<extra></extra>",
+                ))
+                fig.add_trace(go.Scatter(
+                    x=[n_result], y=[actual_power], mode="markers",
+                    name=f"Result (n={n_result}, power={actual_power:.3f})",
+                    marker=dict(color="#d62728", size=10),
+                    hovertemplate=f"n={n_result}<br>power={actual_power:.3f}<extra></extra>",
+                ))
+                fig.add_hline(
+                    y=target_power, line_dash="dash", line_color="grey",
+                    annotation_text=f"Target {target_power:.0%}",
+                    annotation_position="bottom right",
+                )
+                fig.add_vline(
+                    x=n_result, line_dash="dot", line_color="#d62728",
+                    annotation_text=f"n={n_result}",
+                    annotation_position="top right",
+                )
+                fig.update_layout(
+                    xaxis_title="Sample size n", yaxis_title="Power",
+                    yaxis=dict(range=[0, 1.05]),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                    margin=dict(t=40, b=40), height=400,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                if power_mode_ss == "r2" and lambda_mode_ss == "n_minus_p":
+                    scale_note = "\u03bb scaled with (n - p) (R\u00b2 mode, n_minus_p)."
+                else:
+                    scale_note = "\u03bb scaled with n."
+                st.caption(
+                    f"Power approximated from the run result using noncentral-F scaling; {scale_note} "
+                    "The red dot is the exact achieved power."
+                )
 
 st.markdown("---")
 
@@ -584,7 +614,7 @@ with exp_cols[1]:
     if _HAS_XLSXWRITER:
         st.download_button(
             "\u2b07 Excel workbook",
-            data=_make_excel(result),
+            data=_make_excel(design_df, buckets_df, report),
             file_name="iopt_design.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
