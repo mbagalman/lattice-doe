@@ -150,3 +150,15 @@ class MultiResponseDesignResponse(BaseModel):
         ..., description="Unique run-frequency buckets."
     )
     warnings: List[str] = Field(default_factory=list)
+    # Search diagnostics
+    search_strategy: Optional[str] = Field(None, description="Search strategy string (bisection/growth/verification).")
+    p: Optional[int] = Field(None, description="Number of model parameters.")
+    iteration: Optional[int] = Field(None, description="Number of bisection iterations used.")
+    # Hotelling T² joint power (present when sigma_joint was supplied)
+    joint_power: Optional[float] = Field(None, description="Hotelling T² joint power.")
+    joint_lam: Optional[float] = Field(None, description="Hotelling T² noncentrality λ.")
+    joint_df1: Optional[int] = Field(None, description="Hotelling T² numerator df.")
+    joint_df2: Optional[int] = Field(None, description="Hotelling T² denominator df.")
+    # Split-plot summary (present when split-plot mode was used)
+    n_whole_plots: Optional[int] = Field(None, description="Number of whole plots (split-plot only).")
+    subplots_per_wp: Optional[int] = Field(None, description="Sub-plots per whole plot (split-plot only).")

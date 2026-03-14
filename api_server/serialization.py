@@ -196,7 +196,7 @@ def serialize_multiresponse_result(result: dict) -> dict:
     """Convert an i_optimal_multiresponse_design result dict to JSON-safe form."""
     design_df = result.get("design")
     buckets_df = result.get("buckets")
-    return {
+    out: dict = {
         "design": df_to_records(design_df) if isinstance(design_df, pd.DataFrame) else [],
         "n": int(result["n"]),
         "achieved_power": sanitize_float(result["achieved_power"]),
@@ -206,4 +206,17 @@ def serialize_multiresponse_result(result: dict) -> dict:
         "elapsed_sec": sanitize_float(result.get("elapsed_sec")),
         "buckets": df_to_records(buckets_df) if isinstance(buckets_df, pd.DataFrame) else [],
         "warnings": list(result.get("warnings", [])),
+        # Search diagnostics
+        "search_strategy": result.get("search_strategy"),
+        "p": int(result["p"]) if result.get("p") is not None else None,
+        "iteration": int(result["iteration"]) if result.get("iteration") is not None else None,
+        # Hotelling T² (optional — present when sigma_joint was supplied)
+        "joint_power": sanitize_float(result.get("joint_power")),
+        "joint_lam": sanitize_float(result.get("joint_lam")),
+        "joint_df1": int(result["joint_df1"]) if result.get("joint_df1") is not None else None,
+        "joint_df2": int(result["joint_df2"]) if result.get("joint_df2") is not None else None,
+        # Split-plot summary (optional — present when split-plot mode was used)
+        "n_whole_plots": int(result["n_whole_plots"]) if result.get("n_whole_plots") is not None else None,
+        "subplots_per_wp": int(result["subplots_per_wp"]) if result.get("subplots_per_wp") is not None else None,
     }
+    return out
