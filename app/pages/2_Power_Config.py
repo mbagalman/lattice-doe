@@ -99,8 +99,9 @@ formula = st.session_state.get("formula", "")
 # ===========================================================================
 st.subheader("Power Mode")
 
-_POWER_MODES = ["Contrast-based", "Global R\u00b2"]
-_mode_idx = 0 if st.session_state["power_mode"] == "contrast" else 1
+_POWER_MODES = ["Contrast-based", "Global R\u00b2", "GLM (logistic/Poisson)"]
+_MODE_KEYS = ["contrast", "r2", "glm"]
+_mode_idx = _MODE_KEYS.index(st.session_state.get("power_mode", "contrast"))
 _selected_mode = st.radio(
     "Power mode",
     _POWER_MODES,
@@ -111,10 +112,13 @@ _selected_mode = st.radio(
         "**Contrast-based**: test a specific linear combination of coefficients "
         "(e.g. 'does factor B shift the mean by at least 0.5\u03c3?').\n\n"
         "**Global R\u00b2**: test whether the full model explains at least R\u00b2 "
-        "of total variance."
+        "of total variance.\n\n"
+        "**GLM (logistic/Poisson)**: Wald \u03c7\u00b2 power for binary or count "
+        "outcomes. Effect size \u03b4 is on the linear-predictor scale "
+        "(log-odds for logistic; log-rate for Poisson)."
     ),
 )
-st.session_state["power_mode"] = "contrast" if _selected_mode == "Contrast-based" else "r2"
+st.session_state["power_mode"] = _MODE_KEYS[_POWER_MODES.index(_selected_mode)]
 
 st.markdown("---")
 
@@ -122,7 +126,127 @@ st.markdown("---")
 # C2 + C3  (contrast mode)  |  C4  (R² mode)
 # ===========================================================================
 
-if st.session_state["power_mode"] == "contrast":
+if st.session_state["power_mode"] == "glm":
+
+    st.subheader("GLM Specification")
+
+    # Family + baseline
+    _GLM_FAMILY_OPTS = ["binomial", "poisson"]
+    _GLM_FAMILY_LABELS = ["Binomial (logistic)", "Poisson (log)"]
+    _glm_fam_idx = _GLM_FAMILY_OPTS.index(st.session_state.get("glm_family", "binomial"))
+    _glm_fam_sel = st.selectbox(
+        "Family",
+        _GLM_FAMILY_LABELS,
+        index=_glm_fam_idx,
+        help=(
+            "**Binomial**: binary / proportion outcomes (logit link by default).\n\n"
+            "**Poisson**: count outcomes (log link by default)."
+        ),
+    )
+    st.session_state["glm_family"] = _GLM_FAMILY_OPTS[_GLM_FAMILY_LABELS.index(_glm_fam_sel)]
+
+    _glm_family = st.session_state["glm_family"]
+    if _glm_family == "binomial":
+        _baseline_label = "Baseline event probability (0 \u2013 1)"
+        _baseline_help = (
+            "Event probability under the null / reference scenario. "
+            "E.g. 0.20 means a 20\u202f% baseline conversion rate. "
+            "Must be strictly between 0 and 1."
+        )
+        _baseline_min = 0.001
+        _baseline_max = 0.999
+    else:
+        _baseline_label = "Baseline event rate (\u03bc\u2080 > 0)"
+        _baseline_help = (
+            "Expected count under the null scenario. "
+            "E.g. 2.5 means 2.5 events per unit. Must be positive."
+        )
+        _baseline_min = 0.001
+        _baseline_max = 1000.0
+
+    st.number_input(
+        _baseline_label,
+        min_value=_baseline_min,
+        max_value=_baseline_max,
+        step=0.01 if _glm_family == "binomial" else 0.1,
+        format="%.4g",
+        key="glm_baseline",
+        help=_baseline_help,
+    )
+
+    st.markdown("")
+    st.caption(
+        "\u03b4 (effect size) is on the **linear-predictor scale**: "
+        "log-odds difference for logistic (e.g.\u202f0.5\u202f\u2248\u202f0.5\u202fnat increase "
+        "in log-odds, odds ratio\u202f\u2248\u202f1.65); "
+        "log-rate difference for Poisson (e.g.\u202f0.3\u202f\u2248\u202f30\u202f% increase in rate)."
+    )
+
+    # L matrix + delta (same widgets as contrast mode; delta is on LP scale)
+    p = _get_p(factors, formula)
+    if p is not None:
+        st.caption(
+            f"Your formula has **p\u202f=\u202f{p}** model parameters. "
+            f"Each row of L must have exactly {p} column(s)."
+        )
+    elif not factors:
+        st.info("Define factors on Page 1 first \u2014 p is needed to validate L.")
+
+    col_l, col_d = st.columns([3, 2])
+    with col_l:
+        st.markdown("**Contrast matrix L**")
+        st.caption("One row per contrast; values space- or comma-separated.")
+        st.text_area(
+            "L",
+            key="L_text",
+            height=130,
+            label_visibility="collapsed",
+            placeholder="0  0  1  0\n0  0  0  1",
+        )
+    with col_d:
+        st.markdown("**Effect size \u03b4 (LP scale)**")
+        st.caption("One value per row of L (log-odds or log-rate units).")
+        st.text_area(
+            "delta",
+            key="delta_text",
+            height=130,
+            label_visibility="collapsed",
+            placeholder="0.5\n0.5",
+        )
+
+    # Live shape validation
+    L_text = st.session_state.get("L_text", "").strip()
+    delta_text = st.session_state.get("delta_text", "").strip()
+    if L_text and delta_text:
+        try:
+            L = _parse_matrix(L_text)
+            delta = _parse_vector(delta_text)
+            if L.ndim != 2 or L.size == 0:
+                st.error("L must contain at least one row of values.")
+            elif p is not None and L.shape[1] != p:
+                st.error(
+                    f"L has {L.shape[1]} column(s) but the formula has p\u202f=\u202f{p}. "
+                    "Each row of L needs one value per model parameter."
+                )
+            elif L.shape[0] != len(delta):
+                st.error(
+                    f"L has {L.shape[0]} row(s) but \u03b4 has {len(delta)} value(s) \u2014 "
+                    "they must match."
+                )
+            else:
+                st.success(
+                    f"Valid \u2014 L is ({L.shape[0]}\u202f\u00d7\u202f{L.shape[1]}), "
+                    f"\u03b4 has {len(delta)} value(s)."
+                )
+        except ValueError as exc:
+            st.error(f"Parse error: {exc}")
+    elif L_text or delta_text:
+        st.warning("Fill in both L and \u03b4 to validate.")
+
+    if _glm_family == "binomial" and float(st.session_state.get("glm_baseline", 0.20)) in (0.0, 1.0):
+        st.error("Baseline must be strictly between 0 and 1 for the binomial family.")
+
+elif st.session_state["power_mode"] == "contrast":
 
     st.subheader("Contrast Specification")
 
@@ -339,7 +463,7 @@ to find the index of each parameter.
 # ===========================================================================
 # C4 — R² mode
 # ===========================================================================
-else:
+elif st.session_state["power_mode"] == "r2":
     st.subheader("R\u00b2 Effect Size")
     st.markdown(
         "Detect whether the full model explains at least this fraction of total variance."
@@ -467,9 +591,10 @@ with st.expander("Multi-response (optional)"):
 
         # Add response button
         if st.button("+ Add response"):
+            _cur_mode = ss.get("power_mode", "contrast")
             mr_responses.append({
                 "name": f"Response{len(mr_responses) + 1}",
-                "power_mode": "contrast",
+                "power_mode": _cur_mode if _cur_mode in ("contrast", "r2", "glm") else "contrast",
                 "sigma": float(ss.get("sigma", 1.0)),
                 "alpha": float(ss.get("alpha", 0.05)),
                 "power": float(ss.get("power_target", 0.80)),
@@ -478,6 +603,9 @@ with st.expander("Multi-response (optional)"):
                 "delta_text": ss.get("delta_text", ""),
                 "r2_target": float(ss.get("r2_target", 0.15)),
                 "formula": "",
+                "glm_family": ss.get("glm_family", "binomial"),
+                "glm_baseline": float(ss.get("glm_baseline", 0.20)),
+                "glm_link": ss.get("glm_link", ""),
             })
             ss["mr_responses"] = mr_responses
             st.rerun()
@@ -501,19 +629,30 @@ with st.expander("Multi-response (optional)"):
                             "path is activated (MR-5). Leave blank to share the global formula."
                         ),
                     )
-                    r_mode_opts = ["contrast", "r2"]
-                    r_mode_idx = r_mode_opts.index(r.get("power_mode", "contrast"))
-                    r["power_mode"] = st.radio(
-                        "Power mode", r_mode_opts, index=r_mode_idx,
+                    r_mode_opts = ["contrast", "r2", "glm"]
+                    r_mode_labels = ["Contrast", "Global R\u00b2", "GLM"]
+                    _r_mode_val = r.get("power_mode", "contrast")
+                    if _r_mode_val not in r_mode_opts:
+                        _r_mode_val = "contrast"
+                    r_mode_idx = r_mode_opts.index(_r_mode_val)
+                    _r_mode_sel = st.radio(
+                        "Power mode", r_mode_labels, index=r_mode_idx,
                         horizontal=True, key=f"mr_mode_{i}",
                     )
+                    r["power_mode"] = r_mode_opts[r_mode_labels.index(_r_mode_sel)]
+
+                    _r_is_glm = r["power_mode"] == "glm"
                     c_sigma, c_alpha, c_power, c_weight = st.columns(4)
-                    r["sigma"] = c_sigma.number_input(
-                        "σ", value=r.get("sigma", 1.0), min_value=1e-6,
-                        format="%.4g", key=f"mr_sigma_{i}",
-                    )
+                    if not _r_is_glm:
+                        r["sigma"] = c_sigma.number_input(
+                            "\u03c3", value=r.get("sigma", 1.0), min_value=1e-6,
+                            format="%.4g", key=f"mr_sigma_{i}",
+                        )
+                    else:
+                        c_sigma.markdown("**\u03c3**")
+                        c_sigma.caption("N/A (GLM)")
                     r["alpha"] = c_alpha.number_input(
-                        "α", value=r.get("alpha", 0.05), min_value=1e-4,
+                        "\u03b1", value=r.get("alpha", 0.05), min_value=1e-4,
                         max_value=0.5, format="%.3f", key=f"mr_alpha_{i}",
                     )
                     r["power"] = c_power.number_input(
@@ -525,19 +664,38 @@ with st.expander("Multi-response (optional)"):
                         "Weight", value=r.get("weight", 1.0), min_value=0.01,
                         format="%.3g", key=f"mr_weight_{i}",
                     )
-                    if r["power_mode"] == "contrast":
+                    if r["power_mode"] in ("contrast", "glm"):
+                        if _r_is_glm:
+                            _glm_r_fam_opts = ["binomial", "poisson"]
+                            _glm_r_fam_labels = ["Binomial", "Poisson"]
+                            _glm_r_fam_idx = _glm_r_fam_opts.index(r.get("glm_family", "binomial"))
+                            _glm_r_fam_sel = st.selectbox(
+                                "Family", _glm_r_fam_labels, index=_glm_r_fam_idx,
+                                key=f"mr_glm_family_{i}",
+                            )
+                            r["glm_family"] = _glm_r_fam_opts[_glm_r_fam_labels.index(_glm_r_fam_sel)]
+                            r["glm_baseline"] = st.number_input(
+                                "Baseline",
+                                value=float(r.get("glm_baseline", 0.20)),
+                                min_value=0.001,
+                                max_value=0.999 if r["glm_family"] == "binomial" else 1000.0,
+                                format="%.4g",
+                                key=f"mr_glm_baseline_{i}",
+                                help="Event probability (binomial) or rate (Poisson).",
+                            )
+                        _delta_label = "\u03b4 (LP scale)" if _r_is_glm else "\u03b4 (effect size)"
                         r["L_text"] = st.text_area(
                             "Contrast matrix L (one row; space/comma-separated)",
                             value=r.get("L_text", ""),
                             height=80, key=f"mr_L_{i}",
                         )
                         r["delta_text"] = st.text_input(
-                            "δ (effect size)", value=r.get("delta_text", ""),
+                            _delta_label, value=r.get("delta_text", ""),
                             key=f"mr_delta_{i}",
                         )
                     else:
                         r["r2_target"] = st.number_input(
-                            "R² target", value=r.get("r2_target", 0.15),
+                            "R\u00b2 target", value=r.get("r2_target", 0.15),
                             min_value=0.01, max_value=0.99, format="%.3f",
                             key=f"mr_r2_{i}",
                         )

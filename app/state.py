@@ -59,6 +59,11 @@ def init_state() -> None:
         "sp_subplots_per_wp": 0,   # 0 = auto-compute
         "sp_df_method": "auto",    # "auto" | "conservative" | "sp_only"
 
+        # --- GLM options (GL-8) ---
+        "glm_family": "binomial",    # "binomial" | "poisson"
+        "glm_link": "",              # "" = canonical link
+        "glm_baseline": 0.20,        # event probability (binomial) or rate (Poisson)
+
         # --- Multi-response options (MR-8 / CR-32) ---
         "mr_enabled": False,          # enable multi-response mode
         "mr_combination": "min",      # "min" | "product" | "weighted_mean"
@@ -94,13 +99,23 @@ def render_sidebar() -> None:
         st.markdown(f"- Factors: **{factor_label}**")
         if formula:
             st.markdown(f"- Formula: `{formula}`")
-        mode_label = "Contrast-based" if power_mode == "contrast" else "Global R\u00b2"
+        if power_mode == "contrast":
+            mode_label = "Contrast-based"
+        elif power_mode == "r2":
+            mode_label = "Global R\u00b2"
+        else:
+            mode_label = "GLM (logistic/Poisson)"
         st.markdown(f"- Mode: **{mode_label}**")
         if power_mode == "contrast":
             st.markdown(f"- \u03b1={alpha} · power={power_target} · \u03c3={sigma}")
-        else:
+        elif power_mode == "r2":
             r2 = st.session_state["r2_target"]
             st.markdown(f"- \u03b1={alpha} · power={power_target} · R\u00b2={r2}")
+        else:
+            glm_family = st.session_state.get("glm_family", "binomial")
+            glm_baseline = st.session_state.get("glm_baseline", 0.20)
+            st.markdown(f"- GLM ({glm_family})")
+            st.markdown(f"- baseline={glm_baseline} · \u03b1={alpha} · power={power_target}")
 
         st.markdown("---")
         if result is not None:

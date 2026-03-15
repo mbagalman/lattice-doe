@@ -35,6 +35,7 @@ try:
     from iopt_power_design.config import (
         DesignOptions,
         PowerContrastConfig,
+        PowerGLMContrastConfig,
         PowerR2Config,
         MultiResponseOptions,
         ResponseSpec,
@@ -76,7 +77,7 @@ def _parse_vector(text: str) -> np.ndarray:
 
 
 def _build_power_cfg(ss: dict):
-    """Build PowerContrastConfig or PowerR2Config from session state."""
+    """Build PowerContrastConfig, PowerR2Config, or PowerGLMContrastConfig from session state."""
     if ss["power_mode"] == "contrast":
         if ss["contrast_input_mode"] == "matrix":
             L = _parse_matrix(ss["L_text"])
@@ -101,6 +102,20 @@ def _build_power_cfg(ss: dict):
             sigma=float(ss["sigma"]),
             max_n=int(ss["max_n"]),
         )
+    elif ss["power_mode"] == "glm":
+        L = _parse_matrix(ss["L_text"])
+        delta = _parse_vector(ss["delta_text"])
+        link_val = ss.get("glm_link", "").strip() or None
+        return PowerGLMContrastConfig(
+            L=L,
+            delta=delta,
+            baseline=float(ss.get("glm_baseline", 0.20)),
+            family=ss.get("glm_family", "binomial"),
+            link=link_val,
+            alpha=float(ss["alpha"]),
+            power=float(ss["power_target"]),
+            max_n=int(ss["max_n"]),
+        )
     else:
         return PowerR2Config(
             r2_target=float(ss["r2_target"]),
@@ -121,7 +136,18 @@ def _build_multi_response_cfg(ss: dict) -> "MultiResponseOptions":
         r_sigma = float(r.get("sigma", 1.0))
         r_weight = float(r.get("weight", 1.0))
         r_formula = r.get("formula", "").strip() or None
-        if r.get("power_mode", "contrast") == "contrast":
+        _r_mode = r.get("power_mode", "contrast")
+        if _r_mode == "glm":
+            L = _parse_matrix(r.get("L_text", ""))
+            delta = _parse_vector(r.get("delta_text", ""))
+            pcfg = PowerGLMContrastConfig(
+                L=L, delta=delta,
+                baseline=float(r.get("glm_baseline", 0.20)),
+                family=r.get("glm_family", "binomial"),
+                link=r.get("glm_link", "").strip() or None,
+                alpha=r_alpha, power=r_power,
+            )
+        elif _r_mode == "contrast":
             L = _parse_matrix(r.get("L_text", ""))
             delta = _parse_vector(r.get("delta_text", ""))
             pcfg = PowerContrastConfig(
@@ -298,7 +324,8 @@ with st.expander("Current configuration", expanded=not bool(ss.get("result"))):
         _formula_display = formula or "\u2014"
         st.markdown(f"**Formula:** `{_formula_display}`")
     with c2:
-        mode_label = "Contrast-based" if power_mode == "contrast" else "Global R\u00b2"
+        _mode_labels = {"contrast": "Contrast-based", "r2": "Global R\u00b2", "glm": "GLM (logistic/Poisson)"}
+        mode_label = _mode_labels.get(power_mode, power_mode)
         st.markdown(f"**Power mode:** {mode_label}")
         if power_mode == "contrast":
             input_mode = ss.get("contrast_input_mode", "matrix")
@@ -310,6 +337,14 @@ with st.expander("Current configuration", expanded=not bool(ss.get("result"))):
                 st.caption(f"\u03b4 text: `{_d_preview}`")
             else:
                 st.caption(f"SESOI = {ss.get('sesoi', 1.0)}")
+        elif power_mode == "glm":
+            _glm_fam = ss.get("glm_family", "binomial")
+            _glm_bl = ss.get("glm_baseline", 0.20)
+            st.caption(f"Family: {_glm_fam}  |  baseline = {_glm_bl}")
+            _l_preview = (ss.get("L_text", "").strip() or "\u2014")[:40]
+            _d_preview = (ss.get("delta_text", "").strip() or "\u2014")[:40]
+            st.caption(f"L text: `{_l_preview}`")
+            st.caption(f"\u03b4 (LP scale): `{_d_preview}`")
         else:
             st.caption(f"R\u00b2 target = {ss.get('r2_target', 0.15)}")
             st.caption(f"\u03bb mode: {ss.get('lambda_mode', 'n')}")
@@ -336,7 +371,11 @@ if not factors:
     _issues.append("No factors defined \u2014 go to **Page 1**.")
 if not formula.strip():
     _issues.append("No formula entered \u2014 go to **Page 1**.")
-if power_mode == "contrast" and ss.get("contrast_input_mode") == "matrix":
+_needs_contrast_matrix = (
+    power_mode == "glm"
+    or (power_mode == "contrast" and ss.get("contrast_input_mode") == "matrix")
+)
+if _needs_contrast_matrix:
     if not ss.get("L_text", "").strip():
         _issues.append("L matrix is empty \u2014 go to **Page 2**.")
     if not ss.get("delta_text", "").strip():
@@ -479,6 +518,17 @@ if _mr_response_keys:
         if "combination_rule" in report:
             st.caption(f"Combination rule: **{report['combination_rule']}**")
 
+if report.get("test_type") == "wald_chi2":
+    with st.expander("GLM summary", expanded=True):
+        gc1, gc2, gc3, gc4 = st.columns(4)
+        gc1.metric("Family", report.get("family", "\u2014"))
+        gc2.metric("Baseline", f"{report.get('baseline', 0):.4g}")
+        gc3.metric("Test type", "Wald \u03c7\u00b2")
+        if report.get("glm_weight") is not None:
+            gc4.metric("Fisher weight w", f"{report['glm_weight']:.4f}")
+        if report.get("link"):
+            st.caption(f"Link function: **{report['link']}**")
+
 if "split_plot" in report:
     sp = report["split_plot"]
     with st.expander("Split-plot summary", expanded=True):
@@ -526,13 +576,21 @@ st.dataframe(buckets_df, use_container_width=True, height=220)
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
-# E5 — Power curve (analytical approximation) — single-response only
+# E5 — Power curve (analytical approximation) — single-response OLS only
 # ---------------------------------------------------------------------------
+_is_glm_result = report.get("test_type") == "wald_chi2"
 if _is_mr:
     with st.expander("Power curve (n sweep)"):
         st.info(
             "Analytical power curve approximation is not available for multi-response runs. "
             "Use `power_curve_by_n_multiresponse()` from the Python API instead."
+        )
+elif _is_glm_result:
+    with st.expander("Power curve (n sweep)"):
+        st.info(
+            "Power curve by n is available for GLM designs \u2014 "
+            "use the **Analysis** tab or `power_curve_by_n()` from the Python API. "
+            "The noncentral-F approximation used here is not valid for Wald \u03c7\u00b2 tests."
         )
 else:
     with st.expander("Power curve (n sweep)"):

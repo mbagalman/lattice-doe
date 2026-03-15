@@ -52,6 +52,9 @@ def render_power_params() -> None:
                     "Effect size \u03b4 is in the same units."
                 ),
             )
+        elif power_mode == "glm":
+            st.markdown("**Residual \u03c3**")
+            st.caption("Not used in GLM mode \u2014 set Baseline on Page 2.")
         else:
             st.markdown("**Residual \u03c3**")
             st.caption("Not used in Global R\u00b2 mode.")
