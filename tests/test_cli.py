@@ -217,3 +217,32 @@ class TestGLMCLI:
         }
         result = _make_power_cfg(cfg, FORMULA, FACTORS)
         assert isinstance(result, PowerR2Config)
+
+    # ------------------------------------------------------------------
+    # 6. CR-38: --link parser choices and template correctness
+    # ------------------------------------------------------------------
+
+    def test_link_identity_rejected_by_parser(self):
+        """CR-38: --link identity must be rejected by argparse before reaching config."""
+        import io
+        with pytest.raises(SystemExit):
+            main(["--link", "identity", "--dry-run"])
+
+    def test_link_sqrt_rejected_by_parser(self):
+        """CR-38: --link sqrt must be rejected by argparse before reaching config."""
+        with pytest.raises(SystemExit):
+            main(["--link", "sqrt", "--dry-run"])
+
+    def test_glm_binomial_template_no_invalid_links(self, capsys):
+        """CR-38: glm-binomial template must not advertise identity or sqrt."""
+        _print_template("glm-binomial")
+        out = capsys.readouterr().out
+        assert "identity" not in out
+        assert "sqrt" not in out
+
+    def test_glm_poisson_template_no_invalid_links(self, capsys):
+        """CR-38: glm-poisson template must not advertise identity or sqrt."""
+        _print_template("glm-poisson")
+        out = capsys.readouterr().out
+        assert "identity" not in out
+        assert "sqrt" not in out

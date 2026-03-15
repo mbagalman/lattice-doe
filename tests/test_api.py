@@ -1207,6 +1207,80 @@ class TestSplitPlotIntegration:
 
 
 # ---------------------------------------------------------------------------
+# TestCR35MultiResponseSplitPlotGLMGuard
+# ---------------------------------------------------------------------------
+
+class TestCR35MultiResponseSplitPlotGLMGuard:
+    """CR-35: MR split-plot path must reject GLM responses rather than silently
+    producing invalid (OLS-framework) power numbers."""
+
+    _FORMULA = "~ 1 + A + B"
+    _FACTORS = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+    _L = np.array([[0, 1, 0]])
+    _DELTA = np.array([0.5])
+
+    def _sp_opts(self):
+        return DesignOptions(
+            candidate_points=100,
+            starts=1,
+            max_iter=10,
+            random_state=0,
+            split_plot=SplitPlotOptions(
+                htc_factors=["A"],
+                n_whole_plots=2,
+                subplots_per_wp=3,
+                eta=1.0,
+            ),
+        )
+
+    def _glm_rs(self, name):
+        cfg = PowerGLMContrastConfig(
+            L=self._L, delta=self._DELTA,
+            baseline=0.3, family="binomial",
+            power=0.80, max_n=40, max_iter=15,
+        )
+        return ResponseSpec(name=name, power_cfg=cfg)
+
+    def _ols_rs(self, name):
+        cfg = PowerContrastConfig(
+            L=self._L, delta=self._DELTA, sigma=1.0,
+            power=0.80, max_n=40, max_iter=15,
+        )
+        return ResponseSpec(name=name, power_cfg=cfg)
+
+    def test_all_glm_responses_raises(self):
+        """Two GLM responses + split-plot → NotImplementedError."""
+        multi = MultiResponseOptions(
+            responses=[self._glm_rs("Y1"), self._glm_rs("Y2")],
+        )
+        with pytest.raises(NotImplementedError, match="GLM power configs"):
+            i_optimal_multiresponse_design(
+                self._FORMULA, self._FACTORS, multi, self._sp_opts()
+            )
+
+    def test_mixed_glm_ols_responses_raises(self):
+        """One GLM + one OLS response + split-plot → NotImplementedError listing the GLM response."""
+        multi = MultiResponseOptions(
+            responses=[self._ols_rs("Y1"), self._glm_rs("Y2")],
+        )
+        with pytest.raises(NotImplementedError, match="Y2"):
+            i_optimal_multiresponse_design(
+                self._FORMULA, self._FACTORS, multi, self._sp_opts()
+            )
+
+    def test_ols_only_split_plot_not_affected(self):
+        """Two OLS responses + split-plot → no error; regression guard."""
+        multi = MultiResponseOptions(
+            responses=[self._ols_rs("Y1"), self._ols_rs("Y2")],
+        )
+        result = i_optimal_multiresponse_design(
+            self._FORMULA, self._FACTORS, multi, self._sp_opts()
+        )
+        assert isinstance(result, dict)
+        assert "n_whole_plots" in result
+
+
+# ---------------------------------------------------------------------------
 # TestMultiResponseAPI
 # ---------------------------------------------------------------------------
 
@@ -1597,6 +1671,26 @@ class TestHotellingT2API:
         with pytest.raises(NotImplementedError, match="compound"):
             i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
 
+    def test_sigma_joint_with_glm_response_raises(self):
+        """CR-36: sigma_joint must be rejected when any response is GLM."""
+        glm_cfg = PowerGLMContrastConfig(
+            L=_HT2_L, delta=_HT2_DELTA,
+            baseline=0.3, family="binomial",
+            power=0.8, max_n=60, max_iter=5,
+        )
+        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
+                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        r2 = ResponseSpec("Y2", glm_cfg)
+        multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
+        with pytest.raises(NotImplementedError, match="GLM"):
+            i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
+
+    def test_sigma_joint_with_ols_contrast_still_works(self):
+        """CR-36 regression: OLS contrast responses with sigma_joint are unaffected."""
+        result = _ht2_run(np.eye(2))
+        assert "joint_power" in result
+        assert 0.0 <= result["joint_power"] <= 1.0
+
 
 # ---------------------------------------------------------------------------
 # MR-7: Multi-response analysis function tests
@@ -1886,6 +1980,69 @@ class TestMultiResponseCLI:
         factors = _as_factors(cfg["factors"])
         with pytest.raises((ValueError, TypeError)):
             _make_multi_response_cfg(cfg, cfg["formula"], factors)
+
+    # CR-37 tests ---------------------------------------------------------------
+
+    def test_glm_keys_with_contrast_builds_glm_config(self):
+        """CR-37: contrast + family/baseline → PowerGLMContrastConfig, not PowerContrastConfig."""
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        cfg = self._scenario_cfg()
+        cfg["responses"][0] = {
+            "name": "Yield",
+            "family": "binomial",
+            "baseline": 0.30,
+            "contrast": {
+                "scenario_a": {"A": "low", "B": 5.0},
+                "scenario_b": {"A": "high", "B": 5.0},
+                "sesoi": 0.4,
+            },
+        }
+        factors = _as_factors(cfg["factors"])
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        pcfg = multi.responses[0].power_cfg
+        assert isinstance(pcfg, PowerGLMContrastConfig)
+        assert pcfg.family == "binomial"
+        assert pcfg.baseline == pytest.approx(0.30)
+
+    def test_glm_keys_without_contrast_raises(self):
+        """CR-37: GLM keys with no contrast block → KeyError (no silent fallback)."""
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        cfg = self._scenario_cfg()
+        cfg["responses"][0] = {
+            "name": "Yield",
+            "family": "binomial",
+            "baseline": 0.30,
+            # no contrast block and no r2_target
+        }
+        factors = _as_factors(cfg["factors"])
+        with pytest.raises(KeyError):
+            _make_multi_response_cfg(cfg, cfg["formula"], factors)
+
+    def test_glm_contrast_missing_baseline_raises(self):
+        """CR-37: contrast + family but no baseline → KeyError."""
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        cfg = self._scenario_cfg()
+        cfg["responses"][0] = {
+            "name": "Yield",
+            "family": "binomial",
+            # baseline intentionally omitted
+            "contrast": {
+                "scenario_a": {"A": "low", "B": 5.0},
+                "scenario_b": {"A": "high", "B": 5.0},
+                "sesoi": 0.4,
+            },
+        }
+        factors = _as_factors(cfg["factors"])
+        with pytest.raises(KeyError, match="baseline"):
+            _make_multi_response_cfg(cfg, cfg["formula"], factors)
+
+    def test_plain_contrast_no_glm_keys_unchanged(self):
+        """CR-37 regression: contrast without family/baseline still builds PowerContrastConfig."""
+        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        cfg = self._scenario_cfg()
+        factors = _as_factors(cfg["factors"])
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        assert isinstance(multi.responses[0].power_cfg, PowerContrastConfig)
 
     def test_cli_main_multiresponse_dry_run(self, tmp_path):
         """--dry-run with a responses: config should succeed."""

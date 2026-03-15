@@ -296,9 +296,28 @@ def _make_multi_response_cfg(
                     f"Response '{name}' contrast block must contain "
                     "[scenario_a, scenario_b, sesoi] or explicit [L, delta]."
                 )
-            pcfg: Union[PowerContrastConfig, PowerR2Config] = PowerContrastConfig(
-                L=L, delta=delta, alpha=r_alpha, power=r_power, sigma=r_sigma, max_n=r_max_n,
-            )
+            # GLM response: contrast block present AND family/baseline keys present.
+            if "family" in r or "baseline" in r:
+                r_family = str(r.get("family", "binomial"))
+                r_link = r.get("link") or None
+                r_baseline = r.get("baseline")
+                if r_baseline is None:
+                    raise KeyError(
+                        f"Response '{name}' has GLM keys but is missing required 'baseline'."
+                    )
+                pcfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig] = (
+                    PowerGLMContrastConfig(
+                        L=L, delta=delta,
+                        baseline=float(r_baseline),
+                        family=r_family,
+                        link=r_link,
+                        alpha=r_alpha, power=r_power, max_n=r_max_n,
+                    )
+                )
+            else:
+                pcfg = PowerContrastConfig(
+                    L=L, delta=delta, alpha=r_alpha, power=r_power, sigma=r_sigma, max_n=r_max_n,
+                )
         elif "r2_target" in r:
             pcfg = PowerR2Config(
                 r2_target=float(r["r2_target"]), alpha=r_alpha, power=r_power, sigma=r_sigma,
@@ -551,7 +570,7 @@ factors:
 
 # Power mode: Wald chi-square for a binomial (logistic) GLM contrast
 family: binomial       # binomial | poisson
-link: logit            # logit (default for binomial) | log | identity
+link: logit            # logit (default for binomial) | log
 baseline: 0.30         # baseline response probability p₀  (0 < p₀ < 1)
 
 contrast:
@@ -597,7 +616,7 @@ factors:
 
 # Power mode: Wald chi-square for a Poisson (log-linear) GLM contrast
 family: poisson        # binomial | poisson
-link: log              # log (default for Poisson) | identity | sqrt
+link: log              # log (default for Poisson)
 baseline: 2.0          # baseline expected count μ₀  (> 0)
 
 contrast:
@@ -757,10 +776,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--link",
-        choices=["logit", "log", "identity", "sqrt"],
+        choices=["logit", "log"],
         default=None,
         metavar="LINK",
-        help="GLM link function (logit | log | identity | sqrt). Overrides 'link' in the config.",
+        help="GLM link function (logit | log). Overrides 'link' in the config.",
     )
     parser.add_argument(
         "--baseline",

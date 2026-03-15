@@ -1056,11 +1056,18 @@ def i_optimal_multiresponse_design(
                 "sigma_joint (Hotelling T²) is not supported with split-plot designs."
             )
         from .config import PowerR2Config as _PowerR2Config
+        from .config import PowerGLMContrastConfig as _PowerGLMContrastConfig
         for r in multi_cfg.responses:
             if isinstance(r.power_cfg, _PowerR2Config):
                 raise NotImplementedError(
                     f"sigma_joint (Hotelling T²) is not supported for R²-mode "
                     f"response '{r.name}'. Use PowerContrastConfig for all responses."
+                )
+            if isinstance(r.power_cfg, _PowerGLMContrastConfig):
+                raise NotImplementedError(
+                    f"sigma_joint (Hotelling T²) is not supported for GLM response "
+                    f"'{r.name}'. Hotelling T² is an OLS linear-model approximation "
+                    "and is not valid for the Wald chi-square GLM power model."
                 )
         # All L matrices must be identical (same contrast for all responses).
         _L0 = np.asarray(multi_cfg.responses[0].power_cfg.L)
@@ -1078,6 +1085,17 @@ def i_optimal_multiresponse_design(
     # Split-plot path
     # =========================================================================
     if is_sp:
+        _glm_sp_responses = [
+            r.name for r in multi_cfg.responses
+            if isinstance(r.power_cfg, PowerGLMContrastConfig)
+        ]
+        if _glm_sp_responses:
+            raise NotImplementedError(
+                "GLM power configs (PowerGLMContrastConfig) are not supported with "
+                "split-plot designs in multi-response mode. Affected responses: "
+                f"{_glm_sp_responses}. Use a non-split-plot design, or await Phase 2 "
+                "support (weighted GLS exchange)."
+            )
         _validate_htc_factors(sp_opts.htc_factors, factors)
         subplots_per_wp = (
             sp_opts.subplots_per_wp
