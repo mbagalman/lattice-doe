@@ -1,7 +1,7 @@
 [project]
 name = "iopt-power-design"
 version = "0.1.0"
-description = "I-optimal experimental designs with power assurance for linear models."
+description = "Power-assured optimal experimental designs for linear and GLM models."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Michael Bagalman", email = "Michael@ParadoxResolution.com" }]

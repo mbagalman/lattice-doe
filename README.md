@@ -1,10 +1,23 @@
 # iopt-power-design
 
-**I-optimal experimental designs with power assurance for linear models.**
+**Power-assured optimal experimental designs for linear and GLM models.**
 
-Generate powered optimal designs that are guaranteed (or as close as possible) to meet a target statistical power for either a linear contrast test or a global R² F-test. The package automatically searches for the minimum sample size `n` that achieves your power target, then selects the best design at that `n` under your chosen criterion (`"I"` by default, or `"D"` / `"A"`).
+Generate powered optimal designs that are guaranteed (or as close as possible) to meet a target statistical power. The package automatically searches for the minimum sample size `n` that achieves your power target, then selects the best design at that `n` under your chosen criterion (`"I"` by default, or `"D"` / `"A"`).
 
-> **I-optimality** minimises *average prediction variance* over the design region — preferred when prediction accuracy across the factor space is the primary goal.  Set `criterion="D"` in `DesignOptions` to switch to **D-optimality** (maximises `det(X'X)`, preferred when precise coefficient estimation matters most), or `criterion="A"` for **A-optimality** (minimises `trace((X'X)⁻¹)`, equalising coefficient-estimate variances).
+**Supported power modes:**
+
+| Mode | Config class | Test | Use case |
+|---|---|---|---|
+| Linear contrast | `PowerContrastConfig` | F-test on Lβ = δ | Detecting a specific effect in a linear model |
+| Global R² | `PowerR2Config` | Omnibus F-test | Testing whether the full model explains meaningful variance |
+| GLM Wald χ² | `PowerGLMContrastConfig` | Wald chi-square | Binomial (logistic) or Poisson response variables |
+| Multi-response | `MultiResponseOptions` | Per-response + combined | Simultaneously powering several responses |
+
+**Supported optimality criteria** (set via `DesignOptions.criterion`):
+
+- **I-optimality** (default) — minimises *average prediction variance* over the design region; preferred when prediction accuracy across the factor space matters most.
+- **D-optimality** — maximises `det(X'X)`; preferred when precise coefficient estimation is the primary goal.
+- **A-optimality** — minimises `trace((X'X)⁻¹)`; equalises coefficient-estimate variances.
 
 New here? Start with the 10-minute guide: [Quick Start Guide](docs/quickstart.md).  
 Looking for task-oriented examples? See [Recipes](docs/recipes.md).
@@ -116,7 +129,7 @@ result = i_optimal_powered_design(
     design_opts=opts,
 )
 
-design_df  = result["design_df"]    # DataFrame: n-run I-optimal design
+design_df  = result["design_df"]    # DataFrame: n-run optimal design
 buckets_df = result["buckets_df"]   # DataFrame: unique run allocations with counts
 report     = result["report"]       # dict: power, n, lambda, df, timing, etc.
 
@@ -307,6 +320,39 @@ Tests H₀: R² = 0 (all slopes are zero) using the omnibus F-test.
 - `df_num` = number of slope parameters (intercept excluded, per G\*Power convention)
 - `df_denom` = n − rank(X)
 
+### GLM Wald χ² (`PowerGLMContrastConfig`)
+
+Tests H₀: Lβ = 0 using a Wald chi-square statistic for binomial (logistic) or Poisson GLM responses.
+
+The design search uses a **null-based locally optimal** information matrix: `M = w · X'X` where `w = p₀(1 − p₀)` (binomial) or `w = μ₀` (Poisson). Because `w` is a positive scalar it cancels from I/D/A criteria, so the Fedorov exchange is structurally identical to OLS — only the power calculation changes.
+
+```python
+from iopt_power_design import PowerGLMContrastConfig
+from iopt_power_design.contrasts import contrast_from_scenarios
+
+L, delta = contrast_from_scenarios(formula, factors, scenario_a, scenario_b, sesoi=0.4)
+
+power_cfg = PowerGLMContrastConfig(
+    L=L,
+    delta=delta,           # effect on the linear-predictor (log-odds / log-rate) scale
+    baseline=0.30,         # p₀ for binomial (0 < p₀ < 1) or μ₀ for Poisson (> 0)
+    family="binomial",     # "binomial" or "poisson"
+    link=None,             # None → canonical link (logit / log); or explicit "logit" / "log"
+    alpha=0.05,
+    power=0.80,
+    max_n=500,
+)
+
+result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+```
+
+Use the CLI template to get started:
+
+```bash
+iopt-design --template glm-binomial > glm_config.yml
+iopt-design --template glm-poisson  > glm_config.yml
+```
+
 ---
 
 ## Configuration Reference
@@ -333,6 +379,21 @@ Tests H₀: R² = 0 (all slopes are zero) using the omnibus F-test.
 | `power` | float | `0.80` | Target power |
 | `max_n` | int | `2000` | Hard cap on sample size search |
 | `lambda_mode` | `"n"` \| `"n_minus_p"` | `"n"` | Noncentrality convention |
+| `tol_power` | float | `1e-3` | Convergence tolerance |
+| `max_iter` | int | `200` | Max n-search iterations |
+
+### `PowerGLMContrastConfig`
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `L` | array (q×p) | — | Contrast matrix; must match model matrix column count |
+| `delta` | array (q,) | — | Effect sizes on the linear-predictor scale (log-odds for binomial, log-rate for Poisson) |
+| `baseline` | float | — | Baseline mean on the response scale: probability ∈ (0, 1) for binomial; expected count > 0 for Poisson |
+| `family` | `"binomial"` \| `"poisson"` | `"binomial"` | Response distribution family |
+| `link` | `"logit"` \| `"log"` \| `None` | `None` | Link function; `None` selects the canonical link for the family |
+| `alpha` | float | `0.05` | Significance level |
+| `power` | float | `0.80` | Target power |
+| `max_n` | int | `2000` | Hard cap on sample size search |
 | `tol_power` | float | `1e-3` | Convergence tolerance |
 | `max_iter` | int | `200` | Max n-search iterations |
 
@@ -369,7 +430,7 @@ Tests H₀: R² = 0 (all slopes are zero) using the omnibus F-test.
 
 ## Output Structure
 
-`i_optimal_powered_design(...)` returns a dict with three keys:
+`i_optimal_powered_design(...)` returns a dict with three keys. (For multi-response designs, see `i_optimal_multiresponse_design(...)` which returns a different structure with `design`, `buckets`, `responses`, and flat summary fields.)
 
 ### `result["design_df"]` — `DataFrame`
 
@@ -476,7 +537,7 @@ print(result["power_grid"])    # 2D numpy array of power values
 | `"sigma"` | Absolute σ value | ❌ not applicable |
 | `"alpha"` | Significance level | Significance level |
 
-When neither axis is `"n"`, the function builds one I-optimal design at a representative n and sweeps analytically (fast). When `"n"` is an axis, one I-optimal design is built per unique n value (expensive but cached).
+When neither axis is `"n"`, the function builds one optimal design at a representative n and sweeps analytically (fast). When `"n"` is an axis, one optimal design is built per unique n value (expensive but cached).
 
 ### Interactive charts (Plotly)
 
