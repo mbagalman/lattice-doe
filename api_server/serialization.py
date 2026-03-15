@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 
-from iopt_power_design.config import DesignOptions, MultiResponseOptions, PowerContrastConfig, PowerR2Config, ResponseSpec, SplitPlotOptions
+from iopt_power_design.config import DesignOptions, MultiResponseOptions, PowerContrastConfig, PowerGLMContrastConfig, PowerR2Config, ResponseSpec, SplitPlotOptions
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ def records_to_df(records: List[Dict[str, Any]]) -> pd.DataFrame:
 
 def pydantic_power_cfg_to_dataclass(
     model: Any,
-) -> Union[PowerContrastConfig, PowerR2Config]:
+) -> Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig]:
     """Convert a Pydantic power-config model to the matching dataclass."""
     if model.type == "contrast":
         return PowerContrastConfig(
@@ -85,6 +85,19 @@ def pydantic_power_cfg_to_dataclass(
             alpha=model.alpha,
             power=model.power,
             sigma=model.sigma,
+            tol_power=model.tol_power,
+            max_iter=model.max_iter,
+            max_n=model.max_n,
+        )
+    if model.type == "glm_contrast":
+        return PowerGLMContrastConfig(
+            L=np.array(model.L, dtype=float),
+            delta=np.array(model.delta, dtype=float),
+            baseline=model.baseline,
+            family=model.family,
+            link=model.link,
+            alpha=model.alpha,
+            power=model.power,
             tol_power=model.tol_power,
             max_iter=model.max_iter,
             max_n=model.max_n,

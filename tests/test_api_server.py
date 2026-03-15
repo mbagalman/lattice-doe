@@ -956,3 +956,287 @@ class TestMultiResponseIntegration:
         body = r.json()
         assert math.isfinite(body["achieved_power"])
         assert isinstance(body["n"], int)
+
+
+# ---------------------------------------------------------------------------
+# GL-7 — REST API GLM support
+# ---------------------------------------------------------------------------
+
+_GLM_FAST_OPTS: Dict[str, Any] = {
+    "candidate_points": 100,
+    "auto_candidate": False,
+    "starts": 2,
+    "max_iter": 50,
+    "random_state": 42,
+}
+
+_GLM_BINOMIAL_CFG: Dict[str, Any] = {
+    "type": "glm_contrast",
+    "L": [[0, 1]],
+    "delta": [0.4],
+    "family": "binomial",
+    "baseline": 0.30,
+}
+
+_GLM_POISSON_CFG: Dict[str, Any] = {
+    "type": "glm_contrast",
+    "L": [[0, 1]],
+    "delta": [0.5],
+    "family": "poisson",
+    "baseline": 2.0,
+}
+
+_GLM_MOCK_REPORT: Dict[str, Any] = {
+    "n": 12, "p": 2, "df_num": 1, "df_denom": 10,
+    "alpha": 0.05, "target_power": 0.8, "achieved_power": 0.83,
+    "noncentrality_lambda": 7.5, "criterion": "I",
+    "elapsed_sec": 0.4, "warnings": [],
+    "test_type": "wald_chi2",
+    "family": "binomial", "link": "logit", "baseline": 0.30,
+    "glm_weight": 0.21, "df2": None,
+}
+
+
+# --- Layer 1: pure unit tests (no HTTP) ---
+
+class TestGLMPydanticModels:
+    """GL-7 Layer 1: PowerGLMContrastModel construction and validation."""
+
+    def test_glm_model_construction_binomial(self):
+        from api_server.models.common import PowerGLMContrastModel
+        m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3, family="binomial")
+        assert m.type == "glm_contrast"
+        assert m.family == "binomial"
+        assert m.baseline == pytest.approx(0.3)
+
+    def test_glm_model_construction_poisson(self):
+        from api_server.models.common import PowerGLMContrastModel
+        m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.5], baseline=2.0, family="poisson")
+        assert m.family == "poisson"
+        assert m.baseline == pytest.approx(2.0)
+
+    def test_glm_baseline_out_of_range_binomial(self):
+        from api_server.models.common import PowerGLMContrastModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError, match="baseline"):
+            PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=1.5, family="binomial")
+
+    def test_glm_baseline_zero_poisson_rejected(self):
+        from api_server.models.common import PowerGLMContrastModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError, match="baseline"):
+            PowerGLMContrastModel(L=[[0, 1]], delta=[0.5], baseline=0.0, family="poisson")
+
+    def test_glm_wrong_family_rejected(self):
+        from api_server.models.common import PowerGLMContrastModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError):
+            PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3, family="gaussian")
+
+    def test_glm_missing_baseline_rejected(self):
+        from api_server.models.common import PowerGLMContrastModel
+        import pydantic
+        with pytest.raises(pydantic.ValidationError):
+            PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], family="binomial")
+
+    def test_pydantic_power_cfg_to_dataclass_glm_branch(self):
+        from api_server.models.common import PowerGLMContrastModel
+        from iopt_power_design.config import PowerGLMContrastConfig
+        m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3, family="binomial")
+        cfg = pydantic_power_cfg_to_dataclass(m)
+        assert isinstance(cfg, PowerGLMContrastConfig)
+        assert cfg.family == "binomial"
+        assert cfg.baseline == pytest.approx(0.3)
+        assert cfg.L.shape == (1, 2)
+
+    def test_pydantic_power_cfg_to_dataclass_glm_link_forwarded(self):
+        from api_server.models.common import PowerGLMContrastModel
+        m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3,
+                                   family="binomial", link="logit")
+        cfg = pydantic_power_cfg_to_dataclass(m)
+        assert cfg.link == "logit"
+
+    def test_glm_type_discriminator_in_union(self):
+        """PowerCfgModel discriminates glm_contrast correctly."""
+        from api_server.models.common import PowerGLMContrastModel
+        from pydantic import TypeAdapter
+        from api_server.models.common import PowerCfgModel
+        ta = TypeAdapter(PowerCfgModel)
+        m = ta.validate_python({
+            "type": "glm_contrast",
+            "L": [[0, 1]], "delta": [0.3], "baseline": 0.25, "family": "binomial",
+        })
+        assert isinstance(m, PowerGLMContrastModel)
+
+
+# --- Layer 2: HTTP unit tests (mocked, ASGI test client) ---
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
+class TestGLMDesignEndpointMocked:
+    """GL-7 Layer 2: mocked HTTP tests for /design with GLM power config."""
+
+    def _glm_body(self, cfg=None):
+        return {
+            "formula": "~ 1 + A",
+            "factors": {"A": [-1.0, 1.0]},
+            "power_cfg": cfg or _GLM_BINOMIAL_CFG,
+            "design_opts": _GLM_FAST_OPTS,
+        }
+
+    def _mock_return(self, extra=None):
+        r = {
+            "design_df": pd.DataFrame({"A": [0.1, -0.1]}),
+            "buckets_df": pd.DataFrame({"A": [0.1], "count": [2]}),
+            "report": dict(_GLM_MOCK_REPORT),
+        }
+        if extra:
+            r["report"].update(extra)
+        return r
+
+    @patch("api_server.routers.design.i_optimal_powered_design")
+    async def test_glm_binomial_returns_200(self, mock_run, client):
+        mock_run.return_value = self._mock_return()
+        r = await client.post("/design", json=self._glm_body())
+        assert r.status_code == 200
+
+    @patch("api_server.routers.design.i_optimal_powered_design")
+    async def test_glm_binomial_response_has_design_df(self, mock_run, client):
+        mock_run.return_value = self._mock_return()
+        r = await client.post("/design", json=self._glm_body())
+        assert "design_df" in r.json()
+        assert len(r.json()["design_df"]) >= 1
+
+    @patch("api_server.routers.design.i_optimal_powered_design")
+    async def test_glm_binomial_report_has_family(self, mock_run, client):
+        mock_run.return_value = self._mock_return()
+        r = await client.post("/design", json=self._glm_body())
+        assert r.json()["report"]["family"] == "binomial"
+
+    @patch("api_server.routers.design.i_optimal_powered_design")
+    async def test_glm_binomial_report_test_type_wald_chi2(self, mock_run, client):
+        mock_run.return_value = self._mock_return()
+        r = await client.post("/design", json=self._glm_body())
+        assert r.json()["report"]["test_type"] == "wald_chi2"
+
+    @patch("api_server.routers.design.i_optimal_powered_design")
+    async def test_glm_binomial_report_df2_is_none(self, mock_run, client):
+        mock_run.return_value = self._mock_return()
+        r = await client.post("/design", json=self._glm_body())
+        assert r.json()["report"]["df2"] is None
+
+    @patch("api_server.routers.design.i_optimal_powered_design")
+    async def test_glm_poisson_returns_200(self, mock_run, client):
+        mock_run.return_value = self._mock_return({
+            "family": "poisson", "link": "log", "baseline": 2.0, "glm_weight": 2.0,
+        })
+        r = await client.post("/design", json=self._glm_body(_GLM_POISSON_CFG))
+        assert r.status_code == 200
+
+    @patch("api_server.routers.design.i_optimal_powered_design")
+    async def test_glm_poisson_report_has_baseline(self, mock_run, client):
+        mock_run.return_value = self._mock_return({
+            "family": "poisson", "link": "log", "baseline": 2.0, "glm_weight": 2.0,
+        })
+        r = await client.post("/design", json=self._glm_body(_GLM_POISSON_CFG))
+        assert r.json()["report"]["baseline"] == pytest.approx(2.0)
+
+    async def test_glm_baseline_out_of_range_returns_422(self, client):
+        body = self._glm_body({
+            "type": "glm_contrast",
+            "L": [[0, 1]], "delta": [0.4],
+            "family": "binomial",
+            "baseline": 1.5,  # invalid: > 1
+        })
+        r = await client.post("/design", json=body)
+        assert r.status_code == 422
+
+    async def test_glm_missing_baseline_returns_422(self, client):
+        body = self._glm_body({
+            "type": "glm_contrast",
+            "L": [[0, 1]], "delta": [0.4],
+            "family": "binomial",
+            # baseline omitted — required field
+        })
+        r = await client.post("/design", json=body)
+        assert r.status_code == 422
+
+    @patch("api_server.routers.design.i_optimal_powered_design")
+    async def test_ols_contrast_endpoint_unchanged(self, mock_run, client):
+        mock_run.return_value = {
+            "design_df": pd.DataFrame({"A": [0.1, -0.1]}),
+            "buckets_df": pd.DataFrame({"A": [0.1], "count": [1]}),
+            "report": {
+                "n": 10, "p": 2, "df_num": 1, "df_denom": 8,
+                "alpha": 0.05, "target_power": 0.8, "achieved_power": 0.82,
+                "noncentrality_lambda": 6.5, "criterion": "I",
+                "elapsed_sec": 0.3, "warnings": [],
+            },
+        }
+        r = await client.post("/design", json={
+            "formula": "~ 1 + A",
+            "factors": {"A": [-1.0, 1.0]},
+            "power_cfg": {"type": "contrast", "L": [[0, 1]], "delta": [0.5], "sigma": 1.0},
+            "design_opts": _GLM_FAST_OPTS,
+        })
+        assert r.status_code == 200
+
+
+# --- Layer 3: HTTP integration tests (real compute, @slow) ---
+
+_GLM_INTEGRATION_BODY: Dict[str, Any] = {
+    "formula": "~ 1 + A",
+    "factors": {"A": [-1.0, 1.0]},
+    "power_cfg": {
+        "type": "glm_contrast",
+        "L": [[0, 1]],
+        "delta": [0.6],
+        "family": "binomial",
+        "baseline": 0.30,
+        "max_n": 40,
+    },
+    "design_opts": _GLM_FAST_OPTS,
+}
+
+
+@pytest.mark.slow
+@pytest.mark.anyio
+@pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
+class TestGLMDesignIntegration:
+    """GL-7 Layer 3: real compute round-trip for GLM designs."""
+
+    async def test_glm_result_json_parseable(self, client):
+        r = await client.post("/design", json=_GLM_INTEGRATION_BODY)
+        assert r.status_code == 200
+        body = r.json()
+        assert isinstance(body, dict)
+
+    async def test_glm_design_has_factor_columns(self, client):
+        r = await client.post("/design", json=_GLM_INTEGRATION_BODY)
+        assert r.status_code == 200
+        row = r.json()["design_df"][0]
+        assert "A" in row
+
+    async def test_glm_report_achieved_power_between_0_and_1(self, client):
+        r = await client.post("/design", json=_GLM_INTEGRATION_BODY)
+        assert r.status_code == 200
+        ap = r.json()["report"]["achieved_power"]
+        assert 0 < ap <= 1.0
+
+    async def test_glm_no_nan_in_json(self, client):
+        r = await client.post("/design", json=_GLM_INTEGRATION_BODY)
+        assert r.status_code == 200
+        body = r.json()
+        assert math.isfinite(body["report"]["achieved_power"])
+        assert math.isfinite(body["report"]["noncentrality_lambda"])
+
+    async def test_ols_r2_endpoint_unchanged(self, client):
+        """OLS R² path still works after GL-7 changes."""
+        r = await client.post("/design", json={
+            "formula": "~ 1 + A",
+            "factors": {"A": [-1.0, 1.0]},
+            "power_cfg": {"type": "r2", "r2_target": 0.15, "max_n": 30},
+            "design_opts": _GLM_FAST_OPTS,
+        })
+        assert r.status_code == 200
+        assert 0 < r.json()["report"]["achieved_power"] <= 1.0

@@ -66,6 +66,13 @@ class ReportModel(BaseModel):
     search_strategy: Optional[str] = None
     warnings: List[str] = []
     diagnostics: Optional[DiagnosticsModel] = None
+    # GLM fields (present when power_cfg.type == "glm_contrast")
+    test_type: Optional[str] = None       # "f" | "wald_chi2"
+    family: Optional[str] = None
+    link: Optional[str] = None
+    baseline: Optional[float] = None
+    glm_weight: Optional[float] = None
+    df2: Optional[int] = None             # None for GLM (Wald χ² has no denominator df)
 
     model_config = {"extra": "allow"}  # forward-compatible with new report keys
 

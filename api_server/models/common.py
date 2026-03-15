@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Dict, List, Literal, Optional, Tuple, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +59,49 @@ class PowerContrastConfigModel(BaseModel):
     max_n: int = Field(2000, gt=0, description="Hard cap on sample size.")
 
 
+class PowerGLMContrastModel(BaseModel):
+    """Power configuration for GLM (logistic/Poisson) Wald chi-square contrast tests."""
+
+    type: Literal["glm_contrast"] = "glm_contrast"
+    L: List[List[float]] = Field(
+        ...,
+        description="Contrast matrix — 2-D list of floats (q rows × p columns).",
+        examples=[[[0, 1, 0]]],
+    )
+    delta: List[float] = Field(
+        ...,
+        description="Minimum detectable effect on the linear-predictor scale — one value per row of L.",
+        examples=[[0.5]],
+    )
+    family: Literal["binomial", "poisson"] = Field(
+        "binomial",
+        description="GLM response family.",
+    )
+    link: Optional[Literal["logit", "log"]] = Field(
+        None,
+        description="Link function. None selects the canonical link (logit for binomial, log for Poisson).",
+    )
+    baseline: float = Field(
+        ...,
+        description="Baseline response value: event probability p₀ ∈ (0,1) for binomial; expected count μ₀ > 0 for Poisson.",
+    )
+    alpha: float = Field(0.05, ge=1e-6, lt=1.0, description="Significance level.")
+    power: float = Field(0.80, gt=0.0, lt=1.0, description="Target power.")
+    tol_power: float = Field(1e-3, gt=0.0)
+    max_iter: int = Field(200, gt=0)
+    max_n: int = Field(2000, gt=0, description="Hard cap on sample size.")
+
+    @field_validator("baseline")
+    @classmethod
+    def validate_baseline(cls, v: float, info: Any) -> float:
+        family = info.data.get("family", "binomial")
+        if family == "binomial" and not (0.0 < v < 1.0):
+            raise ValueError("baseline must be in (0, 1) for binomial family")
+        if family == "poisson" and v <= 0:
+            raise ValueError("baseline must be > 0 for Poisson family")
+        return v
+
+
 class PowerR2ConfigModel(BaseModel):
     """Power configuration for global R² (full-model F-test) tests."""
 
@@ -85,7 +128,7 @@ class PowerR2ConfigModel(BaseModel):
 
 
 PowerCfgModel = Annotated[
-    Union[PowerContrastConfigModel, PowerR2ConfigModel],
+    Union[PowerContrastConfigModel, PowerR2ConfigModel, PowerGLMContrastModel],
     Field(discriminator="type"),
 ]
 

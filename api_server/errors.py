@@ -29,11 +29,23 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_error_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        # Pydantic v2 may include Exception objects in error 'ctx' dicts which
+        # are not JSON-serializable; convert them to strings.
+        errors = []
+        for e in exc.errors():
+            entry = dict(e)
+            if "ctx" in entry and isinstance(entry["ctx"], dict):
+                entry["ctx"] = {
+                    k: str(v) if isinstance(v, Exception) else v
+                    for k, v in entry["ctx"].items()
+                }
+            entry.pop("url", None)  # strip Pydantic v2 doc URLs (optional)
+            errors.append(entry)
         return JSONResponse(
             status_code=422,
             content={
                 "error": "ValidationError",
-                "detail": exc.errors(),
+                "detail": errors,
             },
         )
 
