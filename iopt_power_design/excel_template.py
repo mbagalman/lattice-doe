@@ -41,8 +41,8 @@ import numpy as np
 import pandas as pd
 
 from .config import (
-    PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions,
-    MultiResponseOptions, ResponseSpec,
+    PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
+    DesignOptions, SplitPlotOptions, MultiResponseOptions, ResponseSpec,
 )
 
 # ---------------------------------------------------------------------------
@@ -196,9 +196,9 @@ def _read_config_sheet(
     formula = settings["formula"]
     power_mode = settings.get("power_mode", "").strip().lower()
 
-    if power_mode and power_mode not in ("r2", "contrast"):
+    if power_mode and power_mode not in ("r2", "contrast", "glm"):
         raise ExcelError(
-            f"[SETTINGS] power_mode must be 'r2' or 'contrast'; got {settings.get('power_mode')!r}."
+            f"[SETTINGS] power_mode must be 'r2', 'contrast', or 'glm'; got {settings.get('power_mode')!r}."
         )
 
     def _float(key: str, default: float) -> float:
@@ -257,6 +257,10 @@ def _read_config_sheet(
     sp_eta             = _float("eta",            1.0)
     subplots_per_wp_raw = _int("subplots_per_wp", 0)   # 0 → auto
     df_method_sp       = str(settings.get("df_method", "auto") or "auto").strip() or "auto"
+    # GLM options (GL-9)
+    glm_family   = str(settings.get("family", "binomial") or "binomial").strip() or "binomial"
+    glm_link     = str(settings.get("link", "") or "").strip() or None
+    glm_baseline = _float("baseline", 0.0)
 
     do_kwargs: Dict[str, Any] = dict(
         criterion=criterion,
@@ -291,14 +295,14 @@ def _read_config_sheet(
     except (ValueError, TypeError) as e:
         raise ExcelError(f"Config sheet produced invalid DesignOptions: {e}") from e
 
-    # --- Parse [CONTRAST] (if present and single-response mode) ---
+    # --- Parse [CONTRAST] (if present and single-response contrast/glm mode) ---
     L: Optional[np.ndarray] = None
     delta: Optional[np.ndarray] = None
 
-    if idx_responses is None and power_mode == "contrast":
+    if idx_responses is None and power_mode in ("contrast", "glm"):
         if idx_contrast is None:
             raise ExcelError(
-                f"power_mode is 'contrast' but the '{_SENTINEL_CONTRAST}' sentinel "
+                f"power_mode is {power_mode!r} but the '{_SENTINEL_CONTRAST}' sentinel "
                 "is missing from the Config sheet."
             )
         contrast_end = idx_factors if idx_factors > idx_contrast else len(rows)
@@ -380,7 +384,7 @@ def _read_config_sheet(
         raise ExcelError("[FACTORS] section contains no factor definitions.")
 
     # --- Build power_cfg (single-response mode only) ---
-    power_cfg: Optional[Union[PowerContrastConfig, PowerR2Config]] = None
+    power_cfg: Optional[Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig]] = None
     if idx_responses is None:
         if power_mode == "r2":
             try:
@@ -393,6 +397,24 @@ def _read_config_sheet(
                 )
             except (ValueError, TypeError) as e:
                 raise ExcelError(f"Config sheet produced invalid PowerR2Config: {e}") from e
+        elif power_mode == "glm":
+            if not glm_baseline:
+                raise ExcelError(
+                    "[SETTINGS] 'baseline' is required when power_mode is 'glm'."
+                )
+            try:
+                power_cfg = PowerGLMContrastConfig(
+                    L=L,
+                    delta=delta,
+                    baseline=glm_baseline,
+                    family=glm_family,
+                    link=glm_link,
+                    alpha=alpha,
+                    power=power_target,
+                    max_n=max_n,
+                )
+            except (ValueError, TypeError) as e:
+                raise ExcelError(f"Config sheet produced invalid PowerGLMContrastConfig: {e}") from e
         else:
             try:
                 power_cfg = PowerContrastConfig(
@@ -460,6 +482,9 @@ def _read_config_sheet(
             r_max_n   = int(float(_rcell(11))) if _rcell(11) else 2000
             r_max_iter = int(float(_rcell(12))) if _rcell(12) else 200
             r_tol_power = float(_rcell(13)) if _rcell(13) else 1e-3
+            # cols 14/15: GLM family and baseline (optional — blank for non-GLM responses)
+            r_glm_family = _rcell(14).strip() or None
+            r_glm_baseline_str = _rcell(15).strip()
 
             if r_mode == "contrast":
                 if not r_L_str or not r_d_str:
@@ -477,7 +502,7 @@ def _read_config_sheet(
                 r_L = np.array([L_vals], dtype=float)
                 r_d = np.array(d_vals, dtype=float)
                 try:
-                    pcfg: Union[PowerContrastConfig, PowerR2Config] = PowerContrastConfig(
+                    pcfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig] = PowerContrastConfig(
                         L=r_L, delta=r_d, alpha=r_alpha, power=r_power_v, sigma=r_sigma,
                         max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power,
                     )
@@ -501,9 +526,41 @@ def _read_config_sheet(
                     raise ExcelError(
                         f"[RESPONSES] row '{r_name}': invalid PowerR2Config: {e}"
                     ) from e
+            elif r_mode == "glm":
+                if not r_L_str or not r_d_str:
+                    raise ExcelError(
+                        f"[RESPONSES] row '{r_name}': glm mode requires "
+                        "L_row (col 7) and delta (col 8) values."
+                    )
+                if not r_glm_baseline_str:
+                    raise ExcelError(
+                        f"[RESPONSES] row '{r_name}': glm mode requires baseline (col 16)."
+                    )
+                try:
+                    L_vals = [float(v.strip()) for v in r_L_str.split(",") if v.strip()]
+                    d_vals = [float(v.strip()) for v in r_d_str.split(",") if v.strip()]
+                    r_glm_baseline = float(r_glm_baseline_str)
+                except ValueError as e:
+                    raise ExcelError(
+                        f"[RESPONSES] row '{r_name}': non-numeric value: {e}"
+                    ) from e
+                r_L = np.array([L_vals], dtype=float)
+                r_d = np.array(d_vals, dtype=float)
+                try:
+                    pcfg = PowerGLMContrastConfig(
+                        L=r_L, delta=r_d,
+                        baseline=r_glm_baseline,
+                        family=r_glm_family or "binomial",
+                        alpha=r_alpha, power=r_power_v,
+                        max_n=r_max_n,
+                    )
+                except (ValueError, TypeError) as e:
+                    raise ExcelError(
+                        f"[RESPONSES] row '{r_name}': invalid PowerGLMContrastConfig: {e}"
+                    ) from e
             else:
                 raise ExcelError(
-                    f"[RESPONSES] row '{r_name}': power_mode must be 'contrast' or 'r2'; "
+                    f"[RESPONSES] row '{r_name}': power_mode must be 'contrast', 'r2', or 'glm'; "
                     f"got {col_b!r}."
                 )
 
@@ -603,7 +660,7 @@ def create_excel_template(
     ----------
     path : str or Path, default ``"iopt_template.xlsx"``
         Destination file path.  Existing files are overwritten.
-    example : {"r2", "contrast", "multiresponse"}, default ``"r2"``
+    example : {"r2", "contrast", "multiresponse", "glm-binomial", "glm-poisson"}, default ``"r2"``
         Which pre-filled example to write.
 
         * ``"r2"``            — global R² power config with two continuous factors.
@@ -611,6 +668,8 @@ def create_excel_template(
           continuous factors.
         * ``"multiresponse"`` — two-response R² joint design with a ``[RESPONSES]``
           section demonstrating all per-response and ``sigma_joint`` fields.
+        * ``"glm-binomial"``  — GLM logistic power with Wald χ² test (binomial family).
+        * ``"glm-poisson"``   — GLM log-linear power with Wald χ² test (Poisson family).
 
     Returns
     -------
@@ -622,13 +681,14 @@ def create_excel_template(
     ImportError
         If ``openpyxl`` is not installed.
     ValueError
-        If *example* is not ``"r2"``, ``"contrast"``, or ``"multiresponse"``.
+        If *example* is not one of the supported values.
     """
     _require_openpyxl()
 
-    if example not in ("r2", "contrast", "multiresponse"):
+    if example not in ("r2", "contrast", "multiresponse", "glm-binomial", "glm-poisson"):
         raise ValueError(
-            f"Unknown example {example!r}. Supported values: 'r2', 'contrast', 'multiresponse'."
+            f"Unknown example {example!r}. Supported values: "
+            "'r2', 'contrast', 'multiresponse', 'glm-binomial', 'glm-poisson'."
         )
 
     wb = openpyxl.Workbook()
@@ -645,13 +705,21 @@ def create_excel_template(
     _key_cell(ws, r, "formula", "~ 1 + A + B"); r += 1
     # power_mode is omitted for multiresponse (overridden by [RESPONSES] section)
     if example != "multiresponse":
-        _key_cell(ws, r, "power_mode", example); r += 1
-        _add_dropdown(ws, '"r2,contrast"', row=r - 1)
+        # GLM examples use power_mode="glm"; map template name to mode value
+        _pm_value = "glm" if example.startswith("glm") else example
+        _key_cell(ws, r, "power_mode", _pm_value); r += 1
+        _add_dropdown(ws, '"r2,contrast,glm"', row=r - 1)
         _key_cell(ws, r, "alpha",        0.05);  r += 1
         _key_cell(ws, r, "power",        0.80);  r += 1
         if example == "r2":
             _key_cell(ws, r, "r2_target",  0.25); r += 1
             _key_cell(ws, r, "sigma",      "");   r += 1   # not used in R² mode
+        elif example.startswith("glm"):
+            _glm_family   = "binomial" if example == "glm-binomial" else "poisson"
+            _glm_baseline = 0.20       if example == "glm-binomial" else 2.0
+            _key_cell(ws, r, "family",    _glm_family);   r += 1
+            _key_cell(ws, r, "link",      "");             r += 1  # blank = canonical
+            _key_cell(ws, r, "baseline",  _glm_baseline); r += 1
         else:
             _key_cell(ws, r, "sigma",      1.0);  r += 1
             _key_cell(ws, r, "r2_target",  "");   r += 1   # not used in contrast mode
@@ -691,6 +759,16 @@ def create_excel_template(
         _key_cell(ws, r, "L_row",  "0, 1, 0"); r += 1
         _key_cell(ws, r, "delta",  "1.0");      r += 1
         r += 1  # blank separator
+    elif example == "glm-binomial":
+        _sentinel_style(ws, r, _SENTINEL_CONTRAST); r += 1
+        _key_cell(ws, r, "L_row",  "0, 1, 0"); r += 1
+        _key_cell(ws, r, "delta",  "0.5");      r += 1
+        r += 1
+    elif example == "glm-poisson":
+        _sentinel_style(ws, r, _SENTINEL_CONTRAST); r += 1
+        _key_cell(ws, r, "L_row",  "0, 1, 0"); r += 1
+        _key_cell(ws, r, "delta",  "0.3");      r += 1
+        r += 1
 
     # ------------------------------------------------------------------ #
     # [FACTORS]

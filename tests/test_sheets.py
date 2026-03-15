@@ -793,3 +793,217 @@ class TestCR34SheetsMultiResponseAdvancedFields:
         ws = _make_mock_worksheet(_TEMPLATE_ROWS["multiresponse"])
         _, _, _, _, multi_cfg = _parse_config_sheet(ws)
         assert multi_cfg.sigma_joint is None
+
+
+# ---------------------------------------------------------------------------
+# TestCR34ExtGLM — GL-9: GLM support in sheets connector
+# ---------------------------------------------------------------------------
+
+class TestCR34ExtGLM:
+    """Tests for GLM power mode in the Google Sheets connector (GL-9)."""
+
+    # ------------------------------------------------------------------
+    # [SETTINGS] parsing
+    # ------------------------------------------------------------------
+
+    def test_glm_binomial_settings_parses(self):
+        """power_mode='glm' with family/baseline is accepted without error."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1 + x2"],
+            ["power_mode", "glm"],
+            ["family", "binomial"],
+            ["link", ""],
+            ["baseline", "0.20"],
+            ["[CONTRAST]", ""],
+            ["L_row", "0,1,0"],
+            ["delta", "0.5"],
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+            ["x2", "continuous", "-1.0", "1.0"],
+        ]
+        ws = _make_mock_worksheet(rows)
+        _, _, power_cfg, _, multi_cfg = _parse_config_sheet(ws)
+        from iopt_power_design.config import PowerGLMContrastConfig
+        assert isinstance(power_cfg, PowerGLMContrastConfig)
+        assert multi_cfg is None
+
+    def test_glm_poisson_settings_parses(self):
+        """power_mode='glm' with Poisson family is accepted."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1"],
+            ["power_mode", "glm"],
+            ["family", "poisson"],
+            ["baseline", "2.0"],
+            ["[CONTRAST]", ""],
+            ["L_row", "0,1"],
+            ["delta", "0.3"],
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+        ]
+        ws = _make_mock_worksheet(rows)
+        _, _, power_cfg, _, _ = _parse_config_sheet(ws)
+        from iopt_power_design.config import PowerGLMContrastConfig
+        assert isinstance(power_cfg, PowerGLMContrastConfig)
+        assert power_cfg.family == "poisson"
+        assert power_cfg.baseline == pytest.approx(2.0)
+
+    def test_glm_family_builds_glm_config(self):
+        """Parsed GLM config has correct family, baseline, L, and delta."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1 + x2"],
+            ["power_mode", "glm"],
+            ["family", "binomial"],
+            ["baseline", "0.30"],
+            ["[CONTRAST]", ""],
+            ["L_row", "0,1,0"],
+            ["delta", "0.6"],
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+            ["x2", "continuous", "-1.0", "1.0"],
+        ]
+        ws = _make_mock_worksheet(rows)
+        _, _, power_cfg, _, _ = _parse_config_sheet(ws)
+        from iopt_power_design.config import PowerGLMContrastConfig
+        assert isinstance(power_cfg, PowerGLMContrastConfig)
+        assert power_cfg.family == "binomial"
+        assert power_cfg.baseline == pytest.approx(0.30)
+        np.testing.assert_array_equal(power_cfg.L, [[0, 1, 0]])
+        np.testing.assert_array_equal(power_cfg.delta, [0.6])
+
+    def test_glm_missing_baseline_raises(self):
+        """Omitting 'baseline' when power_mode='glm' raises SheetsError."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1"],
+            ["power_mode", "glm"],
+            ["family", "binomial"],
+            # baseline intentionally omitted
+            ["[CONTRAST]", ""],
+            ["L_row", "0,1"],
+            ["delta", "0.5"],
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+        ]
+        ws = _make_mock_worksheet(rows)
+        with pytest.raises(SheetsError, match="baseline"):
+            _parse_config_sheet(ws)
+
+    def test_glm_with_invalid_mode_raises(self):
+        """An unrecognised power_mode raises SheetsError with the value shown."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1"],
+            ["power_mode", "wald"],   # not a valid mode
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+        ]
+        ws = _make_mock_worksheet(rows)
+        with pytest.raises(SheetsError, match="wald"):
+            _parse_config_sheet(ws)
+
+    def test_glm_sigma_ignored_gracefully(self):
+        """sigma key is silently ignored when power_mode='glm'."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1"],
+            ["power_mode", "glm"],
+            ["family", "binomial"],
+            ["baseline", "0.25"],
+            ["sigma", "1.0"],   # present but should be ignored
+            ["[CONTRAST]", ""],
+            ["L_row", "0,1"],
+            ["delta", "0.5"],
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+        ]
+        ws = _make_mock_worksheet(rows)
+        # Should not raise; sigma is irrelevant for GLM
+        _, _, power_cfg, _, _ = _parse_config_sheet(ws)
+        from iopt_power_design.config import PowerGLMContrastConfig
+        assert isinstance(power_cfg, PowerGLMContrastConfig)
+
+    def test_glm_template_binomial_parseable(self):
+        """Built-in 'glm-binomial' template parses without error."""
+        ws = _make_mock_worksheet(_TEMPLATE_ROWS["glm-binomial"])
+        _, _, power_cfg, _, multi_cfg = _parse_config_sheet(ws)
+        from iopt_power_design.config import PowerGLMContrastConfig
+        assert isinstance(power_cfg, PowerGLMContrastConfig)
+        assert multi_cfg is None
+        assert power_cfg.family == "binomial"
+
+    def test_glm_template_poisson_parseable(self):
+        """Built-in 'glm-poisson' template parses without error."""
+        ws = _make_mock_worksheet(_TEMPLATE_ROWS["glm-poisson"])
+        _, _, power_cfg, _, _ = _parse_config_sheet(ws)
+        from iopt_power_design.config import PowerGLMContrastConfig
+        assert isinstance(power_cfg, PowerGLMContrastConfig)
+        assert power_cfg.family == "poisson"
+
+    def test_responses_glm_per_response_family(self):
+        """[RESPONSES] rows with power_mode='glm' build PowerGLMContrastConfig."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1 + x2"],
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+            ["x2", "continuous", "-1.0", "1.0"],
+            ["[RESPONSES]", ""],
+            # header
+            ["name", "power_mode", "sigma", "alpha", "power", "weight",
+             "L_row", "delta", "r2_target", "formula", "lambda_mode",
+             "max_n", "max_iter", "tol_power", "family", "baseline"],
+            # special rows
+            ["power_combination", "min"],
+            ["sigma_joint", ""],
+            # data rows — first GLM, second R²
+            ["Y1", "glm", "", "", "", "1.0",
+             "0,1,0", "0.5", "", "", "", "", "", "",
+             "binomial", "0.20"],
+            ["Y2", "r2", "", "", "", "1.0",
+             "", "", "0.15", "", "n", "", "", ""],
+        ]
+        ws = _make_mock_worksheet(rows)
+        _, _, power_cfg, _, multi_cfg = _parse_config_sheet(ws)
+        assert power_cfg is None
+        assert multi_cfg is not None
+        from iopt_power_design.config import PowerGLMContrastConfig, PowerR2Config
+        assert isinstance(multi_cfg.responses[0].power_cfg, PowerGLMContrastConfig)
+        assert isinstance(multi_cfg.responses[1].power_cfg, PowerR2Config)
+
+    def test_responses_glm_baseline_forwarded(self):
+        """Baseline value from col 16 is correctly forwarded to PowerGLMContrastConfig."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1"],
+            ["[FACTORS]", ""],
+            ["factor_name", "type", "value1", "value2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+            ["[RESPONSES]", ""],
+            ["name", "power_mode", "sigma", "alpha", "power", "weight",
+             "L_row", "delta", "r2_target", "formula", "lambda_mode",
+             "max_n", "max_iter", "tol_power", "family", "baseline"],
+            ["power_combination", "min"],
+            ["sigma_joint", ""],
+            ["Y1", "glm", "", "", "", "1.0",
+             "0,1", "0.4", "", "", "", "", "", "",
+             "poisson", "3.0"],
+            ["Y2", "r2", "", "", "", "1.0",
+             "", "", "0.20", "", "n", "", "", ""],
+        ]
+        ws = _make_mock_worksheet(rows)
+        _, _, _, _, multi_cfg = _parse_config_sheet(ws)
+        from iopt_power_design.config import PowerGLMContrastConfig
+        y1_cfg = multi_cfg.responses[0].power_cfg
+        assert isinstance(y1_cfg, PowerGLMContrastConfig)
+        assert y1_cfg.baseline == pytest.approx(3.0)
+        assert y1_cfg.family == "poisson"

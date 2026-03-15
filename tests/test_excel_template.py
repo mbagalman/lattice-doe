@@ -659,5 +659,187 @@ class TestCR34ExcelMultiResponseAdvancedFields:
 
     def test_unknown_multiresponse_example_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with pytest.raises(ValueError, match="multiresponse"):
+            with pytest.raises(ValueError, match="bayesian"):
                 create_excel_template(Path(tmp) / "x.xlsx", example="bayesian")
+
+
+# ---------------------------------------------------------------------------
+# TestExcelGLMSupport — GL-9: GLM support in Excel connector
+# ---------------------------------------------------------------------------
+
+class TestExcelGLMSupport:
+    """Tests for GLM power mode in the Excel connector (GL-9)."""
+
+    def test_excel_glm_settings_parse(self):
+        """power_mode='glm' with family/baseline parses correctly."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1 + x2"],
+            ["power_mode", "glm"],
+            ["family", "binomial"],
+            ["link", ""],
+            ["baseline", "0.20"],
+            ["[CONTRAST]", ""],
+            ["L_row", "0,1,0"],
+            ["delta", "0.5"],
+            ["[FACTORS]", ""],
+            ["Name", "Type", "Value 1", "Value 2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+            ["x2", "continuous", "-1.0", "1.0"],
+        ]
+        ws = _make_ws(rows)
+        formula, factors, power_cfg, design_opts, multi_cfg = _read_config_sheet(ws)
+        from iopt_power_design.config import PowerGLMContrastConfig
+        assert isinstance(power_cfg, PowerGLMContrastConfig)
+        assert formula == "x1 + x2"
+        assert multi_cfg is None
+
+    def test_excel_glm_family_builds_glm_config(self):
+        """GLM config attributes (family, baseline, L, delta) are forwarded correctly."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1"],
+            ["power_mode", "glm"],
+            ["family", "poisson"],
+            ["baseline", "2.5"],
+            ["[CONTRAST]", ""],
+            ["L_row", "0,1"],
+            ["delta", "0.4"],
+            ["[FACTORS]", ""],
+            ["Name", "Type", "Value 1", "Value 2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+        ]
+        ws = _make_ws(rows)
+        _, _, power_cfg, _, _ = _read_config_sheet(ws)
+        from iopt_power_design.config import PowerGLMContrastConfig
+        assert isinstance(power_cfg, PowerGLMContrastConfig)
+        assert power_cfg.family == "poisson"
+        assert power_cfg.baseline == pytest.approx(2.5)
+        np.testing.assert_array_equal(power_cfg.delta, [0.4])
+
+    def test_excel_glm_missing_baseline_raises(self):
+        """Omitting baseline when power_mode='glm' raises ExcelError."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1"],
+            ["power_mode", "glm"],
+            ["family", "binomial"],
+            # baseline omitted
+            ["[CONTRAST]", ""],
+            ["L_row", "0,1"],
+            ["delta", "0.5"],
+            ["[FACTORS]", ""],
+            ["Name", "Type", "Value 1", "Value 2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+        ]
+        ws = _make_ws(rows)
+        with pytest.raises(ExcelError, match="baseline"):
+            _read_config_sheet(ws)
+
+    def test_excel_glm_template_binomial_creates(self):
+        """create_excel_template('glm-binomial') creates a valid .xlsx file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = create_excel_template(Path(tmp) / "glm_bin.xlsx", example="glm-binomial")
+            assert p.exists()
+            assert p.suffix == ".xlsx"
+
+    def test_excel_glm_template_round_trips(self):
+        """'glm-binomial' template can be written and parsed back."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = create_excel_template(Path(tmp) / "glm_bin.xlsx", example="glm-binomial")
+            import openpyxl
+            wb = openpyxl.load_workbook(p)
+            _, _, power_cfg, _, multi_cfg = _read_config_sheet(wb["Config"])
+            from iopt_power_design.config import PowerGLMContrastConfig
+            assert isinstance(power_cfg, PowerGLMContrastConfig)
+            assert power_cfg.family == "binomial"
+            assert multi_cfg is None
+
+    def test_excel_responses_glm_family_per_row(self):
+        """[RESPONSES] row with power_mode='glm' builds PowerGLMContrastConfig."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1 + x2"],
+            ["[FACTORS]", ""],
+            ["Name", "Type", "Value 1", "Value 2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+            ["x2", "continuous", "-1.0", "1.0"],
+            ["[RESPONSES]", ""],
+            ["name", "power_mode", "sigma", "alpha", "power", "weight",
+             "L_row", "delta", "r2_target", "formula", "lambda_mode",
+             "max_n", "max_iter", "tol_power", "family", "baseline"],
+            ["power_combination", "min"],
+            ["sigma_joint", ""],
+            ["Y1", "glm", "", "", "", "1.0",
+             "0,1,0", "0.5", "", "", "", "", "", "",
+             "binomial", "0.20"],
+            ["Y2", "r2", "", "", "", "1.0",
+             "", "", "0.15", "", "n", "", "", ""],
+        ]
+        ws = _make_ws(rows)
+        _, _, power_cfg, _, multi_cfg = _read_config_sheet(ws)
+        assert power_cfg is None
+        assert multi_cfg is not None
+        from iopt_power_design.config import PowerGLMContrastConfig, PowerR2Config
+        assert isinstance(multi_cfg.responses[0].power_cfg, PowerGLMContrastConfig)
+        assert isinstance(multi_cfg.responses[1].power_cfg, PowerR2Config)
+
+    def test_excel_responses_glm_baseline_forwarded(self):
+        """Baseline from col 16 is forwarded to PowerGLMContrastConfig."""
+        rows = [
+            ["[SETTINGS]", ""],
+            ["formula", "x1"],
+            ["[FACTORS]", ""],
+            ["Name", "Type", "Value 1", "Value 2"],
+            ["x1", "continuous", "-1.0", "1.0"],
+            ["[RESPONSES]", ""],
+            ["name", "power_mode", "sigma", "alpha", "power", "weight",
+             "L_row", "delta", "r2_target", "formula", "lambda_mode",
+             "max_n", "max_iter", "tol_power", "family", "baseline"],
+            ["power_combination", "min"],
+            ["sigma_joint", ""],
+            ["Y1", "glm", "", "", "", "1.0",
+             "0,1", "0.4", "", "", "", "", "", "",
+             "poisson", "3.5"],
+            ["Y2", "r2", "", "", "", "1.0",
+             "", "", "0.20", "", "n", "", "", ""],
+        ]
+        ws = _make_ws(rows)
+        _, _, _, _, multi_cfg = _read_config_sheet(ws)
+        from iopt_power_design.config import PowerGLMContrastConfig
+        y1 = multi_cfg.responses[0].power_cfg
+        assert isinstance(y1, PowerGLMContrastConfig)
+        assert y1.baseline == pytest.approx(3.5)
+
+    def test_linear_excel_unchanged(self):
+        """Existing r2 template still round-trips correctly (regression guard)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = create_excel_template(Path(tmp) / "r2.xlsx", example="r2")
+            import openpyxl
+            wb = openpyxl.load_workbook(p)
+            _, _, power_cfg, _, _ = _read_config_sheet(wb["Config"])
+            assert isinstance(power_cfg, PowerR2Config)
+
+    def test_glm_template_poisson_creates_and_parses(self):
+        """'glm-poisson' template can be created and parsed back."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = create_excel_template(Path(tmp) / "glm_poi.xlsx", example="glm-poisson")
+            import openpyxl
+            wb = openpyxl.load_workbook(p)
+            _, _, power_cfg, _, _ = _read_config_sheet(wb["Config"])
+            from iopt_power_design.config import PowerGLMContrastConfig
+            assert isinstance(power_cfg, PowerGLMContrastConfig)
+            assert power_cfg.family == "poisson"
+
+    def test_glm_template_has_baseline_row(self):
+        """'glm-binomial' template Config sheet contains a 'baseline' key."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = create_excel_template(Path(tmp) / "glm_b.xlsx", example="glm-binomial")
+            import openpyxl
+            wb = openpyxl.load_workbook(p)
+            ws = wb["Config"]
+            col_a_values = [
+                str(ws.cell(row=r, column=1).value or "").strip()
+                for r in range(1, ws.max_row + 1)
+            ]
+            assert "baseline" in col_a_values

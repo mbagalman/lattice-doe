@@ -54,8 +54,8 @@ import numpy as np
 import pandas as pd
 
 from .config import (
-    PowerContrastConfig, PowerR2Config, DesignOptions, SplitPlotOptions,
-    MultiResponseOptions, ResponseSpec,
+    PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
+    DesignOptions, SplitPlotOptions, MultiResponseOptions, ResponseSpec,
 )
 
 # ---------------------------------------------------------------------------
@@ -239,9 +239,9 @@ def _parse_config_sheet(
     formula    = settings["formula"]
     power_mode = settings.get("power_mode", "").strip().lower()
 
-    if power_mode and power_mode not in ("r2", "contrast"):
+    if power_mode and power_mode not in ("r2", "contrast", "glm"):
         raise SheetsError(
-            f"Config sheet [SETTINGS] power_mode must be 'r2' or 'contrast'; "
+            f"Config sheet [SETTINGS] power_mode must be 'r2', 'contrast', or 'glm'; "
             f"got {settings['power_mode']!r}."
         )
 
@@ -302,6 +302,10 @@ def _parse_config_sheet(
     sp_eta             = _float("eta",            1.0)
     subplots_per_wp_raw = _int("subplots_per_wp", 0)   # 0 → auto
     df_method_sp       = settings.get("df_method", "auto").strip() or "auto"
+    # GLM options (GL-9)
+    glm_family   = settings.get("family", "binomial").strip() or "binomial"
+    glm_link     = settings.get("link", "").strip() or None
+    glm_baseline = _float("baseline", 0.0)
 
     # ------------------------------------------------------------------
     # 3. Build DesignOptions
@@ -342,7 +346,7 @@ def _parse_config_sheet(
     # ------------------------------------------------------------------
     # 4. Build power config  (skipped when [RESPONSES] is present)
     # ------------------------------------------------------------------
-    power_cfg: Optional[Union[PowerContrastConfig, PowerR2Config]] = None
+    power_cfg: Optional[Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig]] = None
 
     if idx_responses is None:
         if power_mode == "r2":
@@ -357,10 +361,10 @@ def _parse_config_sheet(
             except (ValueError, TypeError) as e:
                 raise SheetsError(f"Config sheet produced invalid PowerR2Config: {e}") from e
 
-        else:  # contrast
+        else:  # contrast or glm — both require [CONTRAST] for L and delta
             if idx_contrast is None:
                 raise SheetsError(
-                    f"power_mode is 'contrast' but the '{_SENTINEL_CONTRAST}' sentinel "
+                    f"power_mode is {power_mode!r} but the '{_SENTINEL_CONTRAST}' sentinel "
                     "is missing from the Config sheet."
                 )
 
@@ -415,19 +419,40 @@ def _parse_config_sheet(
             L = np.array(l_rows, dtype=float)
             delta = np.array(delta_values, dtype=float)
 
-            try:
-                power_cfg = PowerContrastConfig(
-                    L=L,
-                    delta=delta,
-                    alpha=alpha,
-                    power=power_target,
-                    sigma=sigma,
-                    max_n=max_n,
-                )
-            except (ValueError, TypeError) as e:
-                raise SheetsError(
-                    f"Config sheet produced invalid PowerContrastConfig: {e}"
-                ) from e
+            if power_mode == "glm":
+                if not glm_baseline:
+                    raise SheetsError(
+                        "Config sheet [SETTINGS] 'baseline' is required when power_mode is 'glm'."
+                    )
+                try:
+                    power_cfg = PowerGLMContrastConfig(
+                        L=L,
+                        delta=delta,
+                        baseline=glm_baseline,
+                        family=glm_family,
+                        link=glm_link,
+                        alpha=alpha,
+                        power=power_target,
+                        max_n=max_n,
+                    )
+                except (ValueError, TypeError) as e:
+                    raise SheetsError(
+                        f"Config sheet produced invalid PowerGLMContrastConfig: {e}"
+                    ) from e
+            else:
+                try:
+                    power_cfg = PowerContrastConfig(
+                        L=L,
+                        delta=delta,
+                        alpha=alpha,
+                        power=power_target,
+                        sigma=sigma,
+                        max_n=max_n,
+                    )
+                except (ValueError, TypeError) as e:
+                    raise SheetsError(
+                        f"Config sheet produced invalid PowerContrastConfig: {e}"
+                    ) from e
 
     # ------------------------------------------------------------------
     # 5. Parse [FACTORS] section
@@ -547,6 +572,9 @@ def _parse_config_sheet(
             r_max_n   = int(_rcell(11)) if _rcell(11) else 2000
             r_max_iter = int(_rcell(12)) if _rcell(12) else 200
             r_tol_power = float(_rcell(13)) if _rcell(13) else 1e-3
+            # cols 14/15: GLM family and baseline (optional — blank for non-GLM responses)
+            r_glm_family   = _rcell(14).strip() or None
+            r_glm_baseline_str = _rcell(15).strip()
 
             if r_mode == "contrast":
                 if not r_L_str or not r_d_str:
@@ -564,7 +592,7 @@ def _parse_config_sheet(
                 r_L = np.array([L_vals], dtype=float)
                 r_d = np.array(d_vals, dtype=float)
                 try:
-                    pcfg: Union[PowerContrastConfig, PowerR2Config] = PowerContrastConfig(
+                    pcfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig] = PowerContrastConfig(
                         L=r_L, delta=r_d, alpha=r_alpha, power=r_power_v, sigma=r_sigma,
                         max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power,
                     )
@@ -588,9 +616,41 @@ def _parse_config_sheet(
                     raise SheetsError(
                         f"[RESPONSES] row '{r_name}': invalid PowerR2Config: {e}"
                     ) from e
+            elif r_mode == "glm":
+                if not r_L_str or not r_d_str:
+                    raise SheetsError(
+                        f"[RESPONSES] row '{r_name}': glm mode requires "
+                        "L_row (col 7) and delta (col 8) values."
+                    )
+                if not r_glm_baseline_str:
+                    raise SheetsError(
+                        f"[RESPONSES] row '{r_name}': glm mode requires baseline (col 16)."
+                    )
+                try:
+                    L_vals = [float(v.strip()) for v in r_L_str.split(",") if v.strip()]
+                    d_vals = [float(v.strip()) for v in r_d_str.split(",") if v.strip()]
+                    r_glm_baseline = float(r_glm_baseline_str)
+                except ValueError as e:
+                    raise SheetsError(
+                        f"[RESPONSES] row '{r_name}': non-numeric value: {e}"
+                    ) from e
+                r_L = np.array([L_vals], dtype=float)
+                r_d = np.array(d_vals, dtype=float)
+                try:
+                    pcfg = PowerGLMContrastConfig(
+                        L=r_L, delta=r_d,
+                        baseline=r_glm_baseline,
+                        family=r_glm_family or "binomial",
+                        alpha=r_alpha, power=r_power_v,
+                        max_n=r_max_n,
+                    )
+                except (ValueError, TypeError) as e:
+                    raise SheetsError(
+                        f"[RESPONSES] row '{r_name}': invalid PowerGLMContrastConfig: {e}"
+                    ) from e
             else:
                 raise SheetsError(
-                    f"[RESPONSES] row '{r_name}': power_mode must be 'contrast' or 'r2'; "
+                    f"[RESPONSES] row '{r_name}': power_mode must be 'contrast', 'r2', or 'glm'; "
                     f"got {col_b!r}."
                 )
 
@@ -835,10 +895,83 @@ _TEMPLATE_ROWS: Dict[str, List[List[str]]] = {
         ["x1",          "continuous", "-1.0",   "1.0"],
         ["x2",          "continuous", "-1.0",   "1.0"],
     ],
+    # GLM binomial example: single contrast, logistic regression power.
+    # family=binomial, baseline=event probability at H₀.
+    "glm-binomial": [
+        [_SENTINEL_SETTINGS, ""],
+        ["formula",      "x1 + x2"],
+        ["power_mode",   "glm"],
+        ["alpha",        "0.05"],
+        ["power",        "0.80"],
+        ["family",       "binomial"],
+        ["link",         ""],          # blank = canonical logit link
+        ["baseline",     "0.20"],      # P(event) under H₀
+        ["max_n",        "500"],
+        ["criterion",    "I"],
+        ["starts",       "5"],
+        ["max_iter",     "1000"],
+        ["random_state", "123"],
+        ["n_blocks",                "0"],
+        ["block_factor_name",       "Block"],
+        ["preallocate_categorical", "false"],
+        ["alloc_min_per_cell",      "1"],
+        ["alloc_max_per_cell",      "0"],
+        ["htc_factors",             ""],
+        ["n_whole_plots",           "0"],
+        ["eta",                     "1.0"],
+        ["subplots_per_wp",         "0"],
+        ["df_method",               "auto"],
+        ["", ""],
+        [_SENTINEL_CONTRAST, ""],
+        # Model: Intercept + x1 + x2 → contrast x1 only: L = [0, 1, 0]
+        ["L_row",  "0,1,0"],
+        ["delta",  "0.5"],
+        ["", ""],
+        [_SENTINEL_FACTORS, ""],
+        ["factor_name", "type",       "value1", "value2"],
+        ["x1",          "continuous", "-1.0",   "1.0"],
+        ["x2",          "continuous", "-1.0",   "1.0"],
+    ],
+    # GLM Poisson example: single contrast, log-linear power.
+    # family=poisson, baseline=rate at H₀.
+    "glm-poisson": [
+        [_SENTINEL_SETTINGS, ""],
+        ["formula",      "x1 + x2"],
+        ["power_mode",   "glm"],
+        ["alpha",        "0.05"],
+        ["power",        "0.80"],
+        ["family",       "poisson"],
+        ["link",         ""],          # blank = canonical log link
+        ["baseline",     "2.0"],       # expected count (rate) under H₀
+        ["max_n",        "500"],
+        ["criterion",    "I"],
+        ["starts",       "5"],
+        ["max_iter",     "1000"],
+        ["random_state", "123"],
+        ["n_blocks",                "0"],
+        ["block_factor_name",       "Block"],
+        ["preallocate_categorical", "false"],
+        ["alloc_min_per_cell",      "1"],
+        ["alloc_max_per_cell",      "0"],
+        ["htc_factors",             ""],
+        ["n_whole_plots",           "0"],
+        ["eta",                     "1.0"],
+        ["subplots_per_wp",         "0"],
+        ["df_method",               "auto"],
+        ["", ""],
+        [_SENTINEL_CONTRAST, ""],
+        ["L_row",  "0,1,0"],
+        ["delta",  "0.3"],
+        ["", ""],
+        [_SENTINEL_FACTORS, ""],
+        ["factor_name", "type",       "value1", "value2"],
+        ["x1",          "continuous", "-1.0",   "1.0"],
+        ["x2",          "continuous", "-1.0",   "1.0"],
+    ],
     # Multi-response example: two R² responses, joint optimisation.
     # [RESPONSES] replaces [power_mode/r2_target/sigma] from [SETTINGS].
     # Column order: name|power_mode|sigma|alpha|power|weight|L_row|delta|r2_target|
-    #               formula|lambda_mode|max_n|max_iter|tol_power
+    #               formula|lambda_mode|max_n|max_iter|tol_power|family|baseline
     # Special rows before/after data: power_combination, sigma_joint
     "multiresponse": [
         [_SENTINEL_SETTINGS, ""],
@@ -906,7 +1039,7 @@ def create_sheet_template(
     credentials : str or None
         Path to a service account JSON credentials file, or ``None`` to use
         the OAuth2 browser flow (opens a browser tab on first use).
-    example : {"r2", "contrast", "multiresponse"}, default "r2"
+    example : {"r2", "contrast", "multiresponse", "glm-binomial", "glm-poisson"}, default "r2"
         Which working example to pre-populate in the Config sheet.
 
         * ``"r2"``            — global R² power config with two continuous factors.
@@ -914,6 +1047,8 @@ def create_sheet_template(
           continuous factors.
         * ``"multiresponse"`` — two-response R² joint design with a ``[RESPONSES]``
           section demonstrating all per-response and ``sigma_joint`` fields.
+        * ``"glm-binomial"``  — GLM logistic power with Wald χ² test (binomial family).
+        * ``"glm-poisson"``   — GLM log-linear power with Wald χ² test (Poisson family).
     share_anyone : bool, default False
         If ``True``, share the new spreadsheet with anyone who has the link
         (writer access).  Disabled by default to avoid accidental data exposure.
