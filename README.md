@@ -326,6 +326,8 @@ Tests H₀: Lβ = 0 using a Wald chi-square statistic for binomial (logistic) or
 
 The design search uses a **null-based locally optimal** information matrix: `M = w · X'X` where `w = p₀(1 − p₀)` (binomial) or `w = μ₀` (Poisson). Because `w` is a positive scalar it cancels from I/D/A criteria, so the Fedorov exchange is structurally identical to OLS — only the power calculation changes.
 
+> **Approximation scope.** The Fisher weight `w` is a single scalar evaluated at the null baseline and applied uniformly to every design point. This is accurate when the true operating point is close to the baseline. For designs with wide covariate ranges and substantial slope effects, the true per-point weights `wᵢ = p(xᵢ)(1−p(xᵢ))` will vary across the design, and the constant-weight approximation may over- or understate power. Validate results via simulation when slopes are large relative to the baseline.
+
 ```python
 from iopt_power_design import PowerGLMContrastConfig
 from iopt_power_design.contrasts import contrast_from_scenarios
@@ -846,6 +848,7 @@ print(sens["data"])        # columns: eta, power, noncentrality_lambda
 - `eta=0` degenerates to OLS: the GLS power equals the OLS power for that design.
 - The `"conservative"` df_method never produces anti-conservative power for WP-factor contrasts.
 - Set `criterion_ignore_vr=True` inside `SplitPlotOptions` to use the standard OLS criterion during design search while keeping GLS power calculations (useful for benchmarking only).
+- **Denominator df approximation.** df assignment uses a WP-vs-SP stratum classification heuristic, not a full Satterthwaite or Kenward-Roger small-sample correction. For balanced designs with a single variance component this gives exact df. For unbalanced designs or near-singular settings the heuristic can be conservative or anti-conservative; use `df_method="conservative"` when in doubt.
 
 ---
 

@@ -270,6 +270,17 @@ def glm_contrast_power(
     where ``q = rank(L)``.  This is equivalent to OLS contrast power with
     effective residual std ``σ_eff = 1/√w``.
 
+    .. note:: **Approximation scope.**
+        ``w`` is a single scalar derived from ``cfg.baseline`` and applied
+        uniformly across all rows of ``X``.  In the general GLM design
+        setting the weight varies per design point (it depends on the
+        linear predictor at each point under the true parameter vector).
+        This constant-weight approximation is conservative when the true
+        mean is close to the baseline and becomes less accurate as the
+        slope magnitudes and factor ranges grow.  Use results from this
+        function as a planning approximation and validate via simulation
+        for studies with large effects or wide covariate ranges.
+
     Parameters
     ----------
     cfg : PowerGLMContrastConfig
@@ -453,6 +464,17 @@ def contrast_power_sp(
     as the OLS version for multi-row L).
 
     At eta = 0 the result is identical to ``contrast_power``.
+
+    .. note:: **Denominator df approximation.**
+        df assignment uses a stratum-classification heuristic rather than
+        a full small-sample mixed-model method (Satterthwaite or
+        Kenward-Roger).  For balanced designs with a single variance
+        component (η) this gives exact denominator df.  For unbalanced
+        designs, near-singular settings, or more complex variance
+        structures the heuristic can produce conservative or
+        anti-conservative power estimates.  Use ``df_method="conservative"``
+        when in doubt; Satterthwaite/KR support is a planned future
+        enhancement.
 
     Parameters
     ----------
@@ -677,6 +699,20 @@ def combine_powers(
         ``"weighted_mean"``.  Weights are normalised internally.
     rule : {"min", "product", "weighted_mean"}
         Combination rule.
+
+        * ``"min"`` — combined power = min(p_i).  Conservative; the combined
+          power equals the worst individual response.  No statistical
+          assumptions about dependence between responses.
+        * ``"product"`` — combined power = ∏ p_i.  Interprets combined power
+          as the probability that **all** responses simultaneously achieve
+          significance.  **This is the exact joint probability only when
+          responses are independent.**  When responses are correlated
+          (shared experimental units, common error) the true joint
+          probability differs; use ``sigma_joint`` (Hotelling T²) for the
+          correlated OLS contrast case instead.
+        * ``"weighted_mean"`` — combined power = Σ(w_i p_i) / Σw_i.  A
+          soft aggregation that allows high-power responses to partially
+          compensate for low-power ones.
 
     Returns
     -------

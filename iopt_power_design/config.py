@@ -728,6 +728,19 @@ class PowerGLMContrastConfig:
     calculation differs — the test statistic follows a noncentral chi-square
     distribution (df = number of contrast rows) rather than a noncentral F.
 
+    .. note:: **Approximation scope.**
+        The scalar weight ``w`` is evaluated once at the null baseline and
+        applied uniformly to every design point.  This is exact when all
+        predictors are at their reference levels (i.e., the true operating
+        point equals the null), and is a reasonable approximation for
+        moderate effects.  For realistic designs with substantial covariate
+        ranges and nonzero slopes the true Fisher information weight varies
+        per design point (``wᵢ = p(xᵢ)(1−p(xᵢ))`` for binomial), so the
+        constant-weight approximation may overstate or understate power.
+        Full point-wise GLM-optimal design (where each candidate point
+        carries its own Fisher weight derived from a nominal parameter
+        vector) is a planned future enhancement.
+
     Parameters
     ----------
     L : ndarray, shape (q, p)
@@ -951,7 +964,11 @@ class MultiResponseOptions:
 
         * "min"           — design adequate when *all* responses reach target
                             (conservative; recommended default).
-        * "product"       — overall probability all responses pass (independence).
+        * "product"       — combined = ∏ p_i, interpreted as the joint
+                            probability all responses pass simultaneously.
+                            **Statistically valid only when responses are
+                            independent.**  For correlated responses, use
+                            ``sigma_joint`` (Hotelling T²) instead.
         * "weighted_mean" — weighted average; tolerates weaker minor responses.
     sigma_joint : ndarray (k x k) or None, default None
         Inter-response error covariance matrix for Hotelling T² joint power.
