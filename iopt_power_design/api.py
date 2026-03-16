@@ -1025,14 +1025,28 @@ def i_optimal_multiresponse_design(
     X_cand, p_names_global = build_model_matrix(formula, cand)
     p = X_cand.shape[1]
 
-    # 3. Bisection parameters — drive by the hardest individual target.
-    target = max(r.power_cfg.power for r in multi_cfg.responses)
+    rule = multi_cfg.power_combination
+    weights = [r.weight for r in multi_cfg.responses]
+
+    # 3. Bisection parameters — target is evaluated on the combined-power scale.
+    #
+    # For "min":  combined = min(p_i).  We need min(p_i) >= max(target_i) to
+    #   guarantee every individual response meets its own target, so:
+    #   target = max(target_i).
+    #
+    # For "product" / "weighted_mean":  bisect directly on the combined scale, so
+    #   target = combine(target_i), e.g. prod(0.8, 0.8) = 0.64 for "product".
+    #   Using max(target_i) here would overstate the required n and cause misleading
+    #   convergence warnings (SR-1 / statistics review finding #1).
+    if rule == "min":
+        target = max(r.power_cfg.power for r in multi_cfg.responses)
+    else:
+        target = combine_powers(
+            [r.power_cfg.power for r in multi_cfg.responses], weights, rule
+        )
     tol = min(r.power_cfg.tol_power for r in multi_cfg.responses)
     max_iter = min(r.power_cfg.max_iter for r in multi_cfg.responses)
     max_n = min(r.power_cfg.max_n for r in multi_cfg.responses)
-
-    rule = multi_cfg.power_combination
-    weights = [r.weight for r in multi_cfg.responses]
     sp_opts = design_opts.split_plot if is_sp else None
 
     if _compound and design_opts.criterion == "A":

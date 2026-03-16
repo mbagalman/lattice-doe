@@ -1436,6 +1436,58 @@ def _cp_opts(**kw):
     return DesignOptions(**defaults)
 
 
+# ---------------------------------------------------------------------------
+# SR-1: product / weighted_mean bisection target correctness
+# ---------------------------------------------------------------------------
+
+class TestSR1CombinationRuleTarget:
+    """SR-1 (statistics review finding #1): for 'product' and 'weighted_mean'
+    the bisection target must be on the *combined* scale, not the hardest
+    individual marginal target."""
+
+    def test_product_achieved_power_meets_combined_target(self):
+        """product rule: achieved_power = prod(p_i) should be >= prod(targets)."""
+        r1 = _contrast_rs("Y1", power=0.80)
+        r2 = _contrast_rs("Y2", power=0.80)
+        result = _run_mr([r1, r2], rule="product")
+        # Combined target is 0.8 * 0.8 = 0.64.
+        assert result["achieved_power"] >= 0.64 - 1e-3
+
+    def test_product_n_smaller_than_min_rule(self):
+        """product rule should require strictly fewer runs than min rule for the
+        same per-response targets, because the combined target is 0.64, not 0.80."""
+        r1 = _contrast_rs("Y1", power=0.80)
+        r2 = _contrast_rs("Y2", power=0.80)
+        n_product = _run_mr([r1, r2], rule="product")["n"]
+        n_min     = _run_mr([r1, r2], rule="min")["n"]
+        assert n_product <= n_min
+
+    def test_weighted_mean_achieved_power_meets_combined_target(self):
+        """weighted_mean rule: achieved_power should be >= weighted mean of targets."""
+        r1 = _contrast_rs("Y1", power=0.80)
+        r2 = _contrast_rs("Y2", power=0.80)
+        result = _run_mr([r1, r2], rule="weighted_mean")
+        # Combined target = (0.8 + 0.8) / 2 = 0.80; achieved_power is on that scale.
+        assert result["achieved_power"] >= 0.80 - 1e-3
+
+    def test_min_rule_bisection_unchanged(self):
+        """min rule regression: behaviour and n should be unchanged."""
+        r1 = _contrast_rs("Y1", power=0.80)
+        r2 = _contrast_rs("Y2", power=0.80)
+        result = _run_mr([r1, r2], rule="min")
+        # Both per-response powers should meet their individual targets.
+        for rd in result["responses"]:
+            assert rd["power"] >= 0.80 - 1e-3
+
+    def test_product_asymmetric_targets_combined_scale(self):
+        """product rule with different per-response targets: combined target = prod."""
+        r1 = _contrast_rs("Y1", power=0.90)
+        r2 = _contrast_rs("Y2", power=0.70)
+        result = _run_mr([r1, r2], rule="product")
+        # Combined target = 0.90 * 0.70 = 0.63.
+        assert result["achieved_power"] >= 0.63 - 1e-3
+
+
 def _cp_run(r1, r2, rule="min", **opts_kw):
     multi = MultiResponseOptions(responses=[r1, r2], power_combination=rule)
     opts = _cp_opts(**opts_kw)
