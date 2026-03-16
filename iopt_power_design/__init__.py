@@ -3,7 +3,7 @@
 """
 iopt_power_design
 =================
-I-optimal experimental designs with power assurance for linear models.
+Power-assured optimal experimental designs for linear and GLM models.
 """
 
 from __future__ import annotations
