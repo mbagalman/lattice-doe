@@ -154,6 +154,17 @@ That said, the package is not yet at a fully polished public-library standard ac
 3. Rewrite `ADDED` / `CHANGED` / ticket-style comments into durable explanations.
 4. Expand public docs for Excel, widgets, and multi-response / GLM recipes.
 
+## 6. Action tracking
+
+| # | Action | Priority | Status | Notes |
+|---|--------|----------|--------|-------|
+| DR-1 | Fix stale `docs/quickstart.md` — remove `"mean"` from `power_combination` rules | Now | **Done** | Removed `"mean"`; valid values are `"min"`, `"product"`, `"weighted_mean"` |
+| DR-2 | Rewrite/remove 29 `# ADDED` / `# CHANGED` / `CR-xx` comments in `api.py`, `cli.py`, `config.py`, `blocked.py` | Soon | Pending | |
+| DR-3 | Add `black --check` and trailing-whitespace check to CI | CI | Pending | |
+| DR-4 | Add recipes for GLM powered design, multi-response design, spreadsheet-based workflows | Sprint | Pending | |
+| DR-5 | Add top-level docs for Excel and widgets interfaces | Sprint | Pending | |
+| DR-6 | Add "Which interface should I use?" orientation section to README | Later | Pending | |
+
 ## Final conclusion
 
 The project is already credible as an open-source MIT-licensed package, especially for technically comfortable users. The remaining work is not foundational; it is a polish pass.

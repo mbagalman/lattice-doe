@@ -84,7 +84,7 @@ Outputs:
 2. Add runs to an existing design: use `augment_design(...)`.
 3. Sensitivity and MDE checks: use `power_sensitivity(...)` and `min_detectable_effect(...)`.
 4. **GLM responses** (binomial/Poisson): swap `PowerContrastConfig` for `PowerGLMContrastConfig` and set `family`/`baseline`. See `iopt-design --template glm-binomial` for a full YAML starter.
-5. **Multi-response designs**: use `i_optimal_multiresponse_design(...)` with `MultiResponseOptions` to power several responses simultaneously under a combined rule (`"min"`, `"mean"`, `"product"`, or `"weighted_mean"`).
+5. **Multi-response designs**: use `i_optimal_multiresponse_design(...)` with `MultiResponseOptions` to power several responses simultaneously under a combined rule (`"min"`, `"product"`, or `"weighted_mean"`).
 
 ## 5b) Export a shareable HTML report
 
