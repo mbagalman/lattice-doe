@@ -57,6 +57,7 @@ from .config import (
     PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
     DesignOptions, SplitPlotOptions, MultiResponseOptions, ResponseSpec,
 )
+from ._request_builder import build_power_cfg, build_design_opts
 
 # ---------------------------------------------------------------------------
 # Soft dependency guard — same pattern as plot_backends.py (Plotly)
@@ -310,38 +311,28 @@ def _parse_config_sheet(
     # ------------------------------------------------------------------
     # 3. Build DesignOptions
     # ------------------------------------------------------------------
-    do_kwargs: Dict[str, Any] = dict(
+    _do_d: Dict[str, Any] = dict(
         criterion=criterion,
         starts=starts,
         max_iter=max_iter_do,
         random_state=random_state,
+        n_blocks=n_blocks_raw,
+        block_factor_name=block_factor_name_raw,
+        preallocate_categorical=preallocate_categorical,
+        alloc_min_per_cell=alloc_min_per_cell,
+        alloc_max_per_cell=alloc_max_per_cell_raw,
     )
-    if n_blocks_raw >= 2:
-        do_kwargs["n_blocks"] = n_blocks_raw
-        do_kwargs["block_factor_name"] = block_factor_name_raw
-    if preallocate_categorical:
-        do_kwargs["preallocate_categorical"] = True
-        do_kwargs["alloc_min_per_cell"] = alloc_min_per_cell
-        if alloc_max_per_cell_raw > 0:
-            do_kwargs["alloc_max_per_cell"] = alloc_max_per_cell_raw
-    # Split-plot (Enhancement 22)
     if htc_factors_raw and n_whole_plots_raw >= 2:
         htc_list = [f.strip() for f in htc_factors_raw.split(",") if f.strip()]
         if htc_list:
-            try:
-                do_kwargs["split_plot"] = SplitPlotOptions(
-                    htc_factors=htc_list,
-                    n_whole_plots=n_whole_plots_raw,
-                    eta=sp_eta,
-                    subplots_per_wp=subplots_per_wp_raw if subplots_per_wp_raw > 0 else None,
-                    df_method=df_method_sp,
-                )
-            except (ValueError, TypeError) as e:
-                raise SheetsError(f"Config sheet produced invalid SplitPlotOptions: {e}") from e
-    try:
-        design_opts = DesignOptions(**do_kwargs)
-    except (ValueError, TypeError) as e:
-        raise SheetsError(f"Config sheet produced invalid DesignOptions: {e}") from e
+            _do_d["split_plot"] = dict(
+                htc_factors=htc_list,
+                n_whole_plots=n_whole_plots_raw,
+                eta=sp_eta,
+                subplots_per_wp=subplots_per_wp_raw,
+                df_method=df_method_sp,
+            )
+    design_opts = build_design_opts(_do_d, error_cls=SheetsError, context="Config sheet")
 
     # ------------------------------------------------------------------
     # 4. Build power config  (skipped when [RESPONSES] is present)
@@ -350,16 +341,11 @@ def _parse_config_sheet(
 
     if idx_responses is None:
         if power_mode == "r2":
-            try:
-                power_cfg = PowerR2Config(
-                    r2_target=r2_target,
-                    alpha=alpha,
-                    power=power_target,
-                    sigma=sigma,
-                    max_n=max_n,
-                )
-            except (ValueError, TypeError) as e:
-                raise SheetsError(f"Config sheet produced invalid PowerR2Config: {e}") from e
+            power_cfg = build_power_cfg(
+                dict(power_mode="r2", r2_target=r2_target, alpha=alpha,
+                     power=power_target, sigma=sigma, max_n=max_n),
+                error_cls=SheetsError, context="Config sheet",
+            )
 
         else:  # contrast or glm — both require [CONTRAST] for L and delta
             if idx_contrast is None:
@@ -416,43 +402,23 @@ def _parse_config_sheet(
                     f"there are {len(l_rows)} L_row(s). They must have the same length."
                 )
 
-            L = np.array(l_rows, dtype=float)
-            delta = np.array(delta_values, dtype=float)
-
             if power_mode == "glm":
                 if not glm_baseline:
                     raise SheetsError(
                         "Config sheet [SETTINGS] 'baseline' is required when power_mode is 'glm'."
                     )
-                try:
-                    power_cfg = PowerGLMContrastConfig(
-                        L=L,
-                        delta=delta,
-                        baseline=glm_baseline,
-                        family=glm_family,
-                        link=glm_link,
-                        alpha=alpha,
-                        power=power_target,
-                        max_n=max_n,
-                    )
-                except (ValueError, TypeError) as e:
-                    raise SheetsError(
-                        f"Config sheet produced invalid PowerGLMContrastConfig: {e}"
-                    ) from e
+                power_cfg = build_power_cfg(
+                    dict(power_mode="glm", L=l_rows, delta=delta_values,
+                         baseline=glm_baseline, family=glm_family, link=glm_link,
+                         alpha=alpha, power=power_target, max_n=max_n),
+                    error_cls=SheetsError, context="Config sheet",
+                )
             else:
-                try:
-                    power_cfg = PowerContrastConfig(
-                        L=L,
-                        delta=delta,
-                        alpha=alpha,
-                        power=power_target,
-                        sigma=sigma,
-                        max_n=max_n,
-                    )
-                except (ValueError, TypeError) as e:
-                    raise SheetsError(
-                        f"Config sheet produced invalid PowerContrastConfig: {e}"
-                    ) from e
+                power_cfg = build_power_cfg(
+                    dict(power_mode="contrast", L=l_rows, delta=delta_values,
+                         alpha=alpha, power=power_target, sigma=sigma, max_n=max_n),
+                    error_cls=SheetsError, context="Config sheet",
+                )
 
     # ------------------------------------------------------------------
     # 5. Parse [FACTORS] section
@@ -576,10 +542,11 @@ def _parse_config_sheet(
             r_glm_family   = _rcell(14).strip() or None
             r_glm_baseline_str = _rcell(15).strip()
 
+            _resp_ctx = f"[RESPONSES] row '{r_name}'"
             if r_mode == "contrast":
                 if not r_L_str or not r_d_str:
                     raise SheetsError(
-                        f"[RESPONSES] row '{r_name}': contrast mode requires "
+                        f"{_resp_ctx}: contrast mode requires "
                         "L_row (col 7) and delta (col 8) values."
                     )
                 try:
@@ -587,44 +554,37 @@ def _parse_config_sheet(
                     d_vals = [float(v.strip()) for v in r_d_str.split(",") if v.strip()]
                 except ValueError as e:
                     raise SheetsError(
-                        f"[RESPONSES] row '{r_name}': non-numeric L_row or delta: {e}"
+                        f"{_resp_ctx}: non-numeric L_row or delta: {e}"
                     ) from e
-                r_L = np.array([L_vals], dtype=float)
-                r_d = np.array(d_vals, dtype=float)
-                try:
-                    pcfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig] = PowerContrastConfig(
-                        L=r_L, delta=r_d, alpha=r_alpha, power=r_power_v, sigma=r_sigma,
-                        max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power,
+                pcfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig] = (
+                    build_power_cfg(
+                        dict(power_mode="contrast", L=[L_vals], delta=d_vals,
+                             alpha=r_alpha, power=r_power_v, sigma=r_sigma,
+                             max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power),
+                        error_cls=SheetsError, context=_resp_ctx,
                     )
-                except (ValueError, TypeError) as e:
-                    raise SheetsError(
-                        f"[RESPONSES] row '{r_name}': invalid PowerContrastConfig: {e}"
-                    ) from e
+                )
             elif r_mode == "r2":
                 if not r_r2_str:
                     raise SheetsError(
-                        f"[RESPONSES] row '{r_name}': r2 mode requires r2_target (col 9)."
+                        f"{_resp_ctx}: r2 mode requires r2_target (col 9)."
                     )
-                try:
-                    pcfg = PowerR2Config(
-                        r2_target=float(r_r2_str),
-                        alpha=r_alpha, power=r_power_v, sigma=r_sigma,
-                        lambda_mode=r_lambda_mode,
-                        max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power,
-                    )
-                except (ValueError, TypeError) as e:
-                    raise SheetsError(
-                        f"[RESPONSES] row '{r_name}': invalid PowerR2Config: {e}"
-                    ) from e
+                pcfg = build_power_cfg(
+                    dict(power_mode="r2", r2_target=float(r_r2_str),
+                         alpha=r_alpha, power=r_power_v, sigma=r_sigma,
+                         lambda_mode=r_lambda_mode,
+                         max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power),
+                    error_cls=SheetsError, context=_resp_ctx,
+                )
             elif r_mode == "glm":
                 if not r_L_str or not r_d_str:
                     raise SheetsError(
-                        f"[RESPONSES] row '{r_name}': glm mode requires "
+                        f"{_resp_ctx}: glm mode requires "
                         "L_row (col 7) and delta (col 8) values."
                     )
                 if not r_glm_baseline_str:
                     raise SheetsError(
-                        f"[RESPONSES] row '{r_name}': glm mode requires baseline (col 16)."
+                        f"{_resp_ctx}: glm mode requires baseline (col 16)."
                     )
                 try:
                     L_vals = [float(v.strip()) for v in r_L_str.split(",") if v.strip()]
@@ -632,25 +592,17 @@ def _parse_config_sheet(
                     r_glm_baseline = float(r_glm_baseline_str)
                 except ValueError as e:
                     raise SheetsError(
-                        f"[RESPONSES] row '{r_name}': non-numeric value: {e}"
+                        f"{_resp_ctx}: non-numeric value: {e}"
                     ) from e
-                r_L = np.array([L_vals], dtype=float)
-                r_d = np.array(d_vals, dtype=float)
-                try:
-                    pcfg = PowerGLMContrastConfig(
-                        L=r_L, delta=r_d,
-                        baseline=r_glm_baseline,
-                        family=r_glm_family or "binomial",
-                        alpha=r_alpha, power=r_power_v,
-                        max_n=r_max_n,
-                    )
-                except (ValueError, TypeError) as e:
-                    raise SheetsError(
-                        f"[RESPONSES] row '{r_name}': invalid PowerGLMContrastConfig: {e}"
-                    ) from e
+                pcfg = build_power_cfg(
+                    dict(power_mode="glm", L=[L_vals], delta=d_vals,
+                         baseline=r_glm_baseline, family=r_glm_family or "binomial",
+                         alpha=r_alpha, power=r_power_v, max_n=r_max_n),
+                    error_cls=SheetsError, context=_resp_ctx,
+                )
             else:
                 raise SheetsError(
-                    f"[RESPONSES] row '{r_name}': power_mode must be 'contrast', 'r2', or 'glm'; "
+                    f"{_resp_ctx}: power_mode must be 'contrast', 'r2', or 'glm'; "
                     f"got {col_b!r}."
                 )
 
@@ -660,7 +612,7 @@ def _parse_config_sheet(
                     formula=r_formula_str, weight=r_weight,
                 ))
             except (ValueError, TypeError) as e:
-                raise SheetsError(f"[RESPONSES] row '{r_name}': {e}") from e
+                raise SheetsError(f"{_resp_ctx}: {e}") from e
 
         if len(specs) < 2:
             raise SheetsError(

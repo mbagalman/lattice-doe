@@ -68,6 +68,7 @@ from .config import (
     MultiResponseOptions, ResponseSpec,
 )
 from .contrasts import contrast_from_scenarios
+from ._request_builder import build_power_cfg, build_design_opts
 
 logger = logging.getLogger("iopt-design")
 
@@ -184,27 +185,23 @@ def _as_factors(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
+    import numpy as np  # noqa: PLC0415
     alpha = float(cfg.get("alpha", 0.05))
     power = float(cfg.get("power", 0.8))
     sigma = float(cfg.get("sigma", 1.0))
+    max_n = int(cfg.get("max_n", 500))
 
     # GLM path — triggered by presence of 'family' key
     family = cfg.get("family")
     if family is not None:
-        import numpy as np  # local import
         baseline = cfg.get("baseline")
         if baseline is None:
             raise ValueError("'baseline' is required when 'family' is set.")
         link = cfg.get("link", None)
-        max_n = int(cfg.get("max_n", 500))
         c = cfg.get("contrast") or {}
         if {"scenario_a", "scenario_b", "sesoi"} <= c.keys():
             L, delta = contrast_from_scenarios(
-                formula,
-                factors,
-                c["scenario_a"],
-                c["scenario_b"],
-                float(c["sesoi"]),
+                formula, factors, c["scenario_a"], c["scenario_b"], float(c["sesoi"]),
             )
         elif "L" in c and "delta" in c:
             L = np.asarray(c["L"], dtype=float)
@@ -214,37 +211,36 @@ def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
                 "GLM mode requires a 'contrast' block with "
                 "[scenario_a, scenario_b, sesoi] or explicit [L, delta]."
             )
-        return PowerGLMContrastConfig(
-            L=L, delta=delta, baseline=float(baseline),
-            family=str(family), link=link, alpha=alpha, power=power, max_n=max_n,
+        return build_power_cfg(
+            dict(power_mode="glm", L=L, delta=delta, baseline=float(baseline),
+                 family=str(family), link=link, alpha=alpha, power=power, max_n=max_n),
         )
 
     if "contrast" in cfg:
         c = cfg["contrast"] or {}
         if {"scenario_a", "scenario_b", "sesoi"} <= c.keys():
             L, delta = contrast_from_scenarios(
-                formula,
-                factors,
-                c["scenario_a"],
-                c["scenario_b"],
-                float(c["sesoi"]),
+                formula, factors, c["scenario_a"], c["scenario_b"], float(c["sesoi"]),
             )
-            return PowerContrastConfig(L=L, delta=delta, alpha=alpha, power=power, sigma=sigma)
+        elif "L" in c and "delta" in c:
+            L = np.asarray(c["L"], dtype=float)
+            delta = np.asarray(c["delta"], dtype=float)
         else:
-            # Allow advanced users to pass L and delta explicitly
-            if "L" in c and "delta" in c:
-                import numpy as np  # local import to avoid hard dep here
-                L = np.asarray(c["L"], dtype=float)
-                delta = np.asarray(c["delta"], dtype=float)
-                return PowerContrastConfig(L=L, delta=delta, alpha=alpha, power=power, sigma=sigma)
             # This path should be unreachable due to _validate_config_keys
             raise ValueError("Internal error: Invalid contrast config structure.")
+        return build_power_cfg(
+            dict(power_mode="contrast", L=L, delta=delta,
+                 alpha=alpha, power=power, sigma=sigma, max_n=max_n),
+        )
 
     # Otherwise R^2 mode
     if "r2_target" not in cfg:
         # This path should be unreachable due to _validate_config_keys
         raise ValueError("Internal error: Missing r2_target or contrast block.")
-    return PowerR2Config(r2_target=float(cfg["r2_target"]), alpha=alpha, power=power, sigma=sigma)
+    return build_power_cfg(
+        dict(power_mode="r2", r2_target=float(cfg["r2_target"]),
+             alpha=alpha, power=power, sigma=sigma, max_n=max_n),
+    )
 
 
 def _make_multi_response_cfg(
@@ -306,22 +302,21 @@ def _make_multi_response_cfg(
                         f"Response '{name}' has GLM keys but is missing required 'baseline'."
                     )
                 pcfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig] = (
-                    PowerGLMContrastConfig(
-                        L=L, delta=delta,
-                        baseline=float(r_baseline),
-                        family=r_family,
-                        link=r_link,
-                        alpha=r_alpha, power=r_power, max_n=r_max_n,
+                    build_power_cfg(
+                        dict(power_mode="glm", L=L, delta=delta,
+                             baseline=float(r_baseline), family=r_family, link=r_link,
+                             alpha=r_alpha, power=r_power, max_n=r_max_n),
                     )
                 )
             else:
-                pcfg = PowerContrastConfig(
-                    L=L, delta=delta, alpha=r_alpha, power=r_power, sigma=r_sigma, max_n=r_max_n,
+                pcfg = build_power_cfg(
+                    dict(power_mode="contrast", L=L, delta=delta,
+                         alpha=r_alpha, power=r_power, sigma=r_sigma, max_n=r_max_n),
                 )
         elif "r2_target" in r:
-            pcfg = PowerR2Config(
-                r2_target=float(r["r2_target"]), alpha=r_alpha, power=r_power, sigma=r_sigma,
-                max_n=r_max_n,
+            pcfg = build_power_cfg(
+                dict(power_mode="r2", r2_target=float(r["r2_target"]),
+                     alpha=r_alpha, power=r_power, sigma=r_sigma, max_n=r_max_n),
             )
         else:
             raise KeyError(
@@ -392,8 +387,8 @@ def _make_design_opts(cfg: Dict[str, Any]) -> DesignOptions:
     raw_workers = d.get("workers", None)
     workers = int(raw_workers) if raw_workers is not None else None
 
-    # Split-plot options (optional `split_plot:` block in YAML)
-    split_plot: Optional[SplitPlotOptions] = None
+    # Split-plot options live at the top-level cfg key, not inside "design"
+    _sp_d = None
     sp_block = cfg.get("split_plot")
     if sp_block and isinstance(sp_block, dict):
         htc_raw = sp_block.get("htc_factors", [])
@@ -402,22 +397,16 @@ def _make_design_opts(cfg: Dict[str, Any]) -> DesignOptions:
         else:
             htc_factors = [str(f) for f in htc_raw]
         n_whole_plots = int(sp_block.get("n_whole_plots", 4))
-        eta = float(sp_block.get("eta", 1.0))
-        spwp_raw = sp_block.get("subplots_per_wp")
-        spwp_int = int(spwp_raw) if spwp_raw is not None else 0
-        subplots_per_wp = spwp_int if spwp_int > 0 else None
-        df_method = str(sp_block.get("df_method", "auto"))
         if htc_factors and n_whole_plots >= 2:
-            split_plot = SplitPlotOptions(
+            _sp_d = dict(
                 htc_factors=htc_factors,
                 n_whole_plots=n_whole_plots,
-                eta=eta,
-                subplots_per_wp=subplots_per_wp,
-                df_method=df_method,
+                eta=float(sp_block.get("eta", 1.0)),
+                subplots_per_wp=sp_block.get("subplots_per_wp"),
+                df_method=str(sp_block.get("df_method", "auto")),
             )
 
-    return DesignOptions(
-        # Candidate generation
+    _do_d: Dict[str, Any] = dict(
         candidate_points=int(d.get("candidate_points", 2000)),
         auto_candidate=bool(d.get("auto_candidate", False)),
         cand_min=int(d.get("cand_min", 1000)),
@@ -426,24 +415,22 @@ def _make_design_opts(cfg: Dict[str, Any]) -> DesignOptions:
         per_cell_alpha=float(d.get("per_cell_alpha", 1.5)),
         per_cell_min=int(d.get("per_cell_min", 5)),
         per_cell_max=int(d.get("per_cell_max", 20)),
-        # Adaptive refinement
         allow_candidate_growth=bool(d.get("allow_candidate_growth", False)),
         growth_factor=float(d.get("growth_factor", 2.0)),
-        # Search configuration
         starts=int(d.get("starts", 5)),
         algo=str(d.get("algo", "fedorov")),
         criterion=str(d.get("criterion", "I")),
         max_iter=int(d.get("max_iter", 1000)),
         random_state=int(d.get("random_state", 123)),
         xtx_jitter=float(d.get("xtx_jitter", 1e-8)),
-        # Constraint
         constraint_expr=str(d["constraint_expr"]) if d.get("constraint_expr") is not None else None,
-        # Parallel options
         workers=workers,
         parallel_seed_stride=int(d.get("parallel_seed_stride", 10000)),
-        # Split-plot
-        split_plot=split_plot,
     )
+    if _sp_d is not None:
+        _do_d["split_plot"] = _sp_d
+
+    return build_design_opts(_do_d)
 
 
 # -------------------------

@@ -41,6 +41,7 @@ try:
         ResponseSpec,
     )
     from iopt_power_design.contrasts import contrast_from_scenarios
+    from iopt_power_design._request_builder import build_power_cfg, build_design_opts
     _HAS_IOPT = True
 except ImportError:
     _HAS_IOPT = False
@@ -94,36 +95,28 @@ def _build_power_cfg(ss: dict):
                 scenario_b=scenario_b,
                 sesoi=float(ss["sesoi"]),
             )
-        return PowerContrastConfig(
-            L=L,
-            delta=delta,
-            alpha=float(ss["alpha"]),
-            power=float(ss["power_target"]),
-            sigma=float(ss["sigma"]),
-            max_n=int(ss["max_n"]),
-        )
+        return build_power_cfg(dict(
+            power_mode="contrast", L=L, delta=delta,
+            alpha=float(ss["alpha"]), power=float(ss["power_target"]),
+            sigma=float(ss["sigma"]), max_n=int(ss["max_n"]),
+        ))
     elif ss["power_mode"] == "glm":
         L = _parse_matrix(ss["L_text"])
         delta = _parse_vector(ss["delta_text"])
-        link_val = ss.get("glm_link", "").strip() or None
-        return PowerGLMContrastConfig(
-            L=L,
-            delta=delta,
+        return build_power_cfg(dict(
+            power_mode="glm", L=L, delta=delta,
             baseline=float(ss.get("glm_baseline", 0.20)),
             family=ss.get("glm_family", "binomial"),
-            link=link_val,
-            alpha=float(ss["alpha"]),
-            power=float(ss["power_target"]),
+            link=ss.get("glm_link", "").strip() or None,
+            alpha=float(ss["alpha"]), power=float(ss["power_target"]),
             max_n=int(ss["max_n"]),
-        )
+        ))
     else:
-        return PowerR2Config(
-            r2_target=float(ss["r2_target"]),
-            alpha=float(ss["alpha"]),
-            power=float(ss["power_target"]),
-            max_n=int(ss["max_n"]),
-            lambda_mode=ss["lambda_mode"],
-        )
+        return build_power_cfg(dict(
+            power_mode="r2", r2_target=float(ss["r2_target"]),
+            alpha=float(ss["alpha"]), power=float(ss["power_target"]),
+            max_n=int(ss["max_n"]), lambda_mode=ss["lambda_mode"],
+        ))
 
 
 def _build_multi_response_cfg(ss: dict) -> "MultiResponseOptions":
@@ -140,24 +133,25 @@ def _build_multi_response_cfg(ss: dict) -> "MultiResponseOptions":
         if _r_mode == "glm":
             L = _parse_matrix(r.get("L_text", ""))
             delta = _parse_vector(r.get("delta_text", ""))
-            pcfg = PowerGLMContrastConfig(
-                L=L, delta=delta,
+            pcfg = build_power_cfg(dict(
+                power_mode="glm", L=L, delta=delta,
                 baseline=float(r.get("glm_baseline", 0.20)),
                 family=r.get("glm_family", "binomial"),
                 link=r.get("glm_link", "").strip() or None,
                 alpha=r_alpha, power=r_power,
-            )
+            ))
         elif _r_mode == "contrast":
             L = _parse_matrix(r.get("L_text", ""))
             delta = _parse_vector(r.get("delta_text", ""))
-            pcfg = PowerContrastConfig(
-                L=L, delta=delta, alpha=r_alpha, power=r_power, sigma=r_sigma,
-            )
+            pcfg = build_power_cfg(dict(
+                power_mode="contrast", L=L, delta=delta,
+                alpha=r_alpha, power=r_power, sigma=r_sigma,
+            ))
         else:
-            pcfg = PowerR2Config(
-                r2_target=float(r.get("r2_target", 0.15)),
+            pcfg = build_power_cfg(dict(
+                power_mode="r2", r2_target=float(r.get("r2_target", 0.15)),
                 alpha=r_alpha, power=r_power,
-            )
+            ))
         specs.append(ResponseSpec(
             name=str(r.get("name", f"R{len(specs) + 1}")),
             power_cfg=pcfg,
@@ -185,45 +179,32 @@ def _build_multi_response_cfg(ss: dict) -> "MultiResponseOptions":
 
 
 def _build_design_opts(ss: dict) -> DesignOptions:
-    kwargs: dict = dict(
+    _do_d: dict = dict(
         criterion=ss["criterion"],
         starts=int(ss["starts"]),
         random_state=int(ss["random_state"]),
         auto_candidate=bool(ss["auto_candidate"]),
+        n_blocks=int(ss.get("n_blocks", 0)),
+        block_factor_name=ss.get("block_factor_name", "Block"),
+        preallocate_categorical=bool(ss.get("preallocate_categorical", False)),
+        alloc_min_per_cell=int(ss.get("alloc_min_per_cell", 1)),
+        alloc_max_per_cell=int(ss.get("alloc_max_per_cell", 0)),
+        constraint_expr=ss.get("constraint_expr", "").strip() or None,
     )
     if not ss["auto_candidate"]:
-        kwargs["candidate_points"] = int(ss["candidate_points"])
-    expr = ss.get("constraint_expr", "").strip()
-    if expr:
-        kwargs["constraint_expr"] = expr
-    # Blocked design options
-    n_blocks = int(ss.get("n_blocks", 0))
-    if n_blocks >= 2:
-        kwargs["n_blocks"] = n_blocks
-        block_factor_name = ss.get("block_factor_name", "Block").strip()
-        if block_factor_name:
-            kwargs["block_factor_name"] = block_factor_name
-    # Categorical pre-allocation options
-    if ss.get("preallocate_categorical", False):
-        kwargs["preallocate_categorical"] = True
-        kwargs["alloc_min_per_cell"] = int(ss.get("alloc_min_per_cell", 1))
-        alloc_max = int(ss.get("alloc_max_per_cell", 0))
-        if alloc_max > 0:
-            kwargs["alloc_max_per_cell"] = alloc_max
+        _do_d["candidate_points"] = int(ss["candidate_points"])
     # Split-plot options
     if ss.get("split_plot_enabled", False):
-        from iopt_power_design.config import SplitPlotOptions  # noqa: PLC0415
         htc_names = ss.get("sp_htc_factors") or []
         if htc_names:
-            spwp = int(ss.get("sp_subplots_per_wp", 0))
-            kwargs["split_plot"] = SplitPlotOptions(
+            _do_d["split_plot"] = dict(
                 htc_factors=list(htc_names),
                 n_whole_plots=int(ss.get("sp_n_whole_plots", 4)),
                 eta=float(ss.get("sp_eta", 1.0)),
-                subplots_per_wp=spwp if spwp > 0 else None,
+                subplots_per_wp=int(ss.get("sp_subplots_per_wp", 0)),
                 df_method=str(ss.get("sp_df_method", "auto")),
             )
-    return DesignOptions(**kwargs)
+    return build_design_opts(_do_d)
 
 
 def _jsonify(obj):
