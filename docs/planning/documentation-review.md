@@ -170,3 +170,164 @@ That said, the package is not yet at a fully polished public-library standard ac
 The project is already credible as an open-source MIT-licensed package, especially for technically comfortable users. The remaining work is not foundational; it is a polish pass.
 
 If the goal is for outside users to quickly trust the package, understand how it works, and contribute confidently, the next step should be a documentation and style cleanup sprint rather than more structural refactoring.
+
+---
+
+## Addendum — User Guide Review (2026-03-20)
+
+Reviewed against Git commit: `b25e1f1`
+
+### Overall assessment
+
+The new `docs/user-guide.md` is a strong outline, but it is not yet a true user guide in the form you described.
+
+Right now it behaves more like a curriculum map or table of contents for a future guide:
+
+- it names the major capabilities,
+- it suggests a sensible progression from simple to advanced topics,
+- but it does not yet actually showcase each major capability with at least one worked example.
+
+Because of that, it is promising as a structure, but not yet sufficient as an educational complement to the existing docs.
+
+### User-guide-specific findings
+
+#### UG-1 — High — The file is still mostly an outline, not a worked guide
+
+The guide promises to explain the package from first principles, increase in complexity gradually, and cover every interface with realistic examples. In practice, almost all chapters are still bullet-point outlines and “Full worked example” placeholders rather than actual teaching content.
+
+This is the single biggest gap relative to the intended purpose.
+
+What is missing most:
+
+- actual code examples in the chapters
+- annotated outputs or screenshots where appropriate
+- step-by-step transitions from simple use to advanced use
+- explicit bridges back to README / quickstart / recipes for deeper reference
+
+#### UG-2 — High — Several claims about current capabilities are inaccurate
+
+Some sections describe capabilities the current codebase does not provide.
+
+Examples:
+
+1. The guide says “the six interfaces at a glance” but lists seven interfaces.
+   - `docs/user-guide.md:32-34`
+
+2. The widgets chapter says widget `power_mode` can be `"contrast"`, `"r2"`, or `"glm_binomial"` / `"glm_poisson"`.
+   - The widget code documents and implements only `"r2"` and `"contrast"`.
+   - `docs/user-guide.md:304`
+   - `iopt_power_design/widgets.py:294-295`
+   - `iopt_power_design/widgets.py:923-924`
+
+3. The REST API chapter lists endpoint names that do not match the implemented routes.
+   - Guide says:
+     - `POST /multiresponse`
+     - `POST /power_curve`
+     - `POST /compare`
+   - Code implements:
+     - `POST /multiresponse_design`
+     - `POST /power_curve/by_n`
+     - `POST /power_curve/by_effect`
+     - `POST /compare_criteria`
+     - `POST /mde`
+   - `docs/user-guide.md:323-329`
+   - `api_server/routers/design.py:76`
+   - `api_server/routers/power_curve.py:54`
+   - `api_server/routers/power_curve.py:71`
+   - `api_server/routers/compare.py:63`
+   - `api_server/routers/sensitivity.py:93`
+
+4. The split-plot chapter describes denominator-df methods that are not implemented.
+   - Guide mentions Satterthwaite and Kenward-Roger options.
+   - Code supports only `"auto"`, `"conservative"`, and `"sp_only"`.
+   - `docs/user-guide.md:350`
+   - `docs/user-guide.md:356`
+   - `iopt_power_design/config.py:369`
+   - `iopt_power_design/config.py:389`
+
+#### UG-3 — Medium — The Streamlit chapter overstates analysis support
+
+The Streamlit chapter says Page 4 supports power curves by baseline, multi-response analysis, and a broad GLM-friendly walkthrough.
+
+Current code is narrower:
+
+- `app/pages/4_Analysis.py` reconstructs only contrast and R² power configs.
+- The results page explicitly says multi-response analytical power curves are not available in the UI and should be done from the Python API.
+
+Relevant references:
+
+- `docs/user-guide.md:243`
+- `docs/user-guide.md:251`
+- `app/pages/4_Analysis.py:74-107`
+- `app/pages/3_Run_Results.py:560-567`
+
+#### UG-4 — Medium — The Excel chapter describes the wrong workbook mental model
+
+The guide describes the Excel template structure as “Config, Factors, Power, Responses, Output,” which implies multiple conceptual sheets/sections that do not match the actual sentinel-based Config sheet implementation.
+
+The code uses a single `Config` sheet with sentinel sections:
+
+- `[SETTINGS]`
+- `[CONTRAST]`
+- `[FACTORS]`
+- `[RESPONSES]`
+
+Relevant references:
+
+- `docs/user-guide.md:262`
+- `iopt_power_design/excel_template.py:10-24`
+
+#### UG-5 — Medium — Appendix C’s interface matrix is not reliable yet
+
+The comparison table appears to contain multiple incorrect feature assignments.
+
+Examples:
+
+1. It marks Widgets as supporting GLM mode, but widgets are contrast/R² only.
+   - `docs/user-guide.md:580`
+   - `iopt_power_design/widgets.py:294-295`
+
+2. It marks Streamlit as not supporting blocking, but Streamlit exposes blocked design controls.
+   - `docs/user-guide.md:583`
+   - `app/state.py:43-46`
+   - `app/pages/2_Power_Config.py:812-828`
+
+Because this table is intended as a quick decision aid, inaccuracies here are especially risky.
+
+#### UG-6 — Medium — The guide still needs true progression from simple to advanced
+
+The chapter order is good, but the reader experience is not yet progressive in practice because the chapters do not actually walk through increasingly advanced examples.
+
+For the guide to match the intended teaching arc, it should probably include at least:
+
+1. one simple two-factor contrast example early,
+2. one R² example,
+3. one GLM example,
+4. one multi-response example,
+5. one advanced design-structure example (split-plot or blocking),
+6. one interface-based example per major non-Python interface.
+
+### Recommendation for the user guide
+
+The best next step is not to add more chapter headings. It is to convert a subset of the existing outline into real instructional content.
+
+Suggested implementation order:
+
+1. Write Chapters 1–3 fully, including one real end-to-end contrast example.
+2. Write one fully worked example each for:
+   - R² mode
+   - GLM mode
+   - multi-response mode
+3. Fix the inaccurate interface claims before expanding the rest.
+4. Rebuild Appendix C from the actual code surface rather than from memory.
+5. Treat the guide as a narrative layer above README/quickstart/recipes, not a repetition of them.
+
+### Action tracking — User guide
+
+| # | Action | Priority | Status | Notes |
+|---|--------|----------|--------|-------|
+| UG-1 | Convert `docs/user-guide.md` from outline to real instructional content with actual worked examples | Now | Pending | Highest-value improvement |
+| UG-2 | Fix inaccurate capability claims in widgets, REST API, split-plot df-method, and interface count sections | Now | Pending | Several statements currently contradict the code |
+| UG-3 | Rewrite Streamlit chapter to match current UI support, especially Page 4 analysis scope | Soon | Pending | Avoid promising UI features that require Python API instead |
+| UG-4 | Correct the Excel chapter to describe the sentinel-based Config sheet structure | Soon | Pending | Current wording suggests the wrong workbook model |
+| UG-5 | Rebuild Appendix C interface comparison table from implemented feature support | Soon | Pending | Current table appears partially inaccurate |
