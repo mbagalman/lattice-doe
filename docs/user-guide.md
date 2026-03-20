@@ -29,7 +29,7 @@
   - Global R² (omnibus F-test)
   - GLM Wald χ² (binomial / Poisson)
   - Multi-response (per-response + combination rule)
-- 1.5 The six interfaces at a glance — a map for new users
+- 1.5 The seven interfaces at a glance — a map for new users
   - Python API, CLI, Streamlit, Excel, Google Sheets, Jupyter Widgets, REST API
   - "Which interface should I use?" decision guide
 
@@ -240,7 +240,7 @@
   - **Page 1 — Factors**: defining factor names, types (categorical / continuous), and levels
   - **Page 2 — Power Config**: selecting power mode, entering the contrast or R² target, setting α, power, σ
   - **Page 3 — Run & Results**: running the design, reading the design table and power summary, downloading CSV and the HTML report
-  - **Page 4 — Analysis**: power curves (by n, by effect size, by baseline), sensitivity sweeps, MDE, criteria comparison
+  - **Page 4 — Analysis**: power curves (by n, by effect size), sensitivity sweeps, MDE, criteria comparison (contrast and R² modes; multi-response analysis and power-by-baseline curves require the Python API)
 - 10.4 Deploying to Streamlit Community Cloud (free, no server required)
   - Step-by-step: push to GitHub → share.streamlit.io → deploy
   - No secrets or environment variables needed for the core app
@@ -259,8 +259,12 @@
   - Sharing study configurations without sharing Python scripts
   - Capturing results in a structured, formatted workbook
 - 11.2 Creating a template workbook: `create_excel_template`
-  - Template sheet structure: Config, Factors, Power, Responses, Output
-  - How to fill in each section
+  - The workbook contains one `Config` sheet with sentinel-delimited sections:
+    - `[SETTINGS]` — key/value pairs: formula, power parameters, design options
+    - `[CONTRAST]` — optional; required when `power_mode = contrast` or `glm`
+    - `[FACTORS]` — factor table: Name | Type | Value 1 | Value 2 | …
+    - `[RESPONSES]` — optional; required for multi-response mode
+  - Output is written to separate sheets: `Results`, `Design`, `Buckets`
   - Sentinel values: blank cells, zero for absent numeric options
 - 11.3 Running the design from a workbook: `excel_run`
   - What `excel_run` returns and what it writes back to the workbook
@@ -301,7 +305,7 @@
 - 13.2 Installing widget support: `pip install -e ".[widgets]"`
 - 13.3 `design_widget` and `DesignWidget`
   - The `formula` and `factors` pre-fill parameters
-  - Selecting `power_mode`: `"contrast"`, `"r2"`, or `"glm_binomial"` / `"glm_poisson"`
+  - Selecting `power_mode`: `"contrast"` or `"r2"` (GLM modes are not available in the widget; use the Python API for GLM designs)
   - The inline Plotly power curve (live-updates on factor or config changes)
   - Retrieving the result after running: `w.get_result()`
 - 13.4 Embedding widget output in a report or notebook
@@ -322,10 +326,12 @@
   - Multi-worker deployment
 - 14.3 Available endpoints
   - `POST /design` — generate a single-response optimal design
-  - `POST /multiresponse` — generate a multi-response design
-  - `POST /power_curve` — compute a power curve
+  - `POST /multiresponse_design` — generate a multi-response design
+  - `POST /power_curve/by_n` — power curve over sample sizes
+  - `POST /power_curve/by_effect` — power curve over effect sizes
   - `POST /sensitivity` — run a sensitivity sweep
-  - `POST /compare` — compare criteria
+  - `POST /mde` — compute minimum detectable effect
+  - `POST /compare_criteria` — compare I, D, and A criteria
   - `POST /augment` — augment an existing design
 - 14.4 Request/response schema overview
   - How Python dataclasses map to JSON in the API
@@ -347,13 +353,13 @@
   - Why ordinary (CRD) designs are wrong for split-plot structures
 - 15.2 The GLS information matrix for split-plot designs
   - How the covariance structure changes the effective information
-  - Degrees of freedom: Kenward-Roger vs. Satterthwaite vs. manual (`df_method` option)
+  - Degrees of freedom: how the approximation method (`df_method`) affects power calculations
 - 15.3 Setting up `SplitPlotOptions`
   - `htc_factors`: list of whole-plot factor names
   - `n_whole_plots`: how many WP groups to run
   - `subplots_per_wp`: sub-plot runs per whole-plot group
   - `eta`: the variance ratio assumption
-  - `df_method`: `"auto"`, `"satterthwaite"`, `"kenward_roger"`, or a fixed integer
+  - `df_method`: `"auto"` (default), `"conservative"` (always use WP df), `"sp_only"` (always use SP df)
 - 15.4 The whole-plot cost-power curve: `power_curve_by_wp`
   - Presenting the whole-plot count vs. power tradeoff to stakeholders
 - 15.5 **Full worked example** (Python API + Plotly, industrial baking process)
@@ -577,10 +583,10 @@ Summary tables for all configuration parameters: `PowerContrastConfig`, `PowerR2
 |---|---|---|---|---|---|---|---|
 | Contrast mode | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | R² mode | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| GLM mode | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| GLM mode | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 | Multi-response | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 | Split-plot | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
-| Blocking | ✓ | ✓ | — | ✓ | ✓ | — | ✓ |
+| Blocking | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 | Feasibility constraints | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 | Power curves | ✓ | — | ✓ | — | — | ✓ | ✓ |
 | Sensitivity analysis | ✓ | — | ✓ | — | — | — | ✓ |

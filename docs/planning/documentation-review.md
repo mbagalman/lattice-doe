@@ -326,8 +326,8 @@ Suggested implementation order:
 
 | # | Action | Priority | Status | Notes |
 |---|--------|----------|--------|-------|
-| UG-1 | Convert `docs/user-guide.md` from outline to real instructional content with actual worked examples | Now | Pending | Highest-value improvement |
-| UG-2 | Fix inaccurate capability claims in widgets, REST API, split-plot df-method, and interface count sections | Now | Pending | Several statements currently contradict the code |
-| UG-3 | Rewrite Streamlit chapter to match current UI support, especially Page 4 analysis scope | Soon | Pending | Avoid promising UI features that require Python API instead |
-| UG-4 | Correct the Excel chapter to describe the sentinel-based Config sheet structure | Soon | Pending | Current wording suggests the wrong workbook model |
-| UG-5 | Rebuild Appendix C interface comparison table from implemented feature support | Soon | Pending | Current table appears partially inaccurate |
+| UG-1 | Convert `docs/user-guide.md` from outline to real instructional content with actual worked examples | Now | Pending | Highest-value improvement; all other fixes below unblock this |
+| UG-2 | Fix inaccurate capability claims in widgets, REST API, split-plot df-method, and interface count sections | Now | **Done** | Fixed: "six" → "seven"; widget GLM modes removed; REST routes corrected to `/multiresponse_design`, `/power_curve/by_n`, `/power_curve/by_effect`, `/compare_criteria`, `/mde`; df_method corrected to `"auto"`, `"conservative"`, `"sp_only"` |
+| UG-3 | Rewrite Streamlit chapter to match current UI support, especially Page 4 analysis scope | Soon | **Done** | Page 4 description narrowed: removed "by baseline" and multi-response analysis; added note that those require the Python API |
+| UG-4 | Correct the Excel chapter to describe the sentinel-based Config sheet structure | Soon | **Done** | Section 11.2 now describes single Config sheet with `[SETTINGS]`, `[CONTRAST]`, `[FACTORS]`, `[RESPONSES]` sentinels and separate output sheets |
+| UG-5 | Rebuild Appendix C interface comparison table from implemented feature support | Soon | **Done** | Corrected: Widgets/GLM ✓→—; Streamlit/Blocking —→✓ |
