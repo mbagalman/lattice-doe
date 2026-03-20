@@ -326,7 +326,7 @@ Suggested implementation order:
 
 | # | Action | Priority | Status | Notes |
 |---|--------|----------|--------|-------|
-| UG-1 | Convert `docs/user-guide.md` from outline to real instructional content with actual worked examples | Now | Pending | Highest-value improvement; all other fixes below unblock this |
+| UG-1 | Convert `docs/user-guide.md` from outline to real instructional content with actual worked examples | Now | In progress | Chapter 1 written in full. Remaining: Chapters 2–3 (install + contrast worked example), then one full example each for R², GLM, multi-response, and each major interface |
 | UG-2 | Fix inaccurate capability claims in widgets, REST API, split-plot df-method, and interface count sections | Now | **Done** | Fixed: "six" → "seven"; widget GLM modes removed; REST routes corrected to `/multiresponse_design`, `/power_curve/by_n`, `/power_curve/by_effect`, `/compare_criteria`, `/mde`; df_method corrected to `"auto"`, `"conservative"`, `"sp_only"` |
 | UG-3 | Rewrite Streamlit chapter to match current UI support, especially Page 4 analysis scope | Soon | **Done** | Page 4 description narrowed: removed "by baseline" and multi-response analysis; added note that those require the Python API |
 | UG-4 | Correct the Excel chapter to describe the sentinel-based Config sheet structure | Soon | **Done** | Section 11.2 now describes single Config sheet with `[SETTINGS]`, `[CONTRAST]`, `[FACTORS]`, `[RESPONSES]` sentinels and separate output sheets |

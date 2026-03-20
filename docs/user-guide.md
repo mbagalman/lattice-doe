@@ -14,24 +14,140 @@
 
 ### Chapter 1 — What this package does and why it matters
 
-- 1.1 The problem: choosing where to run experiments
-- 1.2 Optimality criteria — what they measure and why it matters
-  - **I-optimality**: minimising average prediction variance across the design region; the right choice when you want reliable predictions anywhere in the factor space
-  - **D-optimality**: maximising the determinant of the information matrix; the right choice when you care most about precise coefficient estimates
-  - **A-optimality**: minimising the trace of the inverse information matrix; distributes estimation variance evenly across all coefficients
-  - When the three criteria disagree, and how much it usually matters in practice
-- 1.3 Power assurance — what it means to "guarantee" power
-  - Statistical power defined: the probability of detecting an effect that is real
-  - Why design and power are coupled: the same design determines both prediction quality and test sensitivity
-  - How the package searches: the binary search over `n`, the inner Fedorov exchange, and the outer multi-start
-- 1.4 The four power modes at a glance
-  - Linear contrast (F-test on Lβ = δ)
-  - Global R² (omnibus F-test)
-  - GLM Wald χ² (binomial / Poisson)
-  - Multi-response (per-response + combination rule)
-- 1.5 The seven interfaces at a glance — a map for new users
-  - Python API, CLI, Streamlit, Excel, Google Sheets, Jupyter Widgets, REST API
-  - "Which interface should I use?" decision guide
+#### 1.1 The problem: choosing where to run experiments
+
+Suppose you are studying how three process variables — temperature, pressure, and reaction time — affect the yield of a chemical synthesis. Each variable has a range of plausible values you could set it to. In principle, the complete "design space" is a three-dimensional box of infinitely many possible experimental conditions. You cannot run all of them. You can afford, say, 20 runs. Which 20 do you choose?
+
+This is the core problem of experimental design, and the answer is not obvious. Spreading runs evenly across a grid sounds reasonable, but a full three-factor grid with even five levels per factor would require 125 runs. Choosing randomly feels safe, but random selections frequently cluster in some regions while leaving others sparse, producing designs that are worse than deliberate choices. Running at the factor extremes and centre — a common engineering heuristic — turns out to be optimal for some models but poor for others.
+
+**What makes a design "good" depends on what you plan to do with the data.** If you plan to fit a regression model and use it to predict yield at arbitrary process conditions, a good design places points where they minimise prediction uncertainty across the whole region. If you plan to estimate model coefficients and test specific hypotheses about them, a good design places points where they maximise estimation precision. These two goals are related but not identical, and they lead to different optimal designs.
+
+This package automates the search for designs that are simultaneously:
+
+1. **Statistically optimal** — the points are chosen to minimise prediction variance, maximise coefficient precision, or balance the two, depending on which criterion you select.
+2. **Power-assured** — the number of runs is chosen to guarantee that your planned hypothesis test has at least the statistical power you specify.
+
+Most design software addresses optimality and power separately. This package treats them as a joint problem: it searches for the minimum number of runs `n` that achieves your power target, and at each `n` it selects the statistically optimal arrangement of those runs.
+
+---
+
+#### 1.2 Optimality criteria — what they measure and why it matters
+
+Every design optimality criterion is built on the same foundation: the **model matrix** X and the **information matrix** X'X.
+
+When you fit a linear regression model to your data, the matrix X is the *n* × *p* array in which each row encodes one experimental run (with the factor settings expressed in the coding your formula specifies), and each column corresponds to one model term — an intercept, a main effect, or an interaction. The information matrix M = X'X summarises how much statistical information your design contains. It controls both the precision of coefficient estimates (through (X'X)⁻¹) and the variance of predictions at any point in the design space.
+
+The three optimality criteria measure different aspects of M.
+
+**I-optimality** (also called *integrated* or *average prediction variance* optimality) minimises the average variance of model predictions across the entire design region:
+
+```
+I-criterion = (1/|R|) ∫_R Var[ŷ(x)] dx
+            = (1/|R|) ∫_R f(x)ᵀ (X'X)⁻¹ f(x) dx
+```
+
+where f(x) is the vector of model-term values at point x and R is the design region. Geometrically, an I-optimal design spreads its points to keep the prediction surface uniformly accurate everywhere, not just at the observed points. **Use I-optimality when your model will be used for prediction — for example, when you want to map the response surface and identify process conditions that achieve a target yield.**
+
+**D-optimality** maximises the determinant of the information matrix:
+
+```
+D-criterion = det(X'X)
+```
+
+Maximising `det(X'X)` is equivalent to minimising the volume of the joint confidence ellipsoid for all model coefficients simultaneously. A D-optimal design packs the most statistical information about the coefficients into the fewest runs. **Use D-optimality when precise estimation of individual model coefficients is the primary goal — for example, in confirmatory experiments where you need tight standard errors on specific effects.**
+
+**A-optimality** minimises the trace of the inverse information matrix:
+
+```
+A-criterion = trace((X'X)⁻¹) = Σᵢ Var[β̂ᵢ]
+```
+
+This is the sum of the variances of all coefficient estimates. Where D-optimality minimises the *joint* volume of uncertainty, A-optimality minimises the *total* variance summed across coefficients. **Use A-optimality when you want balanced estimation precision across all model terms, with no single coefficient estimate dominating the uncertainty budget.**
+
+**How often do the criteria disagree in practice?** Less often than you might expect. For continuous factors in an unconstrained box, I-, D-, and A-optimal designs at the same `n` are often nearly identical, or differ by only a few run placements. Meaningful differences emerge when:
+
+- The model includes many categorical factors with multiple levels (the number of encoding columns can be asymmetric)
+- The design space is constrained by feasibility constraints that rule out part of the box
+- The model is strongly nonlinear in the factors (e.g. a quadratic or interaction-heavy formula)
+
+The package's `compare_criteria` function runs all three criteria for your specific formula, factors, and power target and returns a side-by-side summary — `n`, achieved power, I-criterion value, and D-efficiency — so you can see the practical tradeoff before committing to a design. This is covered in detail in Chapter 7.
+
+---
+
+#### 1.3 Power assurance — what it means to "guarantee" power
+
+**Statistical power** is the probability of correctly rejecting the null hypothesis when the null hypothesis is false and the true effect is at least as large as your minimum effect of interest. A design with 80% power at effect size δ will detect an effect of that size (or larger) in 80% of replications of the experiment, at significance level α, given the assumed residual standard deviation σ.
+
+Power is not a property of the analysis alone. It depends on the design through the **noncentrality parameter** λ, which for a linear contrast test takes the form:
+
+```
+λ = δᵀ [L (X'X)⁻¹ Lᵀ]⁺ δ / σ²
+```
+
+Here L is the contrast matrix defining your hypothesis, δ is the vector of minimum detectable effects, and (X'X)⁻¹ is determined entirely by your design X. A larger information matrix (better design) produces a larger λ, which translates directly into higher power. The same optimality criterion that governs prediction quality or coefficient precision also governs detectability.
+
+**This coupling is what motivates the package's design.** Choosing `n` by power calculations alone (as a standalone power analysis tool would) and then designing independently (as a standalone optimal design tool would) ignores the feedback: a more efficient design achieves the same power with fewer runs, and the power you actually achieve depends on the specific design chosen, not just its size.
+
+This package performs both steps jointly through a three-level search:
+
+1. **Outer loop — sample size search.** The package performs a binary search over `n` from a small starting value up to `max_n`. At each candidate `n`, it asks: can an optimal design of this size achieve the target power? The search finds the minimum `n` that answers yes.
+
+2. **Middle loop — multi-start.** At each `n`, the Fedorov exchange is run from multiple random starting designs (controlled by `starts`). This reduces the risk of getting stuck in a poor local optimum, which the exchange algorithm can produce if started from an unlucky initial point.
+
+3. **Inner loop — Fedorov exchange.** Given a starting design and `n` fixed, the Fedorov exchange iteratively swaps each current design point with the best available candidate point (according to the chosen criterion), continuing until no single swap improves the criterion. This is a well-established algorithm for discrete optimal design.
+
+The result is a design that is both optimal (by the chosen criterion) *and* guaranteed to meet your power target at the minimum feasible sample size.
+
+> **A note on "guarantee."** Power assurance is based on assumptions — about the residual standard deviation σ, the effect size δ, and the form of the model. If σ turns out to be larger than assumed, the achieved power will be lower. Chapter 20 covers sensitivity analysis tools that let you quantify how much power you retain if the σ assumption is off by 20%, 50%, or more, before you run a single experiment.
+
+---
+
+#### 1.4 The four power modes at a glance
+
+The package supports four distinct ways of specifying what you want to detect. Each corresponds to a different statistical test and a different configuration class.
+
+| Mode | Config class | Test | When to use |
+|---|---|---|---|
+| **Linear contrast** | `PowerContrastConfig` | F-test on Lβ = δ | You have a specific effect in mind — a main effect, interaction, or comparison between two scenarios — and you know roughly how large it needs to be to matter |
+| **Global R²** | `PowerR2Config` | Omnibus F-test | You want to test whether the model as a whole explains meaningful variance; you don't have a specific contrast in mind |
+| **GLM Wald χ²** | `PowerGLMContrastConfig` | Wald chi-square | Your response is binary (pass/fail, conversion, presence/absence) or a count (defects per unit, events per period) |
+| **Multi-response** | `MultiResponseOptions` + `ResponseSpec` | Per-response + combined rule | You have two or more responses that must all be adequately powered, and you want the design to satisfy all of them simultaneously |
+
+**Linear contrast mode** (Chapter 3) is the most commonly used and the most flexible. You specify a contrast matrix L that encodes exactly which linear combination of model coefficients you want to test, and δ gives the minimum effect you need to detect on that combination. If you are unsure how to construct L, the `contrast_from_scenarios` helper builds it automatically by comparing two sets of factor settings.
+
+**Global R² mode** (Chapter 4) is appropriate when you cannot or do not want to specify a precise contrast but still want the experiment to be powered to detect a meaningful model fit. It uses Cohen's f² effect-size convention and aligns with the omnibus F-test reported by most regression software.
+
+**GLM mode** (Chapter 5) handles the two most common non-Gaussian response types. For a binomial response (e.g. a product test that passes or fails), the effect is expressed as a difference in log-odds; for a Poisson response (e.g. defect counts), it is a difference in log-rates. The design search is structurally the same as for linear models, but the power calculation uses a Wald chi-square statistic and accounts for the response family through a Fisher weight.
+
+**Multi-response mode** (Chapter 6) lets you specify several responses at once, each with its own formula, factors, and power mode. The design search maximises a combined power objective whose combination rule you control: `"min"` (the design is only as good as its weakest response), `"product"` (penalises any response that is under-powered), or `"weighted_mean"` (lets you assign business-priority weights across responses).
+
+---
+
+#### 1.5 The seven interfaces at a glance — a map for new users
+
+The package provides seven ways to generate a design. They all call the same underlying algorithm; they differ in how you provide input and receive output.
+
+| Interface | Best for | Requires Python? |
+|---|---|---|
+| Python API | Scripting, automation, custom post-processing | Yes |
+| CLI | Reproducible file-based pipelines, CI/CD | For install only |
+| Streamlit web UI | Interactive exploration, non-programmer collaborators | No |
+| Excel | Teams with an Excel-first workflow | No |
+| Google Sheets | Distributed teams, cloud-first organisations | No |
+| Jupyter Widgets | Interactive exploration inside a notebook | Yes |
+| REST API | Integration with non-Python systems or shared platforms | No |
+
+**If you are new to the package** and comfortable with Python, start with the Python API (Chapter 8) for maximum transparency and control. Run the [Quick Start Guide](quickstart.md) first — it gets a working design in ten minutes and introduces the core objects.
+
+**If you need a no-code interface**, the Streamlit app (Chapter 10) covers all major design types with a four-page UI that requires no programming. You can run it locally with `streamlit run app/app.py` or deploy it to Streamlit Community Cloud for free.
+
+**If your team lives in spreadsheets**, the Excel interface (Chapter 11) and Google Sheets interface (Chapter 12) accept a filled-in template and write results back to the same file, so the entire workflow stays in the tool your collaborators already use.
+
+**If you are embedding the package in a larger platform**, the REST API (Chapter 14) exposes all major functions as HTTP endpoints, making it straightforward to call from R, JavaScript, or any language with an HTTP client.
+
+**Choosing between interfaces for the same task** is mostly a question of convenience and team workflow. All interfaces share the same configuration parameters; there is no capability penalty for using the spreadsheet interfaces over the Python API for the features they support. Appendix C has a full feature-by-interface comparison table.
+
+> **Cross-reference:** The [README](../README.md) has concise parameter tables for every configuration class. The [Quick Start Guide](quickstart.md) covers the Python API and CLI from zero to a working design. The [Recipes](recipes.md) have copy-paste snippets for common tasks like criteria comparison, sensitivity analysis, augmentation, and split-plot designs. This guide builds on all three by explaining the reasoning behind the choices those documents ask you to make.
 
 ---
 
