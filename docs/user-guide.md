@@ -153,19 +153,184 @@ The package provides seven ways to generate a design. They all call the same und
 
 ### Chapter 2 — Installation and project layout
 
-- 2.1 Python version requirements (≥ 3.9)
-- 2.2 Installing the core package from source
-- 2.3 Optional extras and when you need them
-  - `[cli]` — YAML config support for the command-line tool
-  - `[viz]` — Matplotlib + Plotly for power curve figures
-  - `[app]` — Streamlit web UI
-  - `[report]` — self-contained HTML report generation (Jinja2 + Pillow)
-  - `[report-pdf]` — PDF export via WeasyPrint
-  - `[extras]` — tqdm progress bars, openpyxl for Excel output
-  - `[widgets]` — ipywidgets + Plotly for in-notebook interactive UI
-  - `[all]` — everything at once
-- 2.4 Verifying the install: a one-line smoke test
-- 2.5 Project layout overview: `iopt_power_design/`, `app/`, `api_server/`, `docs/`
+#### 2.1 Python version requirements
+
+The package requires **Python 3.9 or later**. It has been tested on Python 3.9, 3.10, 3.11, and 3.12. It runs on Linux, macOS, and Windows.
+
+The four core runtime dependencies — `numpy`, `pandas`, `scipy`, and `patsy` — are installed automatically with the core package. All other dependencies are optional and installed only when you request a specific extras group (see section 2.3).
+
+---
+
+#### 2.2 Installing the core package
+
+The package is installed from source using pip's editable install mode, which means Python reads the source files directly from the repository rather than copying them into your site-packages directory. This makes it straightforward to update by pulling new commits without reinstalling.
+
+From the repository root:
+
+```bash
+pip install -e .
+```
+
+This installs the core package with its four required dependencies and registers two command-line entry points:
+
+- `iopt-design` — the CLI for YAML-driven design generation (requires the `[cli]` extra for YAML parsing; see section 2.3)
+- `iopt-api` — the REST API server entry point (requires the `[server]` extra)
+
+If you are setting up a fresh environment, a virtual environment is strongly recommended to keep the package's dependencies isolated from your system Python:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # on Windows: .venv\Scripts\activate
+pip install -e .
+```
+
+---
+
+#### 2.3 Optional extras and when you need them
+
+The package uses pip extras groups to keep the core install lightweight. Install only the extras you actually need for your workflow. Each extra is independent; you can combine them in a single install command.
+
+```bash
+pip install -e ".[extra1,extra2,...]"
+```
+
+| Extra | What it adds | Install when |
+|---|---|---|
+| `cli` | `pyyaml` — YAML config parsing | You want to use `iopt-design --config config.yml` |
+| `viz` | `matplotlib`, `seaborn`, `plotly` — power curve figures | You want to generate or display power curve plots |
+| `app` | `streamlit`, `plotly`, `pyyaml` — the web UI | You want to run `streamlit run app/app.py` |
+| `report` | `jinja2`, `pillow`, `kaleido` — HTML report generation | You want to call `generate_report(...)` to produce shareable HTML files |
+| `report-pdf` | Everything in `[report]` plus `weasyprint` | You want PDF output from `generate_report(...)` |
+| `extras` | `tqdm` (progress bars), `xlsxwriter`, `openpyxl` (Excel I/O) | You want progress bars during long runs, or you use the Excel interface |
+| `sheets` | `gspread`, `google-auth` — Google Sheets client | You want to use `sheets_run(...)` or `create_sheet_template(...)` |
+| `widgets` | `ipywidgets`, `plotly` — in-notebook interactive UI | You want to call `design_widget(...)` inside a Jupyter notebook |
+| `server` | `fastapi`, `uvicorn`, `pydantic`, `httpx` — REST API | You want to run `iopt-api` to start the REST server |
+| `all` | Everything above | You want every feature available |
+
+**Common combinations:**
+
+```bash
+# Core Python API only (no extras needed for scripting)
+pip install -e .
+
+# Python API + plots + HTML reports
+pip install -e ".[viz,report]"
+
+# CLI-driven workflows
+pip install -e ".[cli,extras]"
+
+# Full Streamlit deployment
+pip install -e ".[app,report,extras]"
+
+# Jupyter notebook exploration
+pip install -e ".[viz,widgets]"
+
+# Google Sheets integration
+pip install -e ".[sheets]"
+
+# Everything
+pip install -e ".[all]"
+```
+
+> **PDF export note.** The `weasyprint` library in `[report-pdf]` requires system-level libraries (cairo and pango) that are not installed by pip. On Ubuntu/Debian: `sudo apt-get install libcairo2 libpango-1.0-0 libpangocairo-1.0-0`. On macOS with Homebrew: `brew install cairo pango`. On Windows, see the WeasyPrint documentation. If you only need shareable output, the HTML format from `[report]` requires no system dependencies and can be opened in any browser.
+
+---
+
+#### 2.4 Verifying the install
+
+After installing, run a one-line smoke test to confirm the core package and its dependencies are working:
+
+```python
+python -c "import iopt_power_design; print(iopt_power_design.__version__)"
+```
+
+This should print the current version string (e.g. `0.1.0`) without errors. If it fails, the most common causes are a missing dependency or a Python version below 3.9.
+
+To confirm the CLI is registered:
+
+```bash
+iopt-design --help
+```
+
+You should see the help text listing `--config`, `--template`, `--out`, `--dry-run`, and related flags. If `iopt-design: command not found` is returned, your virtual environment's `bin/` directory may not be on `PATH` — activate the environment and try again.
+
+---
+
+#### 2.5 Project layout
+
+Understanding where things live helps when you want to inspect or extend the code, run the tests, or look up a function's implementation.
+
+```
+iopt_power_design/        # core Python package — importable as `iopt_power_design`
+│
+├── __init__.py           # public API surface: re-exports everything in __all__
+├── config.py             # dataclasses: PowerContrastConfig, PowerR2Config,
+│                         #   PowerGLMContrastConfig, DesignOptions, SplitPlotOptions,
+│                         #   ResponseSpec, MultiResponseOptions
+├── api.py                # primary entry points: i_optimal_powered_design,
+│                         #   i_optimal_multiresponse_design
+├── analysis.py           # analytical utilities: power_curve_by_n, power_curve_by_effect,
+│                         #   power_sensitivity, min_detectable_effect, compare_criteria,
+│                         #   robustness_report, multiresponse_sensitivity, ...
+├── power.py              # per-mode power functions: contrast_power_sp, glm_contrast_power,
+│                         #   global_r2_power_sp, eval_response_power, combine_powers, ...
+├── power_curves.py       # power curve implementations + power_surface_2d
+├── iopt_search.py        # Fedorov exchange engine, multi-start orchestration, augment_design
+├── candidate.py          # candidate set construction: build_candidate, build_split_plot_candidate
+├── model_matrix.py       # Patsy wrapper: build_model_matrix
+├── allocation.py         # i_optimal_allocation
+├── contrasts.py          # contrast_from_scenarios
+├── split_plot.py         # GLS information matrix, whole-plot covariance utilities
+├── blocked.py            # blocked design utilities: balanced_block_sizes, build_blocked_design
+├── _request_builder.py   # internal shared config builder (not part of public API)
+│
+├── cli.py                # iopt-design command-line tool
+├── sheets.py             # Google Sheets interface: sheets_run, create_sheet_template
+├── excel_template.py     # Excel interface: excel_run, create_excel_template
+├── widgets.py            # Jupyter widgets UI: design_widget, DesignWidget
+├── report.py             # HTML/PDF report generation: generate_report
+│
+├── diag_metrics.py       # diagnostics: pure-NumPy metrics
+├── diag_plots.py         # diagnostics: matplotlib figures
+├── diag_export.py        # diagnostics: file export utilities
+├── diagnostics.py        # backward-compat re-export wrapper for diag_* modules
+├── design.py             # backward-compat re-export wrapper (split into candidate/iopt_search)
+│
+└── plot_backends.py      # matplotlib / plotly figure helpers
+
+app/                      # Streamlit web application
+├── app.py                # entry point: `streamlit run app/app.py`
+├── state.py              # shared session-state helpers
+├── components/           # reusable UI components (factor table, power params, charts)
+└── pages/
+    ├── 1_Factors.py      # Page 1: factor definition
+    ├── 2_Power_Config.py # Page 2: power mode and parameters
+    ├── 3_Run_Results.py  # Page 3: run the design, view results, download
+    └── 4_Analysis.py     # Page 4: power curves, sensitivity, MDE, criteria comparison
+
+api_server/               # FastAPI REST API server
+├── main.py               # app factory: `uvicorn api_server.main:create_app --factory`
+├── serialization.py      # Pydantic request/response models
+├── errors.py             # exception handlers
+└── routers/
+    ├── design.py         # POST /design, POST /multiresponse_design
+    ├── power_curve.py    # POST /power_curve/by_n, POST /power_curve/by_effect
+    ├── sensitivity.py    # POST /sensitivity, POST /mde
+    ├── compare.py        # POST /compare_criteria
+    └── augment.py        # POST /augment
+
+docs/                     # documentation
+├── quickstart.md         # 10-minute getting-started guide
+├── recipes.md            # task-oriented code snippets
+├── user-guide.md         # this document
+└── planning/             # internal design and review notes
+
+tests/                    # test suite (pytest)
+```
+
+**The public API surface is everything exported from `iopt_power_design/__init__.py`.** You should never need to import from any submodule directly for ordinary use. The one exception noted in the recipes is `from iopt_power_design.power_curves import power_curve_by_n` when you need access to the Plotly figure object — the top-level wrapper discards it.
+
+The backward-compat wrappers (`design.py`, `diagnostics.py`) exist because those modules were previously monolithic and were split during a refactoring pass. They continue to work exactly as before; you do not need to update existing code that imports from them.
 
 ---
 
