@@ -3856,20 +3856,347 @@ The output sheets are cleared and rewritten with the updated results. The Config
 
 ### Chapter 13 — Jupyter Widgets: interactive in-notebook UI
 
-- 13.1 When to use the widgets interface
-  - Exploratory analysis in JupyterLab or VS Code notebooks
-  - Teaching and demonstration contexts
-  - Interactive power-curve exploration without leaving the notebook
-- 13.2 Installing widget support: `pip install -e ".[widgets]"`
-- 13.3 `design_widget` and `DesignWidget`
-  - The `formula` and `factors` pre-fill parameters
-  - Selecting `power_mode`: `"contrast"` or `"r2"` (GLM modes are not available in the widget; use the Python API for GLM designs)
-  - The inline Plotly power curve (live-updates on factor or config changes)
-  - Retrieving the result after running: `w.get_result()`
-- 13.4 Embedding widget output in a report or notebook
-- 13.5 **Full worked example** (Jupyter notebook, R² mode, consumer survey from Chapter 4)
-  - Comparing widget-driven exploration vs. scripted API calls
-  - Exporting the widget-selected design to CSV and HTML report
+The Jupyter widgets interface puts an interactive power-design UI directly
+inside a JupyterLab or VS Code notebook cell. Instead of editing Python code to
+explore different power assumptions, you adjust sliders and text fields, click
+**Generate design**, and see the result — including an inline Plotly power curve
+— update in place, with no page reload and no context switch.
+
+---
+
+#### 13.1 When to use the widgets interface
+
+The widgets interface is best when the analytical goal is **exploration rather
+than production**:
+
+| Situation | Widgets fit? |
+|-----------|-------------|
+| You want to try several R² targets and see how sample size changes | Yes |
+| You are teaching a class or running a workshop | Yes |
+| You are demonstrating the package to a client who is in the room | Yes |
+| You want a reproducible, auditable analysis script | Better as Python API |
+| You need GLM (binomial/Poisson) mode | No — use Python API |
+| You need multi-response design | No — use Python API |
+| You are automating runs in CI | No — use CLI or Python API |
+
+The widget UI supports **R² mode** and **contrast mode** only. For GLM designs,
+multi-response designs, split-plot designs with advanced options, or any
+scenario where you need programmatic post-processing, use `i_optimal_powered_design`
+directly.
+
+The practical teaching workflow is:
+
+1. Use the widget to explore the design space interactively.
+2. Once the configuration looks right, read off the parameters from the widget
+   output.
+3. Write a short, reproducible Python script with those parameters for archiving
+   or handoff.
+
+---
+
+#### 13.2 Installing widget support
+
+The widget dependencies (`ipywidgets` ≥ 8.0 and `plotly` ≥ 5.0) are optional.
+Install them with the `[widgets]` extras group:
+
+```bash
+pip install "iopt-power-design[widgets]"
+```
+
+If you are working in JupyterLab, you do not need to install any additional
+JupyterLab extension — `ipywidgets` 8.x bundles its own lab extension.
+
+If you are working in VS Code, the Jupyter extension handles `ipywidgets`
+rendering automatically.
+
+To verify that the installation worked:
+
+```python
+from iopt_power_design.widgets import design_widget
+print("widgets OK")
+```
+
+If `ipywidgets` is missing, importing `design_widget` succeeds (the import is
+lazy), but calling it raises `WidgetsError` with a clear install hint. This
+keeps the package importable in environments where widgets are not needed.
+
+---
+
+#### 13.3 The `design_widget` factory function and `DesignWidget` class
+
+**`design_widget`** is the one-liner entry point. It creates a `DesignWidget`
+instance, renders it in the current cell, and returns the instance so you can
+read the result later:
+
+```python
+from iopt_power_design.widgets import design_widget
+
+w = design_widget(
+    formula="~ 1 + Price + Quality + Convenience",
+    factors={
+        "Price":       (0, 50),
+        "Quality":     (1, 5),
+        "Convenience": (1, 3),
+    },
+    power_mode="r2",
+    r2_target=0.15,
+    power=0.80,
+    alpha=0.05,
+)
+```
+
+`design_widget` accepts the same pre-fill parameters as `DesignWidget.__init__`:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `formula` | `str` | `"~ 1 + A + B"` | Patsy formula — pre-fills the formula field |
+| `factors` | `dict` | `{}` | Factor spec — continuous `(lo, hi)`, categorical `[...]` |
+| `power_mode` | `"r2"` or `"contrast"` | `"r2"` | Which power panel is shown first |
+| `alpha` | `float` | `0.05` | Significance level slider initial value |
+| `power` | `float` | `0.80` | Target power slider initial value |
+| `sigma` | `float` | `1.0` | σ field initial value (contrast mode) |
+| `r2_target` | `float` | `0.15` | R² target slider initial value |
+| `max_n` | `int` | `500` | Maximum sample-size search bound |
+| `design_opts` | `DesignOptions` | `None` | Seed design options — exposed fields are pre-filled, non-exposed fields are forwarded at run time |
+| `show_advanced` | `bool` | `False` | Whether to expand the Advanced accordion on load |
+
+**Pre-filling from an existing `DesignOptions`**
+
+If you already have a `DesignOptions` object — perhaps from a previous scripted
+run — pass it as `design_opts`. The widget exposes six `DesignOptions` fields
+as interactive controls:
+
+| Widget control | `DesignOptions` field |
+|----------------|-----------------------|
+| Criterion dropdown (I / D / A) | `criterion` |
+| Starts slider | `starts` |
+| Random seed text box | `random_state` |
+| Auto-size candidate set checkbox | `auto_candidate` |
+| Candidate points text box | `candidate_points` |
+| Constraint expression text box | `constraint_expr` |
+
+Non-exposed fields (such as `n_blocks`, `n_whole_plots`, `workers`) are stored
+internally and forwarded unchanged at run time. So if you set up a blocked
+design via code and then pass the `DesignOptions` to the widget, the block
+structure is preserved even though you cannot see or change it in the UI.
+
+---
+
+#### 13.4 What happens when you click "Generate design"
+
+When you click the blue **Generate design** button, the widget:
+
+1. Validates all inputs. Errors are shown in red beneath the button.
+2. Reads every widget value into a state dict.
+3. Calls `i_optimal_powered_design` with the assembled `formula`, `factors`,
+   `PowerR2Config` or `PowerContrastConfig`, and `DesignOptions`.
+4. On success, displays a metrics summary table, the full design matrix, the
+   run buckets table (if any), and an inline Plotly power-vs-n curve.
+5. Stores the full result in `w._result`, accessible via `w.get_result()`.
+
+The inline power curve is built by scaling the returned noncentrality parameter
+(λ) across a range of n values around the optimal. It is an approximation (the
+design structure is not re-optimised at each n), but it is fast and accurate
+enough for interactive exploration.
+
+**Retrieving results after a run**
+
+```python
+# After clicking Generate design in the cell above:
+result = w.get_result()        # full API result dict
+df     = w.get_design_df()     # result["design_df"]  — the design matrix
+report = w.get_report()        # result["report"]      — metrics dict
+```
+
+All three methods return `None` until at least one run has succeeded.
+
+**Resetting the widget**
+
+```python
+w.reset()   # restores all controls to constructor defaults and clears result
+```
+
+---
+
+#### 13.5 Full worked example — consumer survey in R² mode
+
+This example mirrors the Chapter 4 consumer survey study (Price, Quality,
+Convenience) using the widget UI instead of a pure API call.
+
+**Cell 1 — launch the widget**
+
+```python
+from iopt_power_design.widgets import design_widget
+
+w = design_widget(
+    formula="~ 1 + Price + Quality + Convenience",
+    factors={
+        "Price":       (0, 50),
+        "Quality":     (1, 5),
+        "Convenience": (1, 3),
+    },
+    power_mode="r2",
+    r2_target=0.15,   # detect a model explaining 15% of variance
+    power=0.80,
+    alpha=0.05,
+    max_n=300,
+    show_advanced=False,
+)
+```
+
+The widget renders immediately. The factor table shows three pre-filled rows;
+the R² slider sits at 0.15; the power slider at 0.80.
+
+**Exploring in the UI**
+
+Click **Generate design**. After a few seconds the metrics panel appears:
+
+```
+n (runs)          66
+Achieved power    0.8013
+Target power      0.800
+α                 0.050
+Noncentrality λ   11.6471
+Criterion         I
+```
+
+The inline power curve shows power rising from near 0 at small n through 0.80
+at n = 66, and approaching 1.0 by n ≈ 200.
+
+Now slide the **R² target** from 0.15 to 0.10 — a smaller effect to detect —
+and click **Generate design** again. The required n increases (the curve shifts
+right). Slide it to 0.25 and run again: n decreases. This kind of rapid
+what-if exploration is what the widget is designed for.
+
+**Switching to contrast mode**
+
+Click the **Contrast (L·β = δ)** toggle. The R² panel collapses and the
+L matrix / δ vector / σ fields appear. Enter:
+
+- **L matrix** (one row, three columns — intercept + Price + Quality + Convenience): `0 1 0 0`
+- **δ vector** (minimum detectable effect for Price): `0.5`
+- **σ (residual std)**: `1.0`
+
+Click **Generate design**. For this simple main-effect contrast in a three-factor
+model the returned n is 39 with power 0.8016.
+
+Toggle back to R² mode (the widget remembers your R² values) and you can
+compare the two approaches side by side.
+
+**Cell 2 — extract and save the design**
+
+After you are satisfied with a configuration, extract the result and save:
+
+```python
+import pandas as pd
+
+result = w.get_result()
+df     = w.get_design_df()
+
+# Save design to CSV
+df.to_csv("consumer_survey_design.csv", index=False)
+print(f"Saved {len(df)} runs to consumer_survey_design.csv")
+
+# Show report summary
+r = w.get_report()
+print(f"n={r['n']}  power={r['achieved_power']:.4f}  λ={r['noncentrality_lambda']:.4f}")
+```
+
+**Cell 3 — export an HTML report**
+
+The full result dict is identical to what `i_optimal_powered_design` returns,
+so you can use `export_report_to` after the fact via the API if needed — or
+simply re-run with `export_report_to` set:
+
+```python
+from iopt_power_design.api import i_optimal_powered_design
+from iopt_power_design.config import PowerR2Config, DesignOptions
+
+# Re-run programmatically with the parameters identified via the widget
+result = i_optimal_powered_design(
+    formula="~ 1 + Price + Quality + Convenience",
+    factors={
+        "Price":       (0, 50),
+        "Quality":     (1, 5),
+        "Convenience": (1, 3),
+    },
+    power_cfg=PowerR2Config(r2_target=0.15, power=0.80, alpha=0.05),
+    design_opts=DesignOptions(random_state=42),
+    export_report_to="consumer_survey_report.html",
+)
+print("Report saved to consumer_survey_report.html")
+```
+
+This makes the widget-to-script handoff seamless: you explore with the widget,
+identify the right parameters, then lock them in a reproducible script for
+archiving.
+
+**Widget-driven vs scripted: when to choose which**
+
+| Task | Widget | Script |
+|------|--------|--------|
+| Initial power/n exploration | Preferred | Verbose |
+| Trying 5 different R² targets | Preferred | Manageable |
+| Sharing a notebook with collaborators | Good | Also good |
+| Archiving in version control | Awkward | Preferred |
+| CI/CD or automated scheduling | Not supported | Required |
+| GLM / multi-response designs | Not supported | Required |
+
+The typical workflow is widget first, script second: explore visually, then
+freeze the winning configuration as a Python call for reproducibility.
+
+---
+
+#### 13.6 Using `DesignWidget` directly
+
+`design_widget` is a thin wrapper that calls `DesignWidget(...).display()` and
+returns the widget. Use `DesignWidget` directly if you want to build the widget
+object first and display it later, or if you want to embed it inside a larger
+`ipywidgets` layout:
+
+```python
+from iopt_power_design.widgets import DesignWidget
+import ipywidgets as widgets
+
+w = DesignWidget(
+    formula="~ 1 + Price + Quality + Convenience",
+    factors={
+        "Price":       (0, 50),
+        "Quality":     (1, 5),
+        "Convenience": (1, 3),
+    },
+    power_mode="r2",
+    r2_target=0.15,
+)
+
+# Wrap in a Tab alongside another widget
+tab = widgets.Tab(children=[w._layout, widgets.HTML("<p>Other content</p>")])
+tab.set_title(0, "Design")
+tab.set_title(1, "Notes")
+display(tab)
+```
+
+#### 13.7 `WidgetsError`
+
+If `ipywidgets` or `plotly` is not installed, the first call to `design_widget`
+or `DesignWidget(...)` raises `WidgetsError`:
+
+```python
+from iopt_power_design.widgets import WidgetsError
+
+try:
+    w = design_widget()
+except WidgetsError as e:
+    print(e)
+# ipywidgets is required for the Jupyter UI. Install with:
+# pip install "iopt-power-design[widgets]"
+```
+
+You can also import `WidgetsError` from the package root:
+
+```python
+from iopt_power_design import WidgetsError
+```
 
 ---
 
