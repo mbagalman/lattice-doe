@@ -4202,28 +4202,426 @@ from iopt_power_design import WidgetsError
 
 ### Chapter 14 — REST API: programmatic access and microservice integration
 
-- 14.1 When to use the REST API
-  - Integrating with non-Python systems (R, JavaScript, Java, etc.)
-  - Deploying as a shared microservice in a data science platform
-  - Automating design generation from external scheduling tools
-- 14.2 Starting the server: `uvicorn api_server.main:create_app --factory`
-  - The `iopt-api` CLI entry point
-  - Multi-worker deployment
-- 14.3 Available endpoints
-  - `POST /design` — generate a single-response optimal design
-  - `POST /multiresponse_design` — generate a multi-response design
-  - `POST /power_curve/by_n` — power curve over sample sizes
-  - `POST /power_curve/by_effect` — power curve over effect sizes
-  - `POST /sensitivity` — run a sensitivity sweep
-  - `POST /mde` — compute minimum detectable effect
-  - `POST /compare_criteria` — compare I, D, and A criteria
-  - `POST /augment` — augment an existing design
-- 14.4 Request/response schema overview
-  - How Python dataclasses map to JSON in the API
-  - Handling optional parameters and their defaults
-- 14.5 **Full worked example** (curl / Python `httpx` client, contrast-mode design request)
-  - Full JSON request body for a two-factor contrast design
-  - Parsing the JSON response: design rows, buckets, report fields
+The REST API server wraps the full iopt-power-design library behind a set of
+HTTP endpoints. It is the right interface when you need to call the package from
+a non-Python environment, share a single design service across a team, or
+integrate design generation into a data pipeline or scheduling system.
+
+---
+
+#### 14.1 When to use the REST API
+
+| Situation | REST API fit? |
+|-----------|--------------|
+| Your analysis code is in R, JavaScript, Java, or any other language | Yes |
+| You want a single shared design service for a team or platform | Yes |
+| You are integrating with an external scheduler (Airflow, Prefect, cron) | Yes |
+| You want to call the package from the Python API directly | No — import directly |
+| You want an interactive UI | No — use Streamlit or widgets |
+
+The REST API supports all power modes (R², contrast, GLM), multi-response
+designs, split-plot designs, blocking, constraints, power curves, sensitivity
+sweeps, MDE, criteria comparison, and design augmentation.
+
+---
+
+#### 14.2 Installing server dependencies
+
+The server dependencies (FastAPI, Uvicorn, httpx, Pydantic v2) are optional:
+
+```bash
+pip install "iopt-power-design[server]"
+```
+
+---
+
+#### 14.3 Starting the server
+
+**Option A — `iopt-api` CLI entry point (recommended)**
+
+```bash
+iopt-api
+```
+
+This starts Uvicorn on `0.0.0.0:8000` with a fresh app instance. Equivalent to:
+
+```bash
+uvicorn api_server.main:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+**Option B — Uvicorn with custom settings**
+
+```bash
+uvicorn api_server.main:create_app \
+    --factory \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 4 \
+    --log-level info
+```
+
+The `--factory` flag is required. It tells Uvicorn to call `create_app()` once
+per worker process rather than sharing a single app instance, which is the
+correct pattern for multi-worker deployments.
+
+**Note on parallelism inside the server**
+
+The `workers` field in `DesignOptionsModel` (see §14.5) is accepted but silently
+set to `None` inside the ASGI server. Process-pool executors conflict with
+Uvicorn's event loop. Use Uvicorn's own `--workers` flag for horizontal scaling
+instead.
+
+**Interactive API docs**
+
+Once the server is running, the auto-generated interactive documentation is
+available at:
+
+- `/docs` — Swagger UI (try endpoints directly in the browser)
+- `/redoc` — ReDoc (readable reference)
+- `/health` — health check: `{"status": "ok", "version": "..."}`
+
+---
+
+#### 14.4 Available endpoints
+
+All endpoints accept and return JSON. Compute-heavy endpoints run in a
+background thread so the server remains responsive; wall-clock time for a
+design run is typically 10–120 seconds depending on complexity.
+
+| Method + path | Purpose |
+|---------------|---------|
+| `POST /design` | Generate a single-response I-optimal powered design |
+| `POST /multiresponse_design` | Generate a multi-response powered design |
+| `POST /power_curve/by_n` | Power vs sample size curve |
+| `POST /power_curve/by_effect` | Power vs effect size curve (fixed n) |
+| `POST /sensitivity` | Power sensitivity sweep on a fixed design |
+| `POST /mde` | Minimum detectable effect for a fixed design |
+| `POST /compare_criteria` | Compare I, D, and A optimality criteria |
+| `POST /augment` | Augment an existing design with additional runs |
+| `GET /health` | Health check |
+
+---
+
+#### 14.5 Request/response schema overview
+
+Every request body follows the same structural pattern:
+
+```
+formula        string              Patsy formula
+factors        object              {"Name": [lo, hi]} or {"Name": ["lvl1", "lvl2"]}
+power_cfg      object              Power configuration (see below)
+design_opts    object (optional)   Design generation options
+```
+
+**Factor specification**
+
+Continuous factors are encoded as a two-element JSON array `[low, high]`.
+Categorical factors are encoded as an array of strings `["level1", "level2"]`.
+In JSON, both are arrays — the API distinguishes them by element type.
+
+**`power_cfg` — discriminated union on `"type"`**
+
+The `power_cfg` field is a discriminated union. The `"type"` key is required
+and selects which power model is used:
+
+| `"type"` value | Power model | Key required fields |
+|----------------|-------------|---------------------|
+| `"r2"` | Global R² F-test | `r2_target` |
+| `"contrast"` | L·β = δ contrast test | `L`, `delta` |
+| `"glm_contrast"` | GLM Wald χ² contrast | `L`, `delta`, `family`, `baseline` |
+
+All three types accept optional `alpha` (default 0.05), `power` (default 0.80),
+and `max_n` (default 2000).
+
+**`design_opts` — optional, uses defaults when omitted**
+
+The `design_opts` object mirrors `DesignOptions` from the Python API. Key
+fields:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `criterion` | `"I"` | Optimality criterion: `"I"`, `"D"`, or `"A"` |
+| `starts` | `5` | Number of random starts |
+| `random_state` | `123` | Random seed for reproducibility |
+| `auto_candidate` | `false` | Auto-size candidate set |
+| `candidate_points` | `2000` | Candidate set size (when `auto_candidate` is false) |
+| `constraint_expr` | `null` | Row-level constraint string (e.g. `"A + B <= 1"`) |
+| `n_blocks` | `null` | Number of blocks (≥ 2 to enable blocking) |
+| `split_plot` | `null` | Split-plot options object |
+
+Note: `constraint_func` (Python callable) cannot travel over HTTP. Use
+`constraint_expr` (a string) instead — it is compiled server-side using the
+same sandboxed AST evaluator as the Python API.
+
+**`POST /design` response structure**
+
+```json
+{
+  "design_df": [
+    {"A": -0.97, "B": 0.84},
+    ...
+  ],
+  "buckets_df": [
+    {"A": -1.0, "B": -1.0, "count": 3},
+    ...
+  ],
+  "report": {
+    "n": 39,
+    "p": 3,
+    "df_num": 1,
+    "df_denom": 36,
+    "alpha": 0.05,
+    "target_power": 0.80,
+    "achieved_power": 0.8016,
+    "noncentrality_lambda": 8.2471,
+    "criterion": "I",
+    "elapsed_sec": 4.21,
+    "diagnostics": {
+      "i_criterion": 0.034,
+      "d_efficiency": 0.951,
+      "condition_number": 3.1
+    }
+  }
+}
+```
+
+**Error responses**
+
+| HTTP status | `"error"` key | Cause |
+|-------------|---------------|-------|
+| 422 | `"ValidationError"` | Malformed JSON or invalid field value |
+| 422 | `"InvalidInput"` | `ValueError` from the core library (e.g. bad formula) |
+| 422 | `"DesignError"` | `RuntimeError` from the design search (e.g. no feasible design) |
+| 500 | `"InternalServerError"` | Unexpected exception (see server logs) |
+
+---
+
+#### 14.6 Full worked example — curl and Python httpx
+
+This example uses the same two-factor Temp/Pressure model from earlier chapters
+to demonstrate the full request/response cycle. We show both `curl` and the
+Python `httpx` client for completeness.
+
+**Start the server** (in a separate terminal):
+
+```bash
+iopt-api
+```
+
+Wait for the log line:
+
+```
+INFO:     iopt-api v<version> started.
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+**Health check**
+
+```bash
+curl http://localhost:8000/health
+# {"status":"ok","version":"..."}
+```
+
+**Design request — curl**
+
+```bash
+curl -s -X POST http://localhost:8000/design \
+  -H "Content-Type: application/json" \
+  -d '{
+    "formula": "~ 1 + Temp + Pressure",
+    "factors": {
+      "Temp":     [-1, 1],
+      "Pressure": [-1, 1]
+    },
+    "power_cfg": {
+      "type":  "contrast",
+      "L":     [[0, 1, 0]],
+      "delta": [0.5],
+      "sigma": 1.0,
+      "power": 0.80,
+      "alpha": 0.05
+    },
+    "design_opts": {
+      "random_state": 42,
+      "starts": 5
+    }
+  }' | python -m json.tool
+```
+
+The response `report` section will show `"n": 39` and `"achieved_power"` near
+0.8016, matching the Python API result from earlier chapters.
+
+**Design request — Python httpx**
+
+```python
+import httpx
+
+BASE = "http://localhost:8000"
+
+payload = {
+    "formula": "~ 1 + Temp + Pressure",
+    "factors": {
+        "Temp":     [-1, 1],
+        "Pressure": [-1, 1],
+    },
+    "power_cfg": {
+        "type":  "contrast",
+        "L":     [[0, 1, 0]],
+        "delta": [0.5],
+        "sigma": 1.0,
+        "power": 0.80,
+        "alpha": 0.05,
+    },
+    "design_opts": {
+        "random_state": 42,
+        "starts": 5,
+    },
+}
+
+resp = httpx.post(f"{BASE}/design", json=payload, timeout=120)
+resp.raise_for_status()
+data = resp.json()
+
+report = data["report"]
+print(f"n={report['n']}  power={report['achieved_power']:.4f}")
+print(f"λ={report['noncentrality_lambda']:.4f}  criterion={report['criterion']}")
+
+# Parse the design matrix into a DataFrame
+import pandas as pd
+design_df = pd.DataFrame(data["design_df"])
+print(design_df.head())
+```
+
+**GLM contrast request — curl**
+
+For a pharma bioavailability study (binomial, baseline event rate 0.30,
+formulation effect δ = 1.10 on the log-odds scale):
+
+```bash
+curl -s -X POST http://localhost:8000/design \
+  -H "Content-Type: application/json" \
+  -d '{
+    "formula": "~ 1 + Dose + Formulation",
+    "factors": {
+      "Dose":        [-1, 1],
+      "Formulation": ["IR", "SR"]
+    },
+    "power_cfg": {
+      "type":     "glm_contrast",
+      "L":        [[0, 0, 1]],
+      "delta":    [1.10],
+      "family":   "binomial",
+      "baseline": 0.30,
+      "power":    0.80,
+      "alpha":    0.05
+    }
+  }' | python -m json.tool
+```
+
+**R² request — Python httpx**
+
+```python
+payload_r2 = {
+    "formula": "~ 1 + Price + Quality + Convenience",
+    "factors": {
+        "Price":       [0, 50],
+        "Quality":     [1, 5],
+        "Convenience": [1, 3],
+    },
+    "power_cfg": {
+        "type":      "r2",
+        "r2_target": 0.15,
+        "power":     0.80,
+        "alpha":     0.05,
+    },
+}
+
+resp = httpx.post(f"{BASE}/design", json=payload_r2, timeout=120)
+data = resp.json()
+print(f"n={data['report']['n']}  power={data['report']['achieved_power']:.4f}")
+```
+
+**Power curve request**
+
+```python
+payload_curve = {
+    "formula": "~ 1 + Temp + Pressure",
+    "factors": {"Temp": [-1, 1], "Pressure": [-1, 1]},
+    "power_cfg": {
+        "type":  "contrast",
+        "L":     [[0, 1, 0]],
+        "delta": [0.5],
+        "sigma": 1.0,
+    },
+    "n_points": 10,
+}
+
+resp = httpx.post(f"{BASE}/power_curve/by_n", json=payload_curve, timeout=300)
+curve_df = pd.DataFrame(resp.json()["rows"])
+print(curve_df[["n", "power"]].to_string(index=False))
+```
+
+**MDE request (given a fixed design)**
+
+First generate a design, then ask what the minimum detectable effect is for it
+at 80% power:
+
+```python
+# 1. Generate design
+design_resp = httpx.post(f"{BASE}/design", json=payload, timeout=120).json()
+design_rows = design_resp["design_df"]
+
+# 2. Ask for MDE
+mde_payload = {
+    "formula": "~ 1 + Temp + Pressure",
+    "factors": {"Temp": [-1, 1], "Pressure": [-1, 1]},
+    "design_df": design_rows,
+    "power_cfg": {
+        "type":  "contrast",
+        "L":     [[0, 1, 0]],
+        "delta": [0.5],    # ignored for MDE; starting guess only
+        "sigma": 1.0,
+    },
+    "target_power": 0.80,
+}
+
+mde_resp = httpx.post(f"{BASE}/mde", json=mde_payload, timeout=60).json()
+print(f"MDE={mde_resp['mde']:.4f}  achieved_power={mde_resp['achieved_power']:.4f}")
+```
+
+---
+
+#### 14.7 Deploying behind a reverse proxy
+
+The server has no built-in authentication. For production use, place a reverse
+proxy (nginx, Traefik, Caddy) in front to enforce:
+
+- TLS termination
+- Access controls (API key, OAuth2, network CIDR)
+- Rate limiting
+
+A minimal nginx location block:
+
+```nginx
+location /iopt/ {
+    proxy_pass http://127.0.0.1:8000/;
+    proxy_set_header Host $host;
+    proxy_read_timeout 180s;   # allow up to 3 min for heavy design searches
+}
+```
+
+For multi-worker deployment:
+
+```bash
+uvicorn api_server.main:create_app \
+    --factory \
+    --workers 4 \
+    --host 127.0.0.1 \
+    --port 8000
+```
+
+Each Uvicorn worker is an independent process with its own Python interpreter.
+There is no shared state between workers — every request is stateless.
 
 ---
 
