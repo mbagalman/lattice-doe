@@ -7143,24 +7143,222 @@ is usually preferable.
 
 ### Chapter 22 — Shareable reports
 
-- 22.1 What the report contains
-  - Configuration summary: formula, factors, power_cfg
-  - Power metrics: n, achieved power, noncentrality, degrees of freedom
-  - Design table with run allocations
-  - Embedded power-curve figure (base64-inline, no external dependencies)
-- 22.2 Generating a report: `generate_report`
-  - `output_path`: `.html` or `.pdf` extension controls the format
-  - Installing extras: `[report]` for HTML; `[report-pdf]` for PDF
-  - `export_report_to` shortcut: auto-generate the report at the end of `i_optimal_powered_design`
-- 22.3 The self-contained HTML format
-  - All CSS inline; no internet connection required; safe to email
-  - Opening in any browser without Python installed
-- 22.4 PDF output
-  - WeasyPrint dependency and system requirements
-  - When to use PDF vs. HTML
-- 22.5 **Full worked example** (Python API, generating and sharing an HTML report)
-  - Auto-report from `i_optimal_powered_design`, plus manual `generate_report` call with a custom path
-  - Embedding the report link in a CLI pipeline
+After a design is built, the results often need to be shared with collaborators,
+documented in a study protocol, or reviewed by someone who does not have Python
+installed. `generate_report` produces a self-contained HTML (or PDF) file that
+captures everything about the design in a single document.
+
+---
+
+#### 22.1 What the report contains
+
+A generated report has six sections:
+
+**Configuration.** The formula, factor definitions, and power configuration
+(contrast L, δ, σ, α, target power, or R² parameters) are displayed in a
+human-readable table. This makes it possible to reproduce the design from the
+document alone.
+
+**Power metrics.** The key numerical results: required n, achieved power,
+noncentrality parameter λ, and degrees of freedom (numerator and denominator).
+
+**Design table.** The first `design_rows_shown` rows of the design DataFrame
+(default: up to 30 rows). A note is shown when the full design has more rows.
+
+**Buckets table.** The `buckets_df` summary from `i_optimal_powered_design`,
+showing run-count groupings.
+
+**Diagnostics.** Any metrics from the `report` dict that were recorded during
+the search (timing, condition number, etc.).
+
+**Power-curve figure.** When `include_power_curve=True`, a power-vs-n curve is
+generated and embedded as a base64-encoded PNG — no external image files or
+internet connection required.
+
+---
+
+#### 22.2 Generating a report: `generate_report`
+
+**Installing the dependency.** HTML report generation requires `jinja2`:
+
+```bash
+pip install "iopt-power-design[report]"
+```
+
+PDF output additionally requires `weasyprint`:
+
+```bash
+pip install "iopt-power-design[report-pdf]"
+```
+
+**Signature:**
+
+```python
+from iopt_power_design import generate_report
+from pathlib import Path
+
+report_path = generate_report(
+    result,          # dict returned by i_optimal_powered_design
+    formula,         # Patsy formula string
+    factors,         # factor specification dict
+    power_cfg,       # PowerContrastConfig or PowerR2Config
+    output_path,     # str or Path — file destination
+    title="I-Optimal Design Report",   # optional heading
+    include_power_curve=True,          # embed a power-vs-n figure
+    design_rows_shown=30,              # max rows in the design table
+)
+# report_path is a pathlib.Path of the file that was written
+```
+
+**Output path rules:**
+
+| `output_path` value | Result |
+|---|---|
+| `"report.html"` | Writes `report.html` |
+| `"report.pdf"` | Writes `report.pdf` (requires WeasyPrint) |
+| `"results/"` (directory) | Writes `results/iopt_report.html` |
+| `"report"` (no extension) | Writes `report.html` (`.html` appended automatically) |
+
+**Returns** the resolved `pathlib.Path` of the written file.
+
+**`export_report_to` shortcut.**
+Pass `export_report_to` directly to `i_optimal_powered_design` to generate the
+report as part of the design call:
+
+```python
+result = i_optimal_powered_design(
+    formula, factors, power_cfg, design_opts,
+    export_report_to="my_design_report.html",
+)
+# → my_design_report.html is written automatically
+# result["report"]["report_path"] holds the resolved path
+```
+
+When using this shortcut, `include_power_curve` is set to `False` to keep
+the call fast. Use the explicit `generate_report` call with
+`include_power_curve=True` if you want the embedded figure.
+
+---
+
+#### 22.3 The self-contained HTML format
+
+The HTML report is designed to be **completely self-contained**:
+
+- All CSS is inlined in the `<style>` block — no external stylesheet is fetched.
+- The power-curve figure (when present) is base64-encoded and embedded directly
+  in the HTML as a `<img src="data:image/png;base64,...">` tag.
+- No JavaScript is required.
+
+This means the file can be:
+- Emailed as a single attachment without any auxiliary files.
+- Opened in any modern web browser without Python or any other software installed.
+- Archived alongside the raw data with no risk of broken image links.
+
+---
+
+#### 22.4 PDF output
+
+Pass a `.pdf` extension to get PDF output:
+
+```python
+report_path = generate_report(
+    result, formula, factors, power_cfg,
+    output_path="design_report.pdf",
+)
+```
+
+This requires the `weasyprint` package, which in turn has system-level
+dependencies (Cairo, Pango) that vary by operating system.
+
+**When to use PDF vs. HTML:**
+
+| Situation | Recommendation |
+|---|---|
+| Sharing by email, archiving in a study folder | **HTML** — universally openable, no dependencies |
+| Submitting to a regulatory authority or journal | **PDF** — fixed pagination, printable |
+| Embedding in a Streamlit or Jupyter notebook | **HTML** — easier to iframe or link |
+| Long-term archive with no Python environment | **HTML** — the file is self-describing |
+
+---
+
+#### 22.5 Full worked example
+
+**Step 1 — Build the design and generate the report in one call.**
+
+```python
+from iopt_power_design import (
+    i_optimal_powered_design, PowerContrastConfig, DesignOptions,
+)
+
+formula  = "A + B + A:B"
+factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+power_cfg = PowerContrastConfig(
+    L=[[0, 1, 0, 0]], delta=[1.0], sigma=2.0,
+    alpha=0.05, power=0.80, max_n=60,
+)
+opts = DesignOptions(starts=5, random_state=42)
+
+result = i_optimal_powered_design(
+    formula, factors, power_cfg, opts,
+    export_report_to="design_report.html",
+)
+print(result["report"]["n"])           # → 39 (or similar)
+print(result["report"].get("report_path"))  # → resolved path of written file
+```
+
+The file `design_report.html` is written to the current directory.
+Open it in any browser to see the full design summary.
+
+**Step 2 — Generate a richer report separately with the power curve.**
+
+```python
+from iopt_power_design import generate_report
+from pathlib import Path
+
+report_path = generate_report(
+    result,
+    formula,
+    factors,
+    power_cfg,
+    output_path=Path("reports") / "design_with_curve.html",
+    title="Polymer Process Optimisation — Design Report",
+    include_power_curve=True,   # embed power-vs-n figure
+    design_rows_shown=20,       # show first 20 rows of the design table
+)
+print(f"Report written to: {report_path}")
+# → Report written to: /path/to/reports/design_with_curve.html
+```
+
+The `reports/` directory is created automatically if it does not exist.
+The embedded power-curve figure shows power vs. n for the configured effect
+and sigma assumptions, making the report self-documenting.
+
+**Step 3 — Generate a PDF for submission.**
+
+```python
+# Requires: pip install "iopt-power-design[report-pdf]"
+pdf_path = generate_report(
+    result, formula, factors, power_cfg,
+    output_path="design_report.pdf",
+    title="Design Report — Protocol Submission",
+    include_power_curve=False,   # skip figure for cleaner PDF layout
+)
+print(f"PDF written to: {pdf_path}")
+```
+
+**Embedding in a CLI pipeline.**
+When running in a batch script, the return value of `generate_report` can be
+logged or passed to the next step:
+
+```python
+import subprocess, sys
+
+report_path = generate_report(result, formula, factors, power_cfg,
+                               output_path="output/report.html")
+# Open in the default browser (macOS / Linux)
+subprocess.run(["open" if sys.platform == "darwin" else "xdg-open",
+                str(report_path)])
+```
 
 ---
 
