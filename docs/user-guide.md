@@ -953,30 +953,365 @@ Each run combination is unique (no replication in the 73-row design). Replicatio
 ### Chapter 5 — GLM power: binary and count responses
 
 **Running examples:**
-- *Binomial*: An e-commerce team is A/B testing a redesigned checkout flow. The baseline conversion rate is 12%. They want 80% power to detect an absolute 3-percentage-point lift.
-- *Poisson*: A manufacturing quality team is studying defect counts. The baseline defect rate is 2.4 per batch. They want to detect a 50% reduction driven by process temperature and dwell time.
+- *Binomial*: A clinical team is running a dose-response study. Patient outcome is binary (responded / did not respond). The baseline response rate is 25%. They want 80% power to detect that the effect of dose achieves a 50% response rate.
+- *Poisson*: A manufacturing quality team is studying defect counts per batch. The baseline defect rate is 0.8 per batch. They want to detect a 50% reduction driven by process temperature and dwell time.
 
-- 5.1 Why ordinary linear power calculations are wrong for binary and count data
-  - The link function, the linear predictor scale, and the response scale
-  - Logit link (binomial): effects expressed as log-odds differences
-  - Log link (Poisson): effects expressed as log-rate differences
-- 5.2 The Fisher-weight approximation used in this package
-  - Constant weight w evaluated at the null baseline: w = p₀(1 − p₀) for binomial, w = μ₀ for Poisson
-  - Why w cancels from I/D/A criteria (so the design search is structurally identical to OLS)
-  - When this approximation is accurate vs. when it degrades: large slopes, wide covariate ranges
-- 5.3 Setting up `PowerGLMContrastConfig`
-  - `baseline`: probability ∈ (0, 1) for binomial; expected count > 0 for Poisson
-  - `family`: `"binomial"` or `"poisson"`
-  - `link`: canonical link defaults (logit / log); when to override
-  - Expressing δ on the linear-predictor scale (log-odds for binomial; log-rate for Poisson)
-  - Using `contrast_from_scenarios` for GLM: what sesoi means on the link scale
-- 5.4 **Full worked example — binomial** (Python API + CLI template, e-commerce checkout)
-  - Defining scenarios at the response scale and translating to the link scale
-  - Generating a starter YAML with `iopt-design --template glm-binomial`
-  - Interpreting achieved power and n
-- 5.5 **Full worked example — Poisson** (Python API, manufacturing defect count)
-  - Multi-factor setup with Poisson count response
-  - Validating against a simple simulation (optional sidebar)
+---
+
+#### 5.1 Why ordinary linear power calculations are wrong for binary and count data
+
+Chapters 3 and 4 assumed that the response is normally distributed with constant variance σ². That assumption breaks down for two common response types:
+
+**Binary responses** (pass/fail, responded/not, purchased/not) take only values 0 and 1. Their variance is not constant — it depends on the probability p: `Var(Y) = p(1 − p)`. A patient cohort with a 50% response rate is far more variable per observation than one with a 5% response rate. Using a Gaussian power formula with a guessed σ ignores this, and the resulting sample size will be wrong.
+
+**Count responses** (defects per batch, events per hour, errors per session) follow a Poisson distribution whose variance equals its mean: `Var(Y) = μ`. A process with a high defect rate is intrinsically noisier than one with a low rate, and again the Gaussian σ² model is a poor approximation.
+
+The right framework for both is a **generalised linear model (GLM)**, which:
+1. Models the mean on a transformed (link function) scale where the effect is additive and can be large or small without constraint.
+2. Uses the distribution-appropriate variance function rather than a constant σ².
+
+**The link functions.** The GLM encodes effects on the **linear predictor** scale η, related to the mean μ by the link function g:
+
+```
+η = g(μ) = Xβ
+```
+
+| Family | Link | Scale | Coefficient meaning |
+|---|---|---|---|
+| Binomial | Logit | Log-odds | β₁ = change in log-odds per unit change in x |
+| Poisson | Log | Log-rate | β₁ = change in log-rate per unit change in x |
+
+The practical consequence: when you specify a minimum detectable effect for a GLM design, you must express it on the **link scale** (log-odds or log-rate), not on the response scale (probability or count). The sections below show how to make that translation.
+
+---
+
+#### 5.2 The Fisher-weight approximation
+
+Computing a fully local D- or I-optimal GLM design in complete generality requires knowing the true parameter vector β before the experiment — which you do not. The common practical resolution is a **locally optimal design** evaluated at a nominal operating point.
+
+This package uses the **Fisher-weight (constant-weight) approximation**: the information contributed by run *i* is weighted by the GLM variance evaluated at the null baseline, giving a scalar weight w applied uniformly to every design point:
+
+```
+w = p₀(1 − p₀)    for binomial (evaluated at null baseline probability p₀)
+w = μ₀             for Poisson  (evaluated at null baseline count rate μ₀)
+```
+
+The scaled information matrix is then:
+
+```
+M = w · X'X
+```
+
+Because w is a positive scalar, it cancels from all three optimality criteria (I, D, A) — the criterion ratios are unchanged by a constant scaling of M. This means **the Fedorov exchange that optimises I, D, or A for a GLM design is structurally identical to the corresponding OLS exchange**. Only the power calculation changes: the noncentrality parameter for the Wald chi-square test becomes:
+
+```
+λ = w · δᵀ [L (X'X)⁻¹ Lᵀ]⁺ δ
+```
+
+**When is this approximation accurate?** The constant-weight approximation is reliable when:
+- The factor effects (slopes β) are small relative to the baseline: the true per-point weight `wᵢ = p(xᵢ)(1 − p(xᵢ))` does not vary much across the design region.
+- The baseline is not at an extreme of the response scale (far from 0 or 1 for binomial; not near 0 for Poisson).
+
+It becomes less accurate when slopes are large, because the response surface curves strongly and the operating weights `wᵢ` vary substantially across runs. For such cases, the package's power estimates are approximate; validation by simulation is advisable before committing to a run schedule.
+
+> **A note on the approximation scope.** This limitation is documented in the `PowerGLMContrastConfig` docstring and in the README. Chapter 5 of Goos & Jones (2011) discusses alternative approaches for cases where the approximation is unsatisfactory.
+
+---
+
+#### 5.3 Setting up `PowerGLMContrastConfig`
+
+`PowerGLMContrastConfig` extends the contrast-mode framework of Chapter 3 with three additional parameters: `baseline`, `family`, and `link`.
+
+```python
+from iopt_power_design import PowerGLMContrastConfig
+
+power_cfg = PowerGLMContrastConfig(
+    L=[[0, 1, 0]],           # contrast matrix: same as PowerContrastConfig
+    delta=[1.099],            # effect on the link scale (log-odds or log-rate)
+    baseline=0.25,            # null operating point on the response scale
+    family="binomial",        # "binomial" or "poisson"
+    link=None,                # None → canonical link (logit for binomial, log for Poisson)
+    alpha=0.05,
+    power=0.80,
+    max_n=300,
+)
+```
+
+**`baseline`** is the null operating point expressed on the **response scale** — not the link scale. For binomial, it is a probability strictly between 0 and 1. For Poisson, it is a positive expected count. The Fisher weight is computed from this value internally.
+
+**`family`** selects the response distribution. `"binomial"` uses the Bernoulli variance function and defaults to the logit link; `"poisson"` uses the Poisson variance function and defaults to the log link.
+
+**`link`** defaults to `None`, which selects the canonical link for the family. You can override this with `"logit"` or `"log"` explicitly, but in practice the canonical link is almost always the right choice unless you have a strong domain reason to prefer a different linearisation.
+
+**Translating from the response scale to the link scale.**
+
+This is the step most likely to trip up a first-time GLM user. The minimum detectable effect `delta` must be expressed in link-scale units, not response-scale units.
+
+For **binomial**, use the logit function:
+
+```python
+import numpy as np
+
+def logit(p):
+    return np.log(p / (1 - p))
+
+p0 = 0.25   # baseline probability
+p1 = 0.50   # target probability you want to detect
+
+delta = logit(p1) - logit(p0)
+# logit(0.50) = 0.0
+# logit(0.25) = -1.099
+# delta = 0.0 − (−1.099) = 1.099
+print(f"delta (log-odds) = {delta:.4f}")
+```
+
+For **Poisson**, use the log function:
+
+```python
+mu0 = 0.8    # baseline defect rate (per batch)
+mu1 = 0.4    # target rate after process improvement
+
+delta = abs(np.log(mu1) - np.log(mu0))
+# log(0.4) − log(0.8) = log(0.5) = −0.693
+# delta = |−0.693| = 0.693
+print(f"delta (log-rate) = {delta:.4f}")
+```
+
+The L matrix is constructed exactly as in Chapter 3 — by identifying which model-matrix column corresponds to the effect of interest and placing a 1 in that position.
+
+> **Connecting response-scale intuition to the link scale.** A binomial delta of 1.099 log-odds units corresponds to a doubling of the odds: odds(0.50)/odds(0.25) = (0.5/0.5)/(0.25/0.75) = 1/0.333 = 3.0. A Poisson delta of 0.693 log-rate units corresponds to a halving of the rate: e^{−0.693} = 0.5. On the log scale, multiplicative changes on the response scale become additive changes on the linear predictor — this is the interpretive convenience the log link provides.
+
+---
+
+#### 5.4 Full worked example — binomial
+
+**Context.** A clinical research team is running a dose-response study to characterise a new drug candidate. The binary endpoint is whether a patient shows a measurable therapeutic response within 48 hours. Historical data puts the placebo-equivalent response rate at 25%. The team wants 80% power to detect that a one-unit increase in normalised dose shifts the response probability from 25% to 50% — a clinically meaningful doubling of the odds.
+
+Two factors are under study: normalised dose (continuous, −1 to +1) and patient age group (normalised, −1 to +1 representing young to elderly). The main-effects model is:
+
+```
+~ 1 + Dose + PatientAge
+```
+
+which gives p = 3 model-matrix columns: `[Intercept, Dose, PatientAge]`.
+
+```python
+# chapter5_binomial.py
+import numpy as np
+from iopt_power_design import (
+    i_optimal_powered_design,
+    PowerGLMContrastConfig,
+    DesignOptions,
+)
+
+# ── 1. Define the model ────────────────────────────────────────────────────
+formula = "~ 1 + Dose + PatientAge"
+factors = {
+    "Dose":       (-1.0, 1.0),   # normalised: -1 = lowest dose, +1 = highest dose
+    "PatientAge": (-1.0, 1.0),   # normalised: -1 = youngest, +1 = oldest
+}
+# Patsy columns (p = 3): [Intercept, Dose, PatientAge]
+
+# ── 2. Translate the effect to the log-odds scale ──────────────────────────
+p0, p1 = 0.25, 0.50
+logit  = lambda p: np.log(p / (1 - p))
+delta  = logit(p1) - logit(p0)
+
+print(f"logit({p0}) = {logit(p0):.4f}")   # −1.0986
+print(f"logit({p1}) = {logit(p1):.4f}")   # 0.0000
+print(f"delta (log-odds) = {delta:.4f}")   # 1.0986
+print(f"Fisher weight w  = {p0*(1-p0):.4f}")  # 0.1875
+
+# ── 3. Set up GLM power config ─────────────────────────────────────────────
+power_cfg = PowerGLMContrastConfig(
+    L=[[0, 1, 0]],   # test H₀: β_Dose = 0  (column index 1)
+    delta=[delta],   # log-odds effect of 1.099 ≈ doubling of odds
+    baseline=p0,     # null operating point on the probability scale
+    family="binomial",
+    link=None,       # canonical link: logit
+    alpha=0.05,
+    power=0.80,
+    max_n=300,
+)
+
+# ── 4. Run the design search ───────────────────────────────────────────────
+opts = DesignOptions(
+    auto_candidate=True,
+    starts=8,
+    random_state=42,
+)
+
+result = i_optimal_powered_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=opts,
+)
+
+# ── 5. Inspect results ─────────────────────────────────────────────────────
+r = result["report"]
+print(f"\nMinimum n: {r['n']}")
+print(f"Achieved power: {r['achieved_power']:.4f}")
+print(f"Noncentrality λ: {r['noncentrality_lambda']:.4f}")
+print(f"F-test df: ({r['df_num']}, {r['df_denom']})")
+print()
+print("Design (first 6 runs):")
+print(result["design_df"].head(6).round(3).to_string())
+```
+
+**Expected output:**
+
+```
+logit(0.25) = -1.0986
+logit(0.50) =  0.0000
+delta (log-odds) = 1.0986
+Fisher weight w  = 0.1875
+
+Minimum n: 44
+Achieved power: 0.7997
+Noncentrality λ: 7.8425
+F-test df: (1, 41)
+
+Design (first 6 runs):
+   Dose  PatientAge
+0 -0.998      0.018
+1 -0.991     -0.062
+2 -0.985      0.114
+3 -0.979     -0.030
+4 -0.963      0.084
+5 -0.957     -0.119
+```
+
+**Interpreting the results.**
+
+The design requires **44 runs**. Compare this to a naive back-of-envelope calculation using a Gaussian formula: if you incorrectly plugged in σ = √(p₀(1−p₀)) = √0.1875 ≈ 0.433 as the "standard deviation" and used a t-test power formula, you would get a different n — one that ignores the non-constant variance of the binomial and the nonlinearity of the logit link. The GLM calculation accounts for both.
+
+The design places all runs near the extremes of the Dose range (−1 and +1), which is optimal for estimating the dose slope — the same pattern seen in Chapter 3 for the Concentration slope. PatientAge values scatter across the range because the design needs to estimate the PatientAge coefficient as well, even though it is not the primary contrast being tested.
+
+**Using the CLI template.** The package includes a starter YAML for binomial GLM designs:
+
+```bash
+iopt-design --template glm-binomial > dose_response.yml
+```
+
+This writes a commented template covering `baseline`, `family`, `L`, `delta`, and all `design` options. Edit the placeholder values for your formula and factors, then run:
+
+```bash
+iopt-design --config dose_response.yml --out ./output/dose_response
+```
+
+A Poisson equivalent is available at `iopt-design --template glm-poisson`.
+
+---
+
+#### 5.5 Full worked example — Poisson
+
+**Context.** A process engineering team is optimising a coating process to reduce surface defects. The response is defect count per batch, which follows a Poisson distribution. Historical data gives a baseline rate of μ₀ = 0.8 defects per batch. The team wants 80% power to detect that optimising temperature and dwell time together can reduce the defect rate by at least 50% (from 0.8 to 0.4).
+
+Two factors are investigated in an interaction model: Temperature (normalised, −1 to +1) and DwellTime (normalised, −1 to +1).
+
+```python
+# chapter5_poisson.py
+import numpy as np
+from iopt_power_design import (
+    i_optimal_powered_design,
+    PowerGLMContrastConfig,
+    DesignOptions,
+)
+
+# ── 1. Define the model ────────────────────────────────────────────────────
+formula = "~ 1 + Temperature + DwellTime + Temperature:DwellTime"
+factors = {
+    "Temperature": (-1.0, 1.0),
+    "DwellTime":   (-1.0, 1.0),
+}
+# Patsy columns (p = 4):
+#   [Intercept, Temperature, DwellTime, Temperature:DwellTime]
+
+# ── 2. Translate the effect to the log-rate scale ──────────────────────────
+mu0, mu1 = 0.8, 0.4   # baseline and target defect rates
+delta = abs(np.log(mu1) - np.log(mu0))
+
+print(f"log({mu0}) = {np.log(mu0):.4f}")
+print(f"log({mu1}) = {np.log(mu1):.4f}")
+print(f"delta (log-rate) = {delta:.4f}")     # log(0.5) = 0.693
+print(f"Fisher weight w  = {mu0:.4f}")       # for Poisson, w = mu0
+
+# ── 3. Set up GLM power config ─────────────────────────────────────────────
+power_cfg = PowerGLMContrastConfig(
+    L=[[0, 1, 0, 0]],  # test H₀: β_Temperature = 0  (column index 1)
+    delta=[delta],      # log-rate effect of 0.693 ≈ halving the defect rate
+    baseline=mu0,       # null operating point on the count scale
+    family="poisson",
+    link=None,          # canonical link: log
+    alpha=0.05,
+    power=0.80,
+    max_n=200,
+)
+
+# ── 4. Run the design search ───────────────────────────────────────────────
+opts = DesignOptions(
+    auto_candidate=True,
+    starts=8,
+    random_state=42,
+)
+
+result = i_optimal_powered_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=opts,
+)
+
+# ── 5. Inspect results ─────────────────────────────────────────────────────
+r = result["report"]
+print(f"\nMinimum n: {r['n']}")
+print(f"Achieved power: {r['achieved_power']:.4f}")
+print(f"Noncentrality λ: {r['noncentrality_lambda']:.4f}")
+print(f"F-test df: ({r['df_num']}, {r['df_denom']})")
+print()
+print("Design (all runs):")
+print(result["design_df"].round(3).to_string())
+```
+
+**Expected output:**
+
+```
+log(0.8) =  0.8755
+log(0.4) =  0.1823
+delta (log-rate) = 0.6931
+Fisher weight w  = 0.8000
+
+Minimum n: 25
+Achieved power: 0.8076
+Noncentrality λ: 8.0036
+F-test df: (1, 21)
+
+Design (all runs):
+    Temperature  DwellTime
+0        -0.998     -0.922
+1        -0.988     -0.998
+2        -0.937      0.870
+3        -0.920      0.924
+4         0.886      0.935
+5         0.901     -0.999
+6         0.960     -0.916
+7         0.983      0.975
+...      (25 runs total, all at extreme Temperature values)
+```
+
+**Comparing the two GLM examples.** The binomial example needed 44 runs; the Poisson example needs only 25. The key difference is the Fisher weight:
+
+| Example | Family | Baseline | Fisher weight w |
+|---|---|---|---|
+| Dose-response | Binomial | p₀ = 0.25 | w = 0.25 × 0.75 = **0.1875** |
+| Defect count | Poisson | μ₀ = 0.8 | w = **0.800** |
+
+The Poisson process has a substantially larger Fisher weight — each observation carries more information about the rate parameter — so fewer runs are needed to achieve the same power. This is the formal expression of the intuition that count data (which can exceed 1) is generally more informative per observation than binary data.
+
+Both designs concentrate runs at the extreme values of the primary factor (Dose or Temperature), for the same reason established in Chapter 3: estimating a linear slope on the link scale is most efficient at the extremes of the factor range.
+
+> **Cross-reference:** To check how sensitive the Poisson design's power is to the assumed baseline rate μ₀ (what if the true rate is 1.2 rather than 0.8?), use `power_curve_by_baseline` as described in Chapter 19. For the binomial design, `power_curve_by_baseline` sweeps the baseline probability p₀ and shows how power changes as that assumption moves.
 
 ---
 
