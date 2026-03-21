@@ -7366,17 +7366,217 @@ subprocess.run(["open" if sys.platform == "darwin" else "xdg-open",
 
 ### Chapter 23 — Reproducibility
 
-- 23.1 How randomness enters the algorithm
-  - Multi-start initialisation uses `random_state`
-  - Parallel workers use per-worker seed offsets (`parallel_seed_stride`)
-- 23.2 Achieving exact reproducibility
-  - `random_state` must be an integer; `None` is not allowed
-  - Keep `formula`, `factors`, `starts`, `workers`, and `random_state` fixed across re-runs
-  - Store `result["report"]` alongside each output — it records the seed and timing metadata
-- 23.3 Cross-machine reproducibility: NumPy version pinning
-  - NumPy RNG output can change across major versions; pin `numpy` in `requirements.txt` / `pyproject.toml` for long-lived pipelines
-- 23.4 Documenting a design run for regulatory or archival purposes
-  - What fields from `report` to capture: `n`, `achieved_power`, `criterion`, `elapsed_sec`, `random_state`, `starts`, `workers`
+The Fedorov exchange algorithm is a stochastic search: different random
+initialisations can produce different designs with the same n. This is expected
+behaviour — there are many near-optimal designs of a given size, and the algorithm
+reliably finds a good one. But it raises a practical question: how do you ensure
+that a re-run of your script produces exactly the same design?
+
+---
+
+#### 23.1 How randomness enters the algorithm
+
+Two sources of randomness affect the output:
+
+**Multi-start initialisation.** The Fedorov exchange starts from `starts` randomly
+chosen initial subsets of the candidate set. Each start explores a different
+trajectory through the solution space and may converge to a different local
+optimum. The best result across all starts is returned. Different starting points
+generally produce different final designs, though typically with similar power.
+
+**Candidate set generation.** The candidate set is drawn from a random uniform
+sample of the factor space (for continuous factors). A different seed produces a
+different candidate pool, which can in turn affect which exact point values appear
+in the final design.
+
+Both sources are controlled by the single `random_state` parameter in
+`DesignOptions`:
+
+```python
+opts = DesignOptions(
+    starts=5,
+    random_state=42,   # integer seed; controls both candidate generation and starts
+)
+```
+
+**Parallel workers and `parallel_seed_stride`.**
+When `workers > 1`, each worker gets an independent seed:
+
+```
+worker i seed = random_state + i × parallel_seed_stride
+```
+
+The default `parallel_seed_stride = 10_000` ensures the per-worker seed streams
+are well-separated (uncorrelated). To change the stride:
+
+```python
+opts = DesignOptions(
+    starts=10,
+    workers=4,
+    random_state=42,
+    parallel_seed_stride=50_000,
+)
+```
+
+---
+
+#### 23.2 Achieving exact reproducibility
+
+**Rule 1: `random_state` must be an integer.**
+Passing `None` is not allowed — a `ValueError` is raised at construction time.
+The default is `random_state=123`.
+
+**Rule 2: fix all five parameters that affect the search.**
+Two runs produce identical designs if and only if all of the following match:
+
+| Parameter | Where set |
+|---|---|
+| `formula` | function argument |
+| `factors` | function argument |
+| `starts` | `DesignOptions.starts` |
+| `workers` | `DesignOptions.workers` |
+| `random_state` | `DesignOptions.random_state` |
+
+Changing any one of these — even just adding a parallel worker — will produce a
+different design.
+
+**Rule 3: store `result["report"]` alongside your output.**
+Every call to `i_optimal_powered_design` enriches `result["report"]` with the
+exact parameters used during the run:
+
+```python
+import json
+
+result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+r = result["report"]
+
+# Key fields for reproducibility documentation
+print({
+    "n":               r["n"],
+    "achieved_power":  r["achieved_power"],
+    "criterion":       r["criterion"],
+    "starts":          r["starts"],
+    "workers":         r["workers"],
+    "random_state":    r["random_state"],
+    "elapsed_sec":     r["elapsed_sec"],
+    "search_strategy": r["search_strategy"],
+})
+```
+
+Example output:
+
+```
+{
+  "n": 39,
+  "achieved_power": 0.8070,
+  "criterion": "I",
+  "starts": 5,
+  "workers": None,
+  "random_state": 42,
+  "elapsed_sec": 3.14,
+  "search_strategy": "bisect+fedorov"
+}
+```
+
+Save this dict to a JSON file alongside the design CSV:
+
+```python
+design_df = result["design_df"]
+design_df.to_csv("design.csv", index=False)
+
+with open("design_report.json", "w") as f:
+    json.dump(r, f, indent=2, default=str)
+```
+
+The JSON file is a complete audit trail: anyone with the package and this report
+can confirm the design was generated with these exact settings.
+
+---
+
+#### 23.3 Cross-machine reproducibility: NumPy version pinning
+
+The `random_state` seed controls NumPy's random number generator. NumPy's RNG
+implementation can produce different sequences across major versions — a script
+that generates design A on NumPy 1.26 may generate a slightly different design B
+on NumPy 2.0, even with the same seed.
+
+This affects the *exact* point coordinates in the design (floating-point values),
+not the overall structure (number of runs, power achieved). For most uses, this
+is not a concern: both designs achieve the target power and have the same n.
+
+**When cross-machine bit-exact reproducibility matters** (regulatory submissions,
+long-lived pipelines, formal audits), pin the NumPy version in your dependency
+file:
+
+```
+# requirements.txt
+numpy==1.26.4
+iopt-power-design>=1.0
+```
+
+or in `pyproject.toml`:
+
+```toml
+[project]
+dependencies = [
+    "numpy==1.26.4",
+    "iopt-power-design>=1.0",
+]
+```
+
+For day-to-day research use, pinning is unnecessary — the difference between
+two runs on different NumPy versions is at the level of individual coordinate
+values (e.g., −0.9997 vs. −0.9998), while n and power are identical.
+
+---
+
+#### 23.4 Documenting a design run for regulatory or archival purposes
+
+For studies that require formal documentation (GMP, ICH, ISO, or internal audit
+trails), the following fields from `result["report"]` should be captured:
+
+| Field | Meaning |
+|---|---|
+| `n` | Number of experimental runs |
+| `achieved_power` | Statistical power of the final design |
+| `noncentrality_lambda` | Noncentrality parameter λ (power calculation detail) |
+| `df_num` / `df_denom` | Degrees of freedom of the F-test |
+| `criterion` | Optimality criterion used (`"I"`, `"D"`, or `"A"`) |
+| `starts` | Number of multi-start random initialisations |
+| `workers` | Number of parallel workers (`None` = serial) |
+| `random_state` | Integer seed — required to reproduce the design |
+| `elapsed_sec` | Wall-clock time for the search |
+| `search_strategy` | Internal strategy used (e.g. `"bisect+fedorov"`) |
+| `warnings` | Any warnings raised during the run |
+
+**Recommended archival pattern:**
+
+```python
+import json, datetime
+
+result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+
+archive = {
+    "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "formula": formula,
+    "factors": factors,
+    "power_cfg": {
+        "L": power_cfg.L.tolist(),
+        "delta": power_cfg.delta.tolist(),
+        "sigma": power_cfg.sigma,
+        "alpha": power_cfg.alpha,
+        "power": power_cfg.power,
+    },
+    "report": result["report"],
+}
+
+with open("design_archive.json", "w") as f:
+    json.dump(archive, f, indent=2, default=str)
+```
+
+This produces a single JSON file containing both the design-generation parameters
+and the outcome metrics, suitable for attaching to a study protocol or regulatory
+submission.
 
 ---
 
