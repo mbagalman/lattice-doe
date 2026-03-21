@@ -5812,17 +5812,268 @@ runs at the very extreme tip anyway.
 
 ### Chapter 18 — Augmenting an existing design
 
-- 18.1 When augmentation is appropriate
-  - Budget unlocks additional runs after an initial study
-  - Preliminary design lacks power; adding targeted points to fix it
-  - Following up on a surprising early result
-- 18.2 `augment_design`: the API
-  - Inputs: existing `design_df`, `m` (new runs to add), formula, factors, `DesignOptions`
-  - Outputs: `augmented_df` (full design), `new_runs_df` (added points only)
-  - The new points are chosen to most improve the I/D/A criterion given the existing rows
-- 18.3 Power after augmentation: re-running `i_optimal_powered_design` or evaluating directly
-- 18.4 **Full worked example** (Python API, building on the Chapter 3 polymer example)
-  - Initial under-powered design → augment by 4 runs → compare before/after power
+Augmentation answers the question: *you already have some data — what runs should you add?*
+Rather than discarding existing observations and rebuilding from scratch, `augment_design`
+fixes the rows you already have in place and greedily selects additional runs that do the
+most to improve the chosen optimality criterion.
+
+---
+
+#### 18.1 When augmentation is appropriate
+
+Three scenarios commonly arise in practice.
+
+**Budget unlocks after the initial study.**
+A pilot study was sized conservatively, and mid-project the team secures funding for more
+runs. Discarding the pilot data is wasteful; augmentation lets those observations contribute
+to the final analysis.
+
+**The preliminary design falls short of the power target.**
+After collecting the pilot data, re-evaluating power against the actual residual variance
+reveals that 80% power requires more runs than originally planned. Augmentation directs
+the new runs to the positions that most efficiently close that gap.
+
+**An early result triggers a follow-up.**
+A surprising interaction or unexpectedly large variance in the pilot suggests that the
+original design did not adequately cover some part of the factor space. Augmentation can
+target the informative region without redoing runs already completed.
+
+**When augmentation is *not* the right tool:**
+If the initial design is severely poorly placed — for example, all runs at a single factor
+setting — or if the factor structure or model has changed substantially, rebuilding with
+`i_optimal_powered_design` is preferable.
+Greedy augmentation is constrained by the existing rows and cannot recover from designs
+that have fundamental multicollinearity problems.
+
+---
+
+#### 18.2 `augment_design`: the API
+
+```python
+from iopt_power_design import augment_design
+```
+
+**Signature:**
+
+```python
+augment_design(
+    design_df,    # existing design rows (a DataFrame)
+    m,            # number of new runs to add (int, >= 1)
+    formula,      # patsy formula (same as the original design)
+    factors,      # factor specifications (same as the original design)
+    design_opts,  # DesignOptions (optional; controls candidate set and criterion)
+) -> (augmented_df, new_runs_df)
+```
+
+**Inputs:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `design_df` | `pd.DataFrame` | Existing design — all columns for every factor |
+| `m` | `int` | Number of new runs to add; must be ≥ 1 |
+| `formula` | `str` | Patsy formula, identical to the original design call |
+| `factors` | `dict` | Factor specifications, identical to the original design call |
+| `design_opts` | `DesignOptions` | Controls candidate sizing, criterion, `random_state` |
+
+**Outputs:**
+
+| Key | Description |
+|---|---|
+| `augmented_df` | Full design: original rows followed by the `m` new rows |
+| `new_runs_df` | Only the `m` newly added rows, indexed 0 to m−1 |
+
+**How the new points are chosen.**
+The algorithm fixes the existing rows in `design_df` and iterates `m` times.
+At each step it evaluates every candidate point, computing what the chosen criterion
+(I, D, or A) would be if that candidate were appended, then adds the single candidate
+that gives the best score.
+This is a greedy one-point-at-a-time exchange, not a full multi-start Fedorov search.
+It is fast — O(m × N\_cand × p²) — but it does not guarantee a globally optimal result.
+
+**Criterion.**
+The criterion defaults to `"I"` (I-optimality, minimising prediction variance integrated
+over the factor space) and is controlled by `design_opts.criterion`.
+Use `"D"` or `"A"` if the original design was built with those criteria.
+
+**Candidate set.**
+A fresh candidate set is generated for each augmentation call using the same
+`factors` and `design_opts` settings. This means new runs can appear anywhere in
+the factor space, not just at the original pilot's candidate positions.
+
+---
+
+#### 18.3 Evaluating power after augmentation
+
+`augment_design` returns a DataFrame, not a power report. To check whether the
+augmented design meets the power target, evaluate the model matrix directly with
+`build_model_matrix` and `contrast_power`:
+
+```python
+import numpy as np
+from iopt_power_design import build_model_matrix
+from iopt_power_design.power import contrast_power
+
+formula = "A + B + A:B"
+factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+L = np.array([[0, 1, 0, 0]])
+
+aug_df, new_df = augment_design(pilot_df, m=12, formula=formula, factors=factors)
+
+X_aug, _ = build_model_matrix(formula, aug_df)
+pr = contrast_power(X=X_aug, L=L, delta=np.array([1.0]), sigma=2.0, alpha=0.05)
+print(f"Power after augmentation: {pr.power:.4f}  (lambda={pr.lam:.4f})")
+```
+
+`contrast_power` takes:
+
+| Argument | Value |
+|---|---|
+| `X` | Model matrix from `build_model_matrix` (2D numpy array) |
+| `L` | Contrast matrix (same as `PowerContrastConfig.L`, as a numpy array) |
+| `delta` | Effect size array (same as `PowerContrastConfig.delta`, as a numpy array) |
+| `sigma` | Residual standard deviation |
+| `alpha` | Significance level |
+
+It returns a named tuple with `.power` and `.lam` (the noncentrality parameter λ).
+
+**Iterative augmentation.**
+If the power after +m runs is still below target, simply call `augment_design` again
+on the result, or use a loop:
+
+```python
+current_df = pilot_df.copy()
+target_power = 0.80
+
+while True:
+    X, _ = build_model_matrix(formula, current_df)
+    pr = contrast_power(X=X, L=L, delta=np.array([1.0]), sigma=2.0, alpha=0.05)
+    if pr.power >= target_power:
+        break
+    current_df, _ = augment_design(current_df, m=2, formula=formula, factors=factors)
+
+print(f"Reached power={pr.power:.4f} at n={len(current_df)}")
+```
+
+---
+
+#### 18.4 Full worked example
+
+**Scenario.** Continuing with the two-factor coded design from Chapter 17:
+two process factors A and B, each in [−1, 1], model `A + B + A:B` (p = 4 parameters).
+The team wants 80% power to detect an A main effect of size 1.0 with σ = 2.0 (α = 0.05).
+
+A preliminary budget covers 30 runs.
+After collecting the pilot data, a power check reveals 62% power — well short of target.
+Additional budget is approved for 12 more runs.
+The question: where should those runs go?
+
+**Step 1 — Build the pilot design.**
+
+```python
+import numpy as np
+from iopt_power_design.iopt_search import build_i_opt_design_with_idx
+from iopt_power_design.candidate import build_candidate
+from iopt_power_design import build_model_matrix
+from iopt_power_design.power import contrast_power
+
+formula = "A + B + A:B"
+factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+L        = np.array([[0, 1, 0, 0]])
+
+cand = build_candidate(factors, candidate_points=500, seed=42)
+pilot_df, _, _ = build_i_opt_design_with_idx(
+    n=30, cand=cand, formula=formula, n_start=5, random_state=42
+)
+
+X_pilot, _ = build_model_matrix(formula, pilot_df)
+pr_pilot = contrast_power(X=X_pilot, L=L, delta=np.array([1.0]), sigma=2.0, alpha=0.05)
+print(f"Pilot:  n={len(pilot_df)}  power={pr_pilot.power:.4f}  lambda={pr_pilot.lam:.4f}")
+```
+
+```
+Pilot:  n=30  power=0.6213  lambda=5.5530
+```
+
+Power is only 62% — the pilot study is underpowered for the A main-effect test.
+
+**Step 2 — Augment by 12 runs.**
+
+```python
+from iopt_power_design import augment_design, DesignOptions
+
+aug_df, new_df = augment_design(
+    design_df=pilot_df,
+    m=12,
+    formula=formula,
+    factors=factors,
+    design_opts=DesignOptions(random_state=42),
+)
+
+X_aug, _ = build_model_matrix(formula, aug_df)
+pr_aug = contrast_power(X=X_aug, L=L, delta=np.array([1.0]), sigma=2.0, alpha=0.05)
+print(f"After augment:  n={len(aug_df)}  power={pr_aug.power:.4f}  lambda={pr_aug.lam:.4f}")
+```
+
+```
+After augment:  n=42  power=0.8019  lambda=8.3062
+```
+
+The design now exceeds the 80% target.
+
+**Step 3 — Inspect the new runs.**
+
+```python
+print(new_df.to_string())
+```
+
+```
+           A         B
+0  -0.923924  0.983562
+1   0.998672  0.993178
+2  -0.998686 -0.992841
+3   0.909105 -0.983273
+4  -0.923924  0.983562
+5   0.998672  0.993178
+6  -0.998686 -0.992841
+7   0.909105 -0.983273
+8  -0.923924  0.983562
+9   0.998672  0.993178
+10  0.909105 -0.983273
+11 -0.998686 -0.992841
+```
+
+All 12 new points sit near the corners of the factor box (|A| ≈ 0.91–1.00,
+|B| ≈ 0.98–1.00). This is the greedy algorithm expressing a clear preference:
+corner runs provide the most information for a linear model, and the pilot design
+did not have enough of them.
+
+**Power comparison.**
+
+| Design | n | Power | λ | Notes |
+|---|---|---|---|---|
+| Pilot (30 runs) | 30 | 0.621 | 5.55 | Under-powered |
+| Augmented (+12 runs) | 42 | 0.802 | 8.31 | Meets target |
+| Fresh I-optimal (Chapter 17) | 39 | 0.807 | 8.45 | Optimal from scratch |
+
+The augmented design requires **3 more runs** than a fresh I-optimal design at
+the same target.
+This is the **greedy penalty**: the 12 added runs are chosen to be as good as
+possible given the existing 30-run structure, but they cannot move or replace
+those 30 runs.
+A globally optimal design built from scratch at n = 39 outperforms the greedy
+augmentation at n = 42 because it has the freedom to place all 39 points jointly.
+
+**When the penalty is small vs. large.**
+The 3-run penalty in this example is modest because the pilot design already
+had reasonable structure — all runs were at the extremes of the factor range.
+The penalty grows when the existing design has concentrated runs in a poorly
+informative region (e.g., all runs near the centre), because the greedy algorithm
+cannot undo the information lost to those runs.
+
+**Practical rule.** If augmentation leaves a gap larger than ≈10–15% above the fresh
+optimal n, it is worth considering whether a full rebuild would be more efficient.
+Use augmentation when existing data must be preserved (e.g., it has already been
+analysed and reported) and the gap is manageable.
 
 ---
 
