@@ -7582,19 +7582,213 @@ submission.
 
 ### Chapter 24 — Deployment and scaling
 
-- 24.1 Local deployment options summary
-  - Script (Python API), CLI, Streamlit local, Jupyter Widgets
-- 24.2 Cloud / server deployment options
-  - Streamlit Community Cloud: free, no ops overhead, suitable for teams
-  - Docker: portable, reproducible, suitable for IT-managed environments
-  - REST API (FastAPI + Uvicorn): suitable for integration into larger platforms
-- 24.3 REST API multi-worker deployment
-  - `uvicorn api_server.main:create_app --factory --workers 4`
-  - Stateless design: each request is independent, safe to distribute across workers
-- 24.4 Resource considerations
-  - CPU: multi-start parallelism with `workers > N` on a server; multiprocessing guard on macOS / Windows
-  - Memory: large candidate sets and high `starts` counts; use `auto_candidate` to avoid over-provisioning
-  - Typical run times: single-response contrast at modest n < 1 minute; split-plot or multi-response designs may take several minutes with high `starts`
+The package can be consumed in several ways — from an interactive Python session
+to a containerised REST API serving a team of researchers. This chapter summarises
+the deployment options and the resource trade-offs involved.
+
+---
+
+#### 24.1 Local deployment options
+
+| Mode | When to use |
+|---|---|
+| **Python API** | Analysis scripts, notebooks, CI pipelines |
+| **CLI** (`iopt design ...`) | One-off command-line use; YAML-driven pipelines |
+| **Streamlit app** (local) | Interactive exploration on your own machine |
+| **Jupyter Widgets** | In-notebook interactive UI |
+
+All four modes run the same underlying `i_optimal_powered_design` engine.
+Choose based on your workflow: scripts for automation, Streamlit for interactive
+use with non-Python colleagues.
+
+**Starting the Streamlit app locally:**
+
+```bash
+pip install "iopt-power-design[app]"
+streamlit run app/app.py
+# → open http://localhost:8501 in your browser
+```
+
+---
+
+#### 24.2 Cloud and server deployment
+
+**Streamlit Community Cloud.**
+The simplest team deployment. Push your app to GitHub, connect the repo at
+[share.streamlit.io](https://share.streamlit.io), and share the URL.
+No infrastructure to manage. Suitable for teams of up to ~20 concurrent users.
+
+**Docker (Streamlit app).**
+The included `Dockerfile` builds a self-contained image of the Streamlit app:
+
+```bash
+# Build and run
+docker build -t iopt-doe .
+docker run -p 8501:8501 iopt-doe
+# → http://localhost:8501
+```
+
+The image is based on `python:3.11-slim`, installs the package and all app
+dependencies, and starts Streamlit on port 8501.
+A healthcheck pings `/healthz` every 30 seconds.
+
+**REST API (FastAPI + Uvicorn).**
+For integration into larger platforms (LIMS, electronic lab notebooks, custom
+front-ends), a FastAPI server is included:
+
+```bash
+pip install "iopt-power-design[server]"
+
+# Start the API server
+iopt-api
+# or equivalently:
+uvicorn api_server.main:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+The API is then available at:
+- `http://localhost:8000/docs` — Swagger UI (interactive browser)
+- `http://localhost:8000/redoc` — ReDoc reference
+- `http://localhost:8000/health` — health check
+
+**Available endpoints:**
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/design` | Build a single-response I-optimal design |
+| `POST` | `/multiresponse_design` | Multi-response design |
+| `POST` | `/power_curve/by_n` | Power vs. n curve |
+| `POST` | `/power_curve/by_effect` | Power vs. effect size curve |
+| `POST` | `/sensitivity` | σ / R² sensitivity sweep |
+| `POST` | `/mde` | Minimum detectable effect |
+| `POST` | `/compare_criteria` | Compare I / D / A criteria |
+| `POST` | `/augment` | Augment an existing design |
+| `GET` | `/health` | Health check |
+
+All endpoints accept JSON bodies with the same fields as the Python API.
+Constraint expressions (`constraint_expr`) are supported over HTTP;
+Python callables (`constraint_func`) are not serialisable and cannot be used.
+
+---
+
+#### 24.3 REST API multi-worker deployment
+
+**Docker Compose.**
+The `docker-compose.yml` file in the repository deploys the REST API with
+two Uvicorn worker processes:
+
+```bash
+docker compose up --build
+# → http://localhost:8000/docs
+```
+
+The `UVICORN_WORKERS` environment variable controls the process count:
+
+```bash
+UVICORN_WORKERS=4 docker compose up --build
+```
+
+Each worker is an independent process with its own Python interpreter.
+Requests are distributed across workers by Uvicorn's process manager,
+so the server handles multiple simultaneous design requests without one
+blocking another.
+
+**Manual multi-worker start:**
+
+```bash
+uvicorn api_server.main:create_app \
+    --factory \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 4
+```
+
+**Important: `workers` in `DesignOptions` vs. Uvicorn `--workers`.**
+These are two separate parallelism mechanisms:
+
+| Setting | Scope | Effect |
+|---|---|---|
+| `DesignOptions.workers` | Per-request, Python-level | Parallel multi-start Fedorov exchanges within a single design call |
+| Uvicorn `--workers` | Server-level | Parallel HTTP request handling across OS processes |
+
+Inside the ASGI event loop, `DesignOptions.workers` is **ignored** — spawning
+a `ProcessPoolExecutor` from within a Uvicorn worker conflicts with the event
+loop. Use Uvicorn's `--workers` flag for request-level parallelism on a server.
+For Python-script use (outside a server), `DesignOptions.workers` works normally.
+
+**TLS and reverse proxy.**
+The `docker-compose.yml` includes a commented-out nginx service for TLS
+termination and rate limiting. Uncomment and supply certificates for production
+deployments:
+
+```yaml
+# Uncomment in docker-compose.yml:
+nginx:
+  image: nginx:1.27-alpine
+  ports:
+    - "443:443"
+  volumes:
+    - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    - /etc/letsencrypt:/etc/letsencrypt:ro
+```
+
+---
+
+#### 24.4 Resource considerations
+
+**CPU.**
+Each multi-start Fedorov exchange is CPU-bound. On a developer machine with
+`workers=1`, a typical single-response contrast design at n ≤ 50 completes in
+under 30 seconds with `starts=5`. With `workers=4` and `starts=20`, the same
+compute is spread across 4 cores and completes in roughly the same wall time
+with a better-explored solution space.
+
+On a server running multiple simultaneous requests, leave `DesignOptions.workers=1`
+and scale via Uvicorn `--workers` instead, so each request uses one CPU and all
+CPUs are available to serve different requests concurrently.
+
+**macOS / Windows multiprocessing guard.**
+When using `workers > 1` in a Python script on macOS or Windows, put the call
+inside a `__main__` guard to prevent fork-bomb behaviour:
+
+```python
+from iopt_power_design import i_optimal_powered_design, DesignOptions
+
+if __name__ == "__main__":
+    result = i_optimal_powered_design(
+        formula, factors, power_cfg,
+        DesignOptions(starts=20, workers=4, random_state=42),
+    )
+```
+
+This guard is not needed on Linux (where the default process start method is
+`fork`) or when `workers=1`.
+
+**Memory.**
+The main memory cost is the candidate set. With `auto_candidate=True` (the
+default), the package estimates a candidate size proportional to p and the
+number of categorical cells, typically a few hundred to a few thousand rows.
+At 1 MB per 1 000-row DataFrame with modest p, memory is rarely an issue for
+standard designs. Watch memory when:
+
+- Using very large `candidate_points` (e.g., 50 000) manually.
+- Running many parallel workers each with their own candidate copy.
+- Generating power surfaces with a fine `grid_points` grid over a wide n range.
+
+Use `auto_candidate=True` and let the package size the candidate set
+automatically to avoid over-provisioning.
+
+**Typical run times** (single-response contrast, Fedorov, serial):
+
+| Design type | n | starts | Approximate time |
+|---|---|---|---|
+| Simple 2-factor linear + interaction | 20–50 | 5 | < 10 s |
+| 3–4 factor quadratic | 30–80 | 5 | 10–60 s |
+| Split-plot (5 whole-plots × 4 sub-plots) | 20 | 5 | 30–90 s |
+| Multi-response (2 responses) | 30–60 | 5 | 30–120 s |
+| Any of the above | — | 20–50 | 3–5× longer |
+
+These are indicative; actual times depend on hardware, NumPy/SciPy versions,
+and candidate set size.
 
 ---
 
