@@ -8420,11 +8420,292 @@ The table below maps the most frequently adjusted parameters to the chapter that
 
 ## Appendix B — Statistical background
 
-- B.1 The Fedorov exchange algorithm: how designs are searched
-- B.2 The noncentrality parameter for each power mode: derivation sketches
-- B.3 The GLS information matrix for split-plot designs
-- B.4 The Fisher-weight GLM approximation: assumptions and limitations
-- B.5 References and further reading (Goos & Jones 2011; Atkinson, Donev & Tobias 2007; Cohen 1988; Lenth 2001)
+This appendix describes the statistical and computational methods underlying the package. It is written for readers who want to understand *why* the package works the way it does, check its formulas against published references, or judge where the approximations hold and where they do not. It is not required reading for everyday use.
+
+---
+
+### B.1 The Fedorov exchange algorithm
+
+#### Problem statement
+
+Given a pre-built model matrix `X_cand` of shape `(n_cand, p)` over a finite candidate set, the design search problem is to select a subset of `n` rows that optimises a scalar criterion. For I-optimality the criterion is:
+
+```
+φ_I(idx) = trace( M⁻¹ · M_cand )
+```
+
+where `M = X_d'X_d` is the `(p × p)` information matrix of the selected design and `M_cand = X_cand'X_cand` is the information matrix of the entire candidate set. The I-criterion is proportional to the average prediction variance over the candidate region. For D-optimality the criterion is `−log det(M)` and for A-optimality it is `trace(M⁻¹)`.
+
+All three criteria are lower-is-better and are minimised by the same underlying algorithm.
+
+#### The exchange loop
+
+The algorithm (`_fedorov_exchange_single` in `iopt_search.py`) proceeds as follows:
+
+1. **Initialise.** Sample `n` rows uniformly at random from the candidate set without replacement. This is the initial design `X_d`.
+
+2. **Compute leverages.** Form `M = X_d'X_d + ε I` (with diagonal jitter `ε = 1e-8` for numerical stability) and invert it. For each candidate point `x_t`, the *leverage* is `d_t = x_t' M⁻¹ x_t`. The full matrix of column-wise leverages is computed in one matrix product: `H = M⁻¹ X_cand'`, giving `d_t = (X_cand H)_{tt}`.
+
+3. **Score all swaps.** For each point `x_s` currently in the design and each candidate point `x_t` not in the design, compute the *gain* in criterion value from replacing `x_s` with `x_t`. This is done using **rank-1 Sherman-Morrison updates**, which avoid recomputing a full matrix inverse for every candidate swap. The gain formulas differ by criterion:
+
+   - **D-optimal gain:**
+     ```
+     let d_s = x_s'M⁻¹x_s,  d'_t = d_t + (x_t'M⁻¹x_s)²/(1−d_s)
+     gain(s→t) = (1−d_s)(1+d'_t) − 1
+     ```
+     A positive gain means the swap improves `det(M)`.
+
+   - **A-optimal gain:** Remove `x_s` via Sherman-Morrison (increases `trace(M⁻¹)` by `‖M⁻¹x_s‖²/(1−d_s)`), then add `x_t` via a second Sherman-Morrison step. The gain is the net decrease in `trace(M⁻¹)`.
+
+   - **I-optimal gain:** Identical to A but with `M_cand`-weighted traces:
+     ```
+     trace(M⁻¹M_cand) after remove/add = trace_minus − ⟨M⁻¹x_t, M_cand M⁻¹x_t⟩/(1+d'_t)
+     gain = current_trace − new_trace
+     ```
+
+4. **Accept the best swap.** Apply the swap `(s, t)` with the largest positive gain. Update `in_design` membership and `idx` in place.
+
+5. **Repeat** until no improving swap is found (convergence) or `max_iter` iterations are reached.
+
+#### Multiple starts
+
+Because the exchange algorithm is a local search, it can converge to different local optima from different starting points. The wrapper `_optimal_indices_from_X` runs `starts` independent instances of the single-start loop, each seeded with `random_state + k × 1337`, and returns the design with the best criterion score.
+
+For parallel execution (`workers > 1`), the function `_one_start_worker` is submitted to a `ProcessPoolExecutor`. Each worker runs a single start independently and returns its `(idx, score)` pair. The parent process selects the best score.
+
+#### Notes on convergence
+
+- The algorithm is guaranteed to terminate because there are finitely many designs and every accepted swap strictly improves the criterion.
+- It is not guaranteed to find the globally optimal design. The quality of the result improves with more starts and a denser candidate set.
+- For large problems (many factors, complex formulas) the dominant cost is the inner candidate-swap loop, which is `O(n × n_non × p)` per iteration. Increasing `candidate_points` increases quality at the cost of speed.
+
+---
+
+### B.2 The noncentrality parameter for each power mode
+
+All three power modes in the package use the same two-step logic: (1) compute a noncentrality parameter `λ` from the design matrix `X` and the effect-size specification, then (2) evaluate the tail probability of the appropriate noncentral distribution.
+
+#### B.2.1 Contrast mode (OLS)
+
+**Hypothesis.** `H₀: Lβ = 0` vs `H₁: Lβ = δ`, where `L` is a `(q × p)` contrast matrix and `δ` is a `(q,)` effect-size vector.
+
+**Test statistic.** The Wald F-statistic is:
+
+```
+F = (Lβ̂ − δ)' [σ² L(X'X)⁻¹L']⁻¹ (Lβ̂ − δ) / q
+```
+
+Under `H₁` this follows a noncentral F distribution with `df₁ = rank(L)` numerator degrees of freedom, `df₂ = n − rank(X)` denominator degrees of freedom, and noncentrality parameter:
+
+```
+λ = δ' [L (X'X)⁻¹ L']⁻¹ δ / σ²
+```
+
+**Power.** Let `F_crit = F_{1−α}(df₁, df₂)`. Then:
+
+```
+power = 1 − F_cdf(F_crit; df₁, df₂, λ)
+```
+
+where `F_cdf(·; df₁, df₂, λ)` is the CDF of the noncentral F distribution. The package evaluates this with `scipy.stats.ncf`.
+
+**Implementation note.** The package uses `np.linalg.pinv` on the regularised matrix `X'X + εI` to handle near-singular designs gracefully. For the variance matrix `L(X'X)⁻¹L'` it also uses `pinv`, which is the Moore–Penrose pseudoinverse. This means rank-deficient contrasts (e.g., two proportional rows in `L`) are handled without error, but the effective `df₁` is `rank(L)`, not the number of rows.
+
+#### B.2.2 R² mode
+
+**Hypothesis.** `H₀: R² = 0` (model explains no variance) vs `H₁: R² = r2_target`.
+
+**Effect size.** Cohen's f² is defined as:
+
+```
+f² = R² / (1 − R²)
+```
+
+**Noncentrality parameter.** Two conventions are available via `lambda_mode`:
+
+```
+λ = f² × n              (lambda_mode="n"       — G*Power / statsmodels convention)
+λ = f² × (n − rank(X)) (lambda_mode="n_minus_p" — more conservative)
+```
+
+**Degrees of freedom.** `df₁` equals the number of slope parameters (rank of X excluding any all-ones intercept column); `df₂ = n − rank(X)`.
+
+**Power.** Same noncentral F tail probability as the contrast mode, with the R²-derived `λ`.
+
+**Note on lambda_mode.** Published power tables for the global F-test (Cohen 1988; G\*Power) use `λ = f² × n`. The `"n_minus_p"` mode is slightly more conservative and was the original default in the package. New analyses should use `"n"` unless you need to match a reference that uses the `n_minus_p` convention.
+
+#### B.2.3 GLM contrast mode
+
+**Hypothesis.** Same as OLS contrast mode — `H₀: Lβ = 0` vs `H₁: Lβ = δ` — but `β` is now a vector of GLM coefficients on the linear predictor (LP) scale and the test statistic is a Wald chi-square rather than an F.
+
+**Noncentrality parameter.** The GLM information matrix is `M = w · X'X` where `w` is the Fisher information weight evaluated at the null (see §B.4). Because `w` is a positive scalar it does not change which design is selected (it cancels in the I/D/A criteria), but it does scale the noncentrality:
+
+```
+λ = w · δ' [L (X'X)⁻¹ L']⁻¹ δ
+```
+
+**Test statistic.** The Wald chi-square statistic has `df = rank(L)` degrees of freedom and follows a noncentral chi-square distribution under `H₁`.
+
+**Power.** Let `χ²_crit = χ²_{1−α}(q)`. Then:
+
+```
+power = 1 − χ²_cdf(χ²_crit; q, λ)
+```
+
+evaluated with `scipy.stats.ncx2`.
+
+---
+
+### B.3 The GLS information matrix for split-plot designs
+
+#### Two-stratum variance model
+
+A split-plot experiment partitions `n` runs into `n_wp` whole plots of `s` sub-plots each (balanced layout). The observation model is:
+
+```
+y_ij = X β + τ_i + ε_ij,    i = 1…n_wp,  j = 1…s
+
+τ_i  ~ N(0, σ²_wp)   (whole-plot random effect, shared within WP i)
+ε_ij ~ N(0, σ²_sp)   (sub-plot error, independent)
+```
+
+The full covariance matrix is:
+
+```
+V = σ²_sp (η ZZ' + I_n),    η = σ²_wp / σ²_sp
+```
+
+where `Z` is the `(n × n_wp)` whole-plot indicator matrix with `Z[ij, k] = 1` if run `(i,j)` belongs to whole plot `k`.
+
+#### Scaled inverse via the Woodbury identity
+
+The package computes the *scaled* inverse `Ṽ⁻¹ = (η ZZ' + I_n)⁻¹` using the Woodbury matrix identity rather than a full `n × n` inversion:
+
+```
+(I + η ZZ')⁻¹ = I − η Z (I_{n_wp} + η Z'Z)⁻¹ Z'
+```
+
+For a balanced design `Z'Z = s · I_{n_wp}`, so the inner inverse is diagonal with entries `1/(1 + ηs)`. This reduces the computation to:
+
+```
+Ṽ⁻¹[i,i] = 1 − η/(1 + ηs)          (diagonal)
+Ṽ⁻¹[i,j] = −η/(1 + ηs)             (i, j in same WP, i ≠ j)
+Ṽ⁻¹[i,j] = 0                        (i, j in different WPs)
+```
+
+At `η = 0` (no whole-plot variance) the formula returns the identity exactly, and the split-plot power formula reduces to its OLS counterpart.
+
+#### GLS information matrix and power
+
+The GLS information matrix is:
+
+```
+M = X' Ṽ⁻¹ X + ε I_p
+```
+
+(the `σ²_sp` factor is pulled out and cancels in the noncentrality formula). The noncentrality for a single contrast row `l_i` with effect `δ_i` is:
+
+```
+λ_i = δ_i² / (σ²_sp · l_i M⁻¹ l_i')
+```
+
+This is the same structure as OLS contrast power with `M` in place of `X'X`. For a multi-row `L`, the reported power is `min_i power_i` — the design is adequate when every contrast row individually achieves its target (same convention as OLS).
+
+#### Denominator degrees of freedom
+
+The split-plot ANOVA has two error strata:
+
+- **Whole-plot stratum.** Tests on HTC (whole-plot) factors use the whole-plot error. `df_wp = n_wp − rank(X_wp)` where `X_wp` is the sub-matrix of `X` restricted to HTC-factor columns, one representative row per whole plot.
+- **Sub-plot stratum.** Tests on ETC (sub-plot) factors or interactions that involve ETC factors use the sub-plot error. `df_sp = n − n_wp − (rank(X) − rank(X_wp))`.
+
+The `df_method` parameter controls how each contrast row is assigned to a stratum:
+
+| `df_method` | Rule |
+|---|---|
+| `"auto"` | Classify each contrast row: if every non-zero entry falls in an HTC column, use `df_wp`; otherwise use `df_sp`. |
+| `"conservative"` | Always use `df_wp` (never anti-conservative). |
+| `"sp_only"` | Always use `df_sp` (may overstate power for pure HTC contrasts). |
+
+**Limitation.** The df assignment uses a stratum-classification heuristic, not a full Satterthwaite or Kenward-Roger approximation. For balanced designs with a single variance component `η` this gives exact denominator df. For unbalanced designs or more complex variance structures the result is approximate. Use `df_method="conservative"` when in doubt.
+
+---
+
+### B.4 The Fisher-weight GLM approximation
+
+#### What the approximation does
+
+In a generalised linear model the Fisher information contribution of one observation at design point `x_i` is `w_i f(x_i) f(x_i)'`, where:
+
+- `f(x_i)` is the `p`-vector of model-term values (same as a row of the OLS model matrix)
+- `w_i = V(μ_i) / g'(μ_i)²` is a point-specific weight that depends on the mean function and link function evaluated at the *true* linear predictor `η_i = x_i'β`
+
+For a binomial model with logit link: `w_i = μ_i(1 − μ_i)`.
+For a Poisson model with log link: `w_i = μ_i`.
+
+A fully locally optimal GLM design requires a nominal parameter vector `β` to evaluate each `w_i`. The package instead uses a **null-based scalar approximation**: it evaluates the weight once at the null (baseline) mean and applies it uniformly:
+
+```
+w = p₀(1 − p₀)   for binomial  (p₀ = baseline probability under H₀)
+w = μ₀            for Poisson   (μ₀ = baseline count under H₀)
+```
+
+The resulting (approximate) Fisher information matrix is `M ≈ w · X'X`. Because `w > 0` is a scalar it cancels from the I/D/A criteria — the design selected is identical to the OLS design for the same formula and factor space. Only the noncentrality parameter and power differ.
+
+#### When the approximation is accurate
+
+The constant-weight approximation is most accurate when:
+
+- The true operating point is close to the null — that is, the effect `δ` is small relative to the curvature of the link function near `baseline`.
+- All design points are near the null mean (factor ranges are not large on the LP scale).
+
+It becomes less accurate when:
+
+- Effects are large (high odds ratios or rate ratios), so different design points have substantially different `w_i`.
+- The baseline is near 0 or 1 for binomial, where the logistic curve is steeply curved.
+
+In those situations the approximation can overstate power (optimistic) because it uses a uniform `w` equal to the maximum weight (at `p₀ = 0.5`) rather than the lower per-point weights at the tails. A runtime warning is issued when `min(baseline, 1 − baseline) < 0.05`.
+
+**Planned enhancement.** Full point-wise locally optimal GLM design — where each candidate point carries its own Fisher weight derived from a nominal parameter vector — is a planned future addition to the package.
+
+#### Practical guidance
+
+For realistic screening studies with moderate effects (odds ratios between 1.5 and 3.0, binomial baselines between 0.1 and 0.9) the constant-weight approximation is adequate for planning purposes. Validate via simulation before committing to a study with a very small baseline probability or a very large expected effect.
+
+---
+
+### B.5 References and further reading
+
+**Optimal experimental design**
+
+Atkinson, A. C., Donev, A. N., and Tobias, R. D. (2007). *Optimum Experimental Designs, with SAS*. Oxford University Press. — The standard reference for I-, D-, and A-optimal designs; covers the Fedorov exchange algorithm and split-plot designs.
+
+Goos, P. and Jones, B. (2011). *Optimal Design of Experiments: A Case Study Approach*. Wiley. — Accessible treatment with practical examples; chapter 9 covers split-plot optimal designs.
+
+Fedorov, V. V. (1972). *Theory of Optimal Experiments*. Academic Press. — The original source for the point-exchange algorithm.
+
+**Power analysis**
+
+Cohen, J. (1988). *Statistical Power Analysis for the Behavioral Sciences* (2nd ed.). Lawrence Erlbaum Associates. — Defines Cohen's f² effect size and tabulates power for the global F-test; the `lambda_mode="n"` convention in this package matches Cohen's tables.
+
+Lenth, R. V. (2001). "Some practical guidelines for effective sample size determination." *The American Statistician*, 55(3), 187–193. — Practical guidance on SESOI specification and power analysis for designed experiments.
+
+**GLM power**
+
+Self, S. G. and Mauritsen, R. H. (1988). "Power/sample size calculations for generalized linear models." *Biometrics*, 44(1), 79–86. — Derivation of the Wald chi-square power approximation for GLM contrasts used in this package.
+
+Shieh, G. (2000). "A comparison of two approaches for power and sample size calculations in logistic regression models." *Communications in Statistics*, 29(4), 763–791. — Reviews the constant-weight versus point-wise-weight approximations and their relative accuracy.
+
+**Split-plot designs and GLS**
+
+Jones, B. and Goos, P. (2009). "D-optimal design of split-split-plot experiments." *Biometrika*, 96(1), 67–82. — GLS information matrix derivation for multi-stratum designs.
+
+Gilmour, S. G. and Trinca, L. A. (2012). "Optimum design of experiments for statistical inference." *Journal of the Royal Statistical Society, Series C*, 61(3), 345–401. — Covers denominator df approximations for optimal split-plot designs.
+
+**Software**
+
+Russ Lenth's `pwr` R package implements the `lambda_mode="n"` convention for the global F-test and is a useful cross-check for `PowerR2Config` results.
+
+G\*Power 3.1 (Faul et al., 2007) implements the same F-test power tables and is another reference point for validation.
 
 ---
 
