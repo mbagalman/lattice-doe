@@ -6081,24 +6081,491 @@ analysed and reported) and the gap is manageable.
 
 ### Chapter 19 — Power curves: visualising the design–power relationship
 
-- 19.1 Why power curves matter: seeing the tradeoff, not just the answer
-- 19.2 Power vs. sample size: `power_curve_by_n`
-  - How the curve is computed: optimal design at each n, power evaluated
-  - Interpreting the two-panel figure: power on top, I-criterion / D-efficiency on bottom
-  - The `plot` and `plot_backend` parameters: `"matplotlib"` vs. `"plotly"`
-  - Accessing the Plotly figure for Streamlit: `result["figure"]` and `st.plotly_chart`
-- 19.3 Power vs. effect size: `power_curve_by_effect`
-  - Using the curve to communicate MDE to non-statisticians
-- 19.4 Power vs. baseline (GLM): `power_curve_by_baseline`
-  - How power changes as the baseline probability or count rate varies
-  - Critical for binomial designs where the baseline assumption is uncertain
-- 19.5 The power surface: `power_surface_2d`
-  - Two-dimensional heatmap of power as a function of (n, σ) or (n, δ)
-  - Reading the surface: "safe" vs. "risky" parameter regions
-- 19.6 Multi-response power curves: `power_curve_by_n_multiresponse`
-  - Per-response traces on a single figure
-  - Identifying the bottleneck response
-- 19.7 **Full worked example** (Python API + Plotly, all five curve types from one design)
+`i_optimal_powered_design` answers one question: *what is the minimum n that meets
+my power target?* Power curves answer the follow-up questions: *how does power
+change as n grows? as the effect gets smaller or larger? if my assumptions about
+σ turn out to be wrong?*
+
+This chapter covers the five curve-generating functions in the package and explains
+when each is useful.
+
+---
+
+#### 19.1 Why power curves matter
+
+A single number — "n = 39" — leaves several important questions unanswered:
+
+- **Diminishing returns.** Is the jump from n = 35 to n = 39 critical, or does power
+  change slowly in that region? If 36 runs give 79.5% power, the extra 3 runs may not
+  be worth the cost.
+- **Sensitivity to assumptions.** σ = 2.0 is an estimate. If the true σ is 2.5, does
+  n = 39 still provide adequate power? A curve across σ values makes this risk visible.
+- **Communicating to non-statisticians.** A reviewer who asks "what can this design
+  actually detect?" is easier to answer with a curve than with a single number and
+  a formula.
+
+Power curves shift the conversation from a point answer to a surface, making it
+possible to discuss the *robustness* of the design choice rather than just its
+headline number.
+
+---
+
+#### 19.2 Power vs. sample size: `power_curve_by_n`
+
+`power_curve_by_n` sweeps n over a range, builds an I-optimal design at each n,
+and evaluates power.
+It is the most informative single diagnostic because it shows both where the
+80% threshold is crossed and how quickly power saturates at high n.
+
+```python
+from iopt_power_design import (
+    power_curve_by_n, PowerContrastConfig, DesignOptions
+)
+
+formula  = "A + B + A:B"
+factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+power_cfg = PowerContrastConfig(
+    L=[[0, 1, 0, 0]], delta=[1.0], sigma=2.0,
+    alpha=0.05, power=0.80, max_n=60,
+)
+opts = DesignOptions(starts=3, random_state=42)
+
+result = power_curve_by_n(
+    formula, factors, power_cfg,
+    n_range=(5, 55),      # sweep bounds
+    n_points=10,          # number of n values to evaluate
+    design_opts=opts,
+    plot=False,
+)
+```
+
+**Return value.** `power_curve_by_n` returns a dict:
+
+| Key | Type | Contents |
+|---|---|---|
+| `"data"` | `pd.DataFrame` | One row per evaluated n; columns below |
+| `"figure"` | Figure or `None` | Plot object if `plot=True`, else `None` |
+| `"target_n"` | `int` or `None` | First n in the sweep that reaches the power target |
+
+**DataFrame columns:**
+
+| Column | Description |
+|---|---|
+| `n` | Sample size |
+| `power` | Achieved power at the I-optimal design of size n |
+| `lambda` | Noncentrality parameter λ |
+| `d_efficiency` | D-efficiency of the design (0–1; higher is better) |
+| `i_criterion` | I-criterion value (lower is better) |
+| `condition_number` | Condition number of X'X (large values warn of near-multicollinearity) |
+
+For the example above:
+
+```python
+print(result["target_n"])
+# 42
+
+print(result["data"].to_string())
+```
+
+```
+    n     power     lambda  d_efficiency  i_criterion  condition_number
+0   5  0.0747   1.0796      0.8978     0.3961          1.986
+1   6  0.1090   1.3163      0.8739     0.3358          1.819
+2   8  0.1818   1.8152      0.9232     0.2320          1.202
+3  11  0.2764   2.4861      0.9016     0.1733          1.568
+4  14  0.3609   3.1423      0.8964     0.1354          1.330
+5  18  0.4607   3.9945      0.8883     0.1054          1.307
+6  24  0.5905   5.2902      0.8757     0.0795          1.316
+7  32  0.7227   6.9827      0.8594     0.0603          1.363
+8  42  0.8297   8.9359      0.8432     0.0464          1.417
+9  55  0.9137  11.4786      0.8284     0.0358          1.477
+```
+
+> **Note: `target_n` vs. the solver's n.** `power_curve_by_n` evaluates n at the
+> geometric grid points you specify — here {5, 6, 8, 11, …, 55}. The first grid
+> point that crosses 80% is n = 42, so `target_n = 42`. The bisection solver in
+> `i_optimal_powered_design` searches more finely and finds n = 39.
+> Use `i_optimal_powered_design` when you need the exact minimum n; use
+> `power_curve_by_n` with a denser grid (larger `n_points`) or a tighter range
+> when you want the curve detail.
+
+**The two-panel plot.** With `plot=True`:
+
+```python
+result = power_curve_by_n(
+    formula, factors, power_cfg,
+    n_range=(5, 55), n_points=15,
+    design_opts=opts,
+    plot=True,
+)
+```
+
+The matplotlib figure has two stacked panels:
+- **Top panel:** Power vs. n, with a horizontal dashed line at the target power
+  and a vertical marker at `target_n`.
+- **Bottom panel:** I-criterion (left y-axis, green) and D-efficiency (right y-axis,
+  orange) vs. n. These help you see whether additional design quality is being
+  "purchased" as n grows or whether the design is already near-optimal.
+
+**Plotly and Streamlit.** Pass `plot_backend="plotly"` to get an interactive figure:
+
+```python
+result = power_curve_by_n(
+    formula, factors, power_cfg,
+    n_range=(5, 55), n_points=15,
+    design_opts=opts,
+    plot=True,
+    plot_backend="plotly",
+)
+
+fig = result["figure"]  # plotly.graph_objects.Figure
+
+# In a Streamlit app:
+import streamlit as st
+st.plotly_chart(fig, use_container_width=True)
+```
+
+The Plotly figure supports hover tooltips showing exact (n, power, λ) values and
+zoom/pan interactions, making it more useful than the static matplotlib version for
+exploratory work.
+
+**`analysis.power_curve_by_n` vs. `power_curves.power_curve_by_n`.**
+The package exposes a thin wrapper in `iopt_power_design.analysis` that returns only
+the DataFrame (discarding the figure and `target_n`):
+
+```python
+from iopt_power_design import power_curve_by_n   # returns DataFrame
+```
+
+Use the `analysis` version when you only need the data and don't want to manage the
+extra dict keys. Use `power_curves.power_curve_by_n` directly when you need the figure
+or the `target_n` key:
+
+```python
+from iopt_power_design.power_curves import power_curve_by_n as pcbn
+result = pcbn(formula, factors, power_cfg, ...)   # returns full dict
+```
+
+---
+
+#### 19.3 Power vs. effect size: `power_curve_by_effect`
+
+`power_curve_by_effect` holds n fixed and sweeps the effect size.
+It answers: *what is the minimum effect this design can detect at 80% power?*
+— the **minimum detectable effect (MDE)**.
+
+```python
+from iopt_power_design import power_curve_by_effect
+
+result = power_curve_by_effect(
+    formula, factors,
+    n=39,
+    power_cfg=power_cfg,       # base delta=[1.0] is the reference scale
+    effect_range=(0.3, 2.0),   # multipliers on the base delta
+    effect_points=10,
+    design_opts=opts,
+    plot=False,
+)
+```
+
+**Return value.**
+
+| Key | Type | Contents |
+|---|---|---|
+| `"data"` | `pd.DataFrame` | Columns: `effect_size`, `power`, `lambda`, `actual_delta_norm` |
+| `"figure"` | Figure or `None` | Plot if `plot=True` |
+| `"min_detectable_effect"` | `float` or `None` | First grid point reaching 80% power |
+
+**Reading the `effect_size` column.**
+For contrast mode, `effect_size` is a *multiplier* on the base `delta` vector.
+An `effect_size` of 1.0 means the design is evaluated at exactly the stated `delta`;
+values < 1.0 represent smaller (harder to detect) effects; values > 1.0 represent
+larger effects.
+
+```
+   effect_size     power     lambda  actual_delta_norm
+0     0.300000  0.1357   0.7609           0.300
+1     0.488889  0.2823   2.0206           0.489
+2     0.677778  0.4827   3.8837           0.678
+3     0.866667  0.6881   6.3500           0.867
+4     1.055556  0.8471   9.4195           1.056
+5     1.244444  0.9403  13.0923           1.244
+...
+```
+
+```python
+print(f"MDE = {result['min_detectable_effect']:.3f}x the stated delta")
+# MDE = 1.056x the stated delta
+```
+
+At n = 39, the first grid point that crosses 80% power is at effect_size = 1.056 —
+meaning a true effect of 1.056 × δ = 1.056 is just detectable at 80% power with
+10 evenly spaced grid points. The exact crossing (from the full solver) is at
+δ = 1.0 (that is what `i_optimal_powered_design` was designed for), so the grid
+approximation is conservative by about 6%.
+Increasing `effect_points` narrows this gap.
+
+**Communicating to stakeholders.**
+The effect-size curve is useful when reviewers ask "what if the true effect is
+only half of your assumed minimum?" Read off the power at effect_size = 0.5 (i.e.,
+50% of the stated δ) from the curve. In the example above, a 30% effect
+(effect_size = 0.30) gives only 14% power — a clear illustration of why the minimum
+detectable effect matters.
+
+---
+
+#### 19.4 Power vs. baseline (GLM): `power_curve_by_baseline`
+
+For GLM designs (binomial or Poisson responses), power depends heavily on the
+baseline event probability or rate because the Fisher information weight
+`w = p₀(1 − p₀)` (binomial) or `w = μ₀` (Poisson) changes with the baseline.
+`power_curve_by_baseline` holds the design fixed and sweeps the baseline.
+
+```python
+from iopt_power_design import power_curve_by_baseline, PowerGLMContrastConfig
+
+glm_cfg = PowerGLMContrastConfig(
+    L=[[0, 1, 0, 0]],
+    delta=[0.5],
+    baseline=0.3,       # assumed baseline event probability
+    family="binomial",
+    link="logit",
+    alpha=0.05,
+    power=0.80,
+)
+
+# Assume design_df is already built with i_optimal_powered_design
+df_baseline = power_curve_by_baseline(
+    formula=formula,
+    factors=factors,
+    design_df=design_df,
+    cfg=glm_cfg,
+    baseline_range=(0.05, 0.95),
+    baseline_points=30,
+)
+# Columns: baseline, power, lam, family, link
+```
+
+**Key behaviour.**
+For binomial models, power peaks near baseline = 0.5 (maximum Fisher information
+weight) and drops toward 0 as baseline approaches 0 or 1.
+If the true baseline probability is far from the assumed value, power can fall
+significantly below the target — use this curve to understand that risk before
+committing to a sample size.
+
+For Poisson models, power increases monotonically with the baseline rate because
+higher rates mean more Fisher information per observation.
+
+> **Note:** `power_curve_by_baseline` takes an existing `design_df` — it does not
+> rebuild the design as baseline varies. This is a pure sensitivity analysis on the
+> fixed design matrix.
+
+---
+
+#### 19.5 The power surface: `power_surface_2d`
+
+`power_surface_2d` sweeps two parameters simultaneously and returns a grid of power
+values, producing a heatmap that shows the "safe" vs. "risky" regions of the
+parameter space.
+
+```python
+from iopt_power_design import power_surface_2d
+
+result = power_surface_2d(
+    formula, factors, power_cfg,
+    param1="n",        param1_range=(10, 60),
+    param2="sigma",    param2_range=(1.0, 4.0),
+    grid_points=15,    # 15 × 15 = 225 evaluations
+    design_opts=opts,
+    plot=True,
+    plot_backend="plotly",
+)
+
+# result["data"]       — DataFrame with columns [param1, param2, power]
+# result["power_grid"] — 2D numpy array of power values
+# result["figure"]     — contour plot if plot=True
+```
+
+**Valid parameter choices** for `param1` and `param2`:
+
+| Value | Meaning |
+|---|---|
+| `"n"` | Sample size (integer grid) |
+| `"effect"` | Effect size multiplier on δ (contrast) or actual R² (R² mode) |
+| `"sigma"` | Residual standard deviation (contrast mode only) |
+| `"alpha"` | Significance level |
+
+**Reading the surface.**
+The contour line at power = 0.80 is the boundary between designs that meet the
+target and designs that fall short.
+- Everything *above* the 80% contour (in a (n, σ) surface) is a "safe" region: the
+  design is adequately powered even if σ is larger than assumed.
+- The gradient of the surface reveals where the design is most sensitive: a steep
+  gradient in the σ direction means power changes rapidly with small changes in σ
+  (a fragile design); a shallow gradient means the design is robust to that parameter.
+
+> **Computational cost.** When `param1` or `param2` is `"n"`, the function builds a
+> separate I-optimal design for each distinct n value. With `grid_points=15`, that is
+> up to 15 separate design searches, each with `starts` multi-start runs. Use a smaller
+> `grid_points` (8–10) or a tighter n range for interactive exploration.
+>
+> When neither parameter is `"n"` (e.g., a `"sigma"` × `"effect"` surface), the design
+> is built once at a fixed n and power is recomputed analytically for each grid cell —
+> this is very fast.
+
+---
+
+#### 19.6 Multi-response power curves: `power_curve_by_n_multiresponse`
+
+When the design must satisfy power requirements for two or more responses
+simultaneously, `power_curve_by_n_multiresponse` sweeps n and evaluates
+per-response power as well as the combined power at each step.
+
+```python
+from iopt_power_design import (
+    power_curve_by_n_multiresponse, MultiResponseOptions, ResponseSpec
+)
+
+multi_cfg = MultiResponseOptions(
+    responses=[
+        ResponseSpec(
+            name="Yield",
+            power_cfg=PowerContrastConfig(
+                L=[[0, 1, 0, 0]], delta=[1.0], sigma=2.0,
+                alpha=0.05, power=0.80,
+            ),
+        ),
+        ResponseSpec(
+            name="Purity",
+            power_cfg=PowerContrastConfig(
+                L=[[0, 0, 1, 0]], delta=[0.8], sigma=1.5,
+                alpha=0.05, power=0.80,
+            ),
+        ),
+    ],
+    power_combination="all",   # combined power = minimum of per-response powers
+)
+
+df_multi = power_curve_by_n_multiresponse(
+    formula, factors, multi_cfg,
+    n_range=(10, 60),
+    n_points=12,
+    design_opts=opts,
+)
+# Columns: n, combined_power, Yield_power, Purity_power
+```
+
+**Interpreting the output.**
+Each response gets its own power column (`<name>_power`).
+The `combined_power` column reflects the combination rule set in
+`MultiResponseOptions.power_combination`:
+
+| Rule | `combined_power` definition |
+|---|---|
+| `"all"` | Minimum of per-response powers (every response must be powered) |
+| `"any"` | Maximum of per-response powers |
+| `"weighted"` | Weighted average using `ResponseSpec.weight` |
+
+**Identifying the bottleneck response.**
+The response whose power curve rises most slowly to the 80% threshold is the
+bottleneck: it drives the required n. Reading the per-column curves makes this
+immediately visible. If the bottleneck response has a much harder power target
+than the others, consider loosening its δ or σ assumption, or redesigning for
+that response specifically.
+
+---
+
+#### 19.7 Full worked example
+
+This section brings all five curve types together for the running example
+(A + B + A:B model, A, B ∈ [−1, 1], testing A main effect, δ = 1.0, σ = 2.0).
+
+**Setup:**
+
+```python
+from iopt_power_design import (
+    power_curve_by_n, power_curve_by_effect,
+    power_surface_2d, PowerContrastConfig, DesignOptions,
+    i_optimal_powered_design,
+)
+from iopt_power_design.power_curves import power_curve_by_n as pcbn_full
+
+formula  = "A + B + A:B"
+factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+power_cfg = PowerContrastConfig(
+    L=[[0, 1, 0, 0]], delta=[1.0], sigma=2.0,
+    alpha=0.05, power=0.80, max_n=60,
+)
+opts = DesignOptions(starts=3, random_state=42)
+```
+
+**Curve 1 — Power vs. n:**
+
+```python
+result_n = pcbn_full(
+    formula, factors, power_cfg,
+    n_range=(5, 55), n_points=10,
+    design_opts=opts,
+    plot=True, plot_backend="plotly",
+)
+print(f"First n to reach 80% (in this grid): {result_n['target_n']}")
+# 42
+fig_n = result_n["figure"]
+```
+
+Key read: the curve is steep at small n and flattens above n ≈ 30.
+Once power exceeds ≈ 85%, each additional run contributes less than 1 percentage
+point. The I-criterion panel (bottom) shows that D-efficiency is already near its
+maximum by n = 20, so further runs improve power mainly by increasing degrees of
+freedom, not by placing points better.
+
+**Curve 2 — Power vs. effect size:**
+
+```python
+from iopt_power_design.power_curves import power_curve_by_effect as pcbe_full
+
+result_e = pcbe_full(
+    formula, factors, n=39,
+    power_cfg=power_cfg,
+    effect_range=(0.3, 2.0),
+    effect_points=10,
+    design_opts=opts,
+    plot=True, plot_backend="plotly",
+)
+print(f"MDE (grid approx): {result_e['min_detectable_effect']:.3f}x delta")
+# 1.056x delta
+fig_e = result_e["figure"]
+```
+
+Read from the curve: at n = 39, effects smaller than about 0.87 × δ achieve less
+than 70% power. If the true effect turns out to be half the stated minimum (0.5×),
+power drops to ≈ 18% — the design would rarely detect such a small signal.
+
+**Curve 3 — Power surface (n × σ):**
+
+```python
+result_surf = power_surface_2d(
+    formula, factors, power_cfg,
+    param1="n",     param1_range=(15, 55),
+    param2="sigma", param2_range=(1.0, 4.0),
+    grid_points=10,
+    design_opts=opts,
+    plot=True, plot_backend="plotly",
+)
+fig_surf = result_surf["figure"]
+```
+
+The surface shows the 80% power contour as a line in (n, σ) space.
+Runs along the contour (e.g., n = 39, σ = 2.0 → n = 70, σ = 2.7) are equivalent
+from a power standpoint. If prior studies suggest σ may be as large as 3.0, reading
+off the required n at σ = 3.0 shows how much the sample size needs to grow to
+remain adequately powered.
+
+**Curves 4 and 5 — Baseline and multi-response** are described in
+§19.4 and §19.6 respectively.
+For a binomial design, generate the baseline curve with `power_curve_by_baseline`
+after building the GLM design; for a multi-response design, use
+`power_curve_by_n_multiresponse` in place of `power_curve_by_n`.
 
 ---
 
