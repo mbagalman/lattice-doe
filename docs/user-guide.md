@@ -1902,20 +1902,453 @@ The practical guidance: run `compare_criteria` whenever you have categorical fac
 
 ### Chapter 8 — Python API: full programmatic control
 
-- 8.1 The primary entry points: `i_optimal_powered_design` and `i_optimal_multiresponse_design`
-- 8.2 `DesignOptions` deep dive
-  - Candidate set sizing: `auto_candidate`, `cand_min`, `cand_max`, and when to tune them
-  - Multi-start and parallelism: `starts`, `workers`, `parallel_seed_stride`
-  - Reproducibility: `random_state` (must be an int; `None` is not allowed)
-  - Blocking: `n_blocks` and `block_factor_name`
-  - Split-plot: `split_plot` (see Chapter 15 for full coverage)
-  - Feasibility: `constraint_expr` and `constraint_func` (see Chapter 17 for full coverage)
-- 8.3 The result dict: complete field reference
-  - Single-response: `design_df`, `buckets_df`, `report`
-  - Multi-response: `design`, `buckets`, `responses`, summary fields
-- 8.4 Progress callbacks: monitoring long runs
-- 8.5 Patterns for production scripts: logging, error handling, persisting results
-- 8.6 **Full worked example** (end-to-end Python script, parallel multi-start, progress callback, auto-saved report)
+The Python API is the foundation that all other interfaces build on. Every capability the package provides is reachable from Python, and the results are plain Python dicts and pandas DataFrames — easy to inspect, save, and integrate into larger workflows. Chapters 3–7 used the API throughout; this chapter consolidates the full parameter reference and covers the advanced features that earlier chapters deferred.
+
+---
+
+#### 8.1 The primary entry points
+
+Two functions cover all design generation needs:
+
+```python
+from iopt_power_design import (
+    i_optimal_powered_design,           # single response
+    i_optimal_multiresponse_design,     # two or more responses simultaneously
+)
+```
+
+Both share the same basic call shape: formula → factors → power configuration → design options. Single-response returns `{design_df, buckets_df, report}`; multi-response returns `{design, buckets, responses, n, achieved_power, ...}`. The result dict keys are described in full in Section 8.3.
+
+The optional keyword arguments on `i_optimal_powered_design` that earlier chapters skipped:
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `export_diagnostics_to` | `str` or `None` | Path prefix; if provided, writes diagnostic HTML and CSV files alongside the result. |
+| `export_report_to` | `str` or `None` | Path prefix; if provided, writes a self-contained HTML (or PDF) report. Requires `pip install -e "[report]"`. A write failure does not stop the design result from being returned. |
+| `progress_callback` | `callable` or `None` | Function called with the current `report` dict after each binary-search iteration. Useful for logging and progress bars (see Section 8.4). |
+
+---
+
+#### 8.2 `DesignOptions` deep dive
+
+`DesignOptions` is a dataclass. All fields have defaults, so `DesignOptions()` is always valid. You only need to supply the fields you want to override.
+
+```python
+from iopt_power_design import DesignOptions
+
+opts = DesignOptions(
+    auto_candidate=True,
+    starts=10,
+    workers=4,
+    random_state=42,
+    criterion="I",
+)
+```
+
+The fields group into five functional areas.
+
+---
+
+**Candidate set sizing**
+
+The candidate set is the pool of feasible points from which the Fedorov exchange algorithm selects the design. A larger candidate set gives the algorithm more to choose from and tends to produce better designs, at the cost of more memory and slightly slower matrix operations.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `auto_candidate` | `False` | If `True`, size the candidate set automatically based on factor complexity (see below). Recommended for most workflows. |
+| `candidate_points` | 2000 | Fixed candidate size when `auto_candidate=False`. Ignored when `auto_candidate=True`. |
+| `cand_min` | 1000 | Minimum candidate size when `auto_candidate=True`. Ensures adequate coverage even for simple problems. |
+| `cand_max` | 10000 | Maximum candidate size when `auto_candidate=True`. Prevents memory overuse in complex problems. |
+| `cat_cells_cap` | 10000 | Cap on categorical cell enumeration. For designs with many categorical factors, the Cartesian product of levels can be enormous; this limits the enumerated cells before random sampling takes over. |
+| `per_cell_alpha` | 1.5 | Multiplier for categorical cells in adaptive sizing. For purely categorical designs: `candidate_points = min(cells × per_cell_alpha, cand_max)`. |
+| `per_cell_min` | 5 | Minimum continuous samples per categorical cell in mixed designs. |
+| `per_cell_max` | 20 | Maximum continuous samples per categorical cell in mixed designs. |
+
+**When to use `auto_candidate=True`:** For most problems — especially those with mixed factor types — `auto_candidate=True` is the safe default. It sizes the candidate set relative to the problem's complexity, so a 2-factor design gets a smaller candidate set than a 10-factor design with interactions.
+
+**When to set `candidate_points` manually:** If you are running many repeated design searches (for example, in a loop over parameter values), fixing `candidate_points` to a moderate value (500–2000) gives more predictable runtime. If you are working with a constrained region where many candidate points will be rejected by the constraint filter, increase `candidate_points` to ensure the surviving pool is large enough.
+
+---
+
+**Search algorithm and starts**
+
+The Fedorov exchange algorithm is a local optimiser: it starts from a random initial design and iteratively swaps points to improve the optimality criterion. Because it can get stuck in local optima, the package runs multiple independent random starts and returns the best result.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `criterion` | `"I"` | Optimality criterion: `"I"`, `"D"`, or `"A"`. See Chapter 7 for guidance. |
+| `algo` | `"fedorov"` | Algorithm: `"fedorov"` (classic exchange) or `"coordinate"` (coordinate exchange, which can be faster for large problems at the cost of some solution quality). |
+| `starts` | 5 | Number of independent random starts. More starts reduce the risk of returning a local optimum, at the cost of proportionally longer runtime. |
+| `max_iter` | 1000 | Maximum exchange iterations per start. Rarely needs to be changed. |
+| `xtx_jitter` | 1e-8 | Diagonal regularisation added to X'X before inversion. Increase slightly (to 1e-6) if you see numerical warnings about near-singular matrices. |
+
+**Guidance on `starts`:** The default of 5 is sufficient for problems with fewer than about 6 factors and no interactions. For problems with many factors, interactions, or categorical variables, increasing `starts` to 10–20 can meaningfully improve solution quality, particularly for the I and A criteria (which have more complex landscapes than D). The elapsed time scales linearly with `starts`, so the cost is predictable.
+
+---
+
+**Parallelism**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `workers` | `None` | Number of parallel processes. `None` or `<= 1` runs serially. When `> 1`, each start runs in a separate process; results are collected and the best is returned. |
+| `parallel_seed_stride` | 10000 | Seed offset between parallel starts. Worker `i` gets seed = `random_state + i × parallel_seed_stride`, ensuring that parallel starts explore different parts of the candidate space. |
+
+**Important on Windows and macOS:** Python's `multiprocessing` module uses `spawn` start method on these platforms. Calls with `workers > 1` must be guarded with `if __name__ == "__main__":` in script files to prevent recursive subprocess spawning. This guard is not needed in Jupyter notebooks (which run in a `__main__` context).
+
+```python
+# script.py — required guard on Windows and macOS
+if __name__ == "__main__":
+    result = i_optimal_powered_design(
+        formula, factors, power_cfg,
+        DesignOptions(starts=20, workers=4, random_state=42),
+    )
+```
+
+---
+
+**Reproducibility**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `random_state` | 123 | Integer seed for all random number generation: candidate sampling, initial design construction, and start selection. **Must be an integer.** Passing `None` raises `ValueError`. |
+
+`random_state` controls the entire search. Two calls with the same `random_state`, `starts`, `workers`, and `parallel_seed_stride` — and the same package version — will produce identical results. If you change `workers`, the parallel seed assignment changes and the result may differ even with the same `random_state`.
+
+---
+
+**Blocked designs**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `n_blocks` | `None` | Number of blocks. Set to an integer ≥ 2 to activate blocked design mode. |
+| `block_sizes` | `None` | Optional list of per-block run counts. Length must equal `n_blocks`. If `None`, blocks are sized as evenly as possible. |
+| `block_factor_name` | `"Block"` | Name of the blocking factor column in the output design DataFrame. Must not collide with any treatment factor name. |
+
+Blocked designs are covered in Chapter 16. The formula in a blocked call does not include the block factor — the API adds block indicators automatically based on `n_blocks` and `block_factor_name`.
+
+---
+
+**Split-plot designs**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `split_plot` | `None` | `SplitPlotOptions` instance for split-plot designs. See Chapter 15 for full coverage. Cannot be set at the same time as `n_blocks`. |
+
+---
+
+**Feasibility constraints**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `constraint_func` | `None` | Python callable: `(pd.Series) → bool`. Returns `True` to keep a candidate point, `False` to discard it. |
+| `constraint_expr` | `None` | String expression alternative for YAML configs and non-Python interfaces. Factor names are available as variables. A restricted set of math functions is supported (`sqrt`, `log`, `exp`, `abs`, `min`, `max`, etc.). If both are provided, `constraint_expr` takes precedence. |
+
+Examples:
+
+```python
+# Callable form — useful in scripts where you want Python logic
+opts = DesignOptions(
+    constraint_func=lambda row: row["Temperature"] + row["Pressure"] <= 150.0,
+    auto_candidate=True,
+    random_state=42,
+)
+
+# String form — portable to YAML configs and the CLI
+opts = DesignOptions(
+    constraint_expr="Temperature + Pressure <= 150.0",
+    auto_candidate=True,
+    random_state=42,
+)
+```
+
+Constraints are applied during candidate set construction, before the Fedorov exchange. Points that fail the constraint are excluded from the pool that the algorithm draws from. Chapter 17 covers constraints in depth.
+
+---
+
+#### 8.3 The result dict: complete field reference
+
+**Single-response result** (`i_optimal_powered_design`):
+
+```python
+result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `"design_df"` | `DataFrame` | The run table: n rows × factor columns. Factor columns use the original names from the `factors` dict. |
+| `"buckets_df"` | `DataFrame` | Factor-level bucket counts. Each row is a unique combination of factor settings that appears at least once; the `count` column says how many times. |
+| `"report"` | `dict` | Search metadata, power metrics, and diagnostics. See below. |
+
+**`report` fields:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `"n"` | `int` | Final run count (minimum n achieving target power). |
+| `"p"` | `int` | Total model parameter count (including block indicators if blocked). |
+| `"p_treat"` | `int` | Treatment-only parameter count (excluding block indicators). |
+| `"df_num"` | `int` | Numerator degrees of freedom for the F-test (number of rows in L). |
+| `"df_denom"` | `int` | Denominator degrees of freedom (n − p for standard designs; adjusted for split-plot or blocked designs). |
+| `"alpha"` | `float` | Significance level from the power config. |
+| `"target_power"` | `float` | Target power from the power config. |
+| `"achieved_power"` | `float` | Power of the returned design at the selected n. |
+| `"noncentrality_lambda"` | `float` | Noncentrality parameter λ for the final design. |
+| `"criterion"` | `str` | Optimality criterion used (`"I"`, `"D"`, or `"A"`). |
+| `"algo"` | `str` | Search algorithm used (`"fedorov"` or `"coordinate"`). |
+| `"starts"` | `int` | Number of starts used. |
+| `"workers"` | `int` or `None` | Parallel workers used. |
+| `"candidate_points"` | `int` | Candidate set size used. |
+| `"elapsed_sec"` | `float` | Wall-clock seconds for the entire search. |
+| `"search_strategy"` | `str` | `"bisection"` or `"bisection+verification"`. |
+| `"verify_window"` | `int` | Size of the verification window used at convergence. |
+| `"random_state"` | `int` | Seed used (for reproducibility audit). |
+| `"warnings"` | `list[str]` | Non-fatal warnings from the search (empty list if none). |
+| `"diagnostics"` | `dict` | Design matrix diagnostics: `condition_number`, `d_efficiency`, `i_criterion`, `leverage_mean`, `leverage_max`, `leverages` (list of per-run leverage values). |
+| `"block_structure"` | `dict` or `None` | Block sizes and factor name if blocked; `None` otherwise. |
+| `"split_plot"` | `dict` or `None` | Split-plot structure if applicable; `None` otherwise. |
+| `"report_path"` | `str` | Path to the written HTML report (only present when `export_report_to` was set and succeeded). |
+
+**Accessing diagnostics:**
+
+```python
+report = result["report"]
+diag   = report["diagnostics"]
+
+print(f"n={report['n']}, power={report['achieved_power']:.4f}")
+print(f"λ={report['noncentrality_lambda']:.4f}, df=({report['df_num']},{report['df_denom']})")
+print(f"condition_number={diag['condition_number']:.1f}")
+print(f"d_efficiency={diag['d_efficiency']:.4f}")
+print(f"i_criterion={diag['i_criterion']:.6f}")
+```
+
+---
+
+#### 8.4 Progress callbacks: monitoring long runs
+
+For designs with many factors, high `max_n`, or many starts, the binary search can take several minutes. A progress callback lets you log each iteration or display a live progress indicator without polling.
+
+```python
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+log = logging.getLogger(__name__)
+
+def log_progress(report: dict) -> None:
+    log.info(
+        "  iter=%d  n=%d  power=%.4f  elapsed=%.1fs",
+        report.get("iteration", 0),
+        report["n"],
+        report["achieved_power"],
+        report.get("elapsed_sec", 0.0),
+    )
+
+result = i_optimal_powered_design(
+    formula, factors, power_cfg,
+    DesignOptions(auto_candidate=True, starts=10, random_state=42),
+    progress_callback=log_progress,
+)
+```
+
+The callback receives the `report` dict as it looks after each binary-search step — the same structure as the final `result["report"]`, but without the final enrichment fields (`elapsed_sec`, `search_strategy`, `warnings`). If the callback raises an exception, the package catches it, emits a `RuntimeWarning`, and continues the search. The callback is called once per bisection step, not once per Fedorov-exchange iteration.
+
+For a Jupyter notebook progress bar, the `tqdm` library integrates cleanly:
+
+```python
+from tqdm.auto import tqdm
+
+class TqdmCallback:
+    def __init__(self, max_n: int):
+        self.bar = tqdm(total=max_n, desc="n search", unit="runs")
+        self._last_n = 0
+
+    def __call__(self, report: dict) -> None:
+        n = report["n"]
+        self.bar.update(n - self._last_n)
+        self.bar.set_postfix(power=f"{report['achieved_power']:.3f}")
+        self._last_n = n
+
+    def close(self):
+        self.bar.close()
+
+cb = TqdmCallback(max_n=power_cfg.max_n)
+result = i_optimal_powered_design(
+    formula, factors, power_cfg,
+    DesignOptions(auto_candidate=True, starts=10, random_state=42),
+    progress_callback=cb,
+)
+cb.close()
+```
+
+---
+
+#### 8.5 Patterns for production scripts
+
+**Persisting results.** The design DataFrame and the report dict are straightforward to save:
+
+```python
+import json
+import pandas as pd
+
+# Save design to CSV
+result["design_df"].to_csv("design.csv", index=False)
+
+# Save buckets to CSV
+result["buckets_df"].to_csv("buckets.csv", index=False)
+
+# Save report to JSON
+# Convert numpy scalars to Python-native types first
+report_serialisable = {
+    k: (float(v) if hasattr(v, "item") else v)
+    for k, v in result["report"].items()
+    if k != "diagnostics"
+}
+report_serialisable["diagnostics"] = {
+    k: (float(v) if hasattr(v, "item") else v)
+    for k, v in result["report"]["diagnostics"].items()
+    if k != "leverages"   # omit per-run list for brevity
+}
+with open("report.json", "w") as f:
+    json.dump(report_serialisable, f, indent=2)
+```
+
+**Auto-saving the HTML report.** Pass `export_report_to` to have the package write the report in one step:
+
+```python
+result = i_optimal_powered_design(
+    formula, factors, power_cfg, opts,
+    export_report_to="./output/design_report.html",
+)
+# result["report"]["report_path"] contains the actual path written
+```
+
+**Error handling.** The package raises `ValueError` for invalid inputs (bad formula, wrong L dimensions, `max_n` too small) and `RuntimeWarning` for non-convergence (bisection reaches `max_n` without hitting the power target). Catch them explicitly in scripts that run unattended:
+
+```python
+import warnings
+
+try:
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+
+    if w:
+        for warning in w:
+            logging.warning("Design warning: %s", warning.message)
+
+    if result["report"]["warnings"]:
+        for msg in result["report"]["warnings"]:
+            logging.warning("Search warning: %s", msg)
+
+except ValueError as e:
+    logging.error("Invalid input: %s", e)
+    raise
+```
+
+---
+
+#### 8.6 Full worked example
+
+The following script puts together the API features covered in this chapter: parallel multi-start, a logging progress callback, the full result inspection, and auto-saved output.
+
+```python
+"""
+production_design.py
+End-to-end design generation with parallel starts,
+progress logging, and persisted output.
+
+Run with: python production_design.py
+(if __name__ == "__main__" guard required on Windows / macOS for workers > 1)
+"""
+
+import json
+import logging
+import math
+from pathlib import Path
+
+from iopt_power_design import (
+    i_optimal_powered_design,
+    PowerContrastConfig,
+    DesignOptions,
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger(__name__)
+
+# ── Experiment definition ────────────────────────────────────────────────────
+formula = "~ 1 + Temp + Press + Catalyst + Temp:Catalyst + Press:Catalyst"
+factors = {
+    "Temp":     (-1.0, 1.0),
+    "Press":    (-1.0, 1.0),
+    "Catalyst": ["A", "B", "C"],
+}
+# p = 8: Intercept, Temp, Press, Catalyst[T.B], Catalyst[T.C],
+#         Temp:Catalyst[T.B], Temp:Catalyst[T.C],
+#         Press:Catalyst[T.B], Press:Catalyst[T.C]   — actually p=9 for 3-level cat
+# Test: Temp main effect  →  L = [[0, 1, 0, 0, 0, 0, 0, 0, 0]]
+power_cfg = PowerContrastConfig(
+    L=[[0, 1, 0, 0, 0, 0, 0, 0, 0]],
+    delta=[0.5],
+    alpha=0.05,
+    power=0.80,
+    sigma=1.0,
+    max_n=400,
+)
+
+OUTPUT_DIR = Path("output")
+
+# ── Progress callback ─────────────────────────────────────────────────────────
+def log_iteration(report: dict) -> None:
+    log.info(
+        "  bisect iter=%-3d  n=%-4d  power=%.4f",
+        report.get("iteration", 0),
+        report["n"],
+        report["achieved_power"],
+    )
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    OUTPUT_DIR.mkdir(exist_ok=True)
+
+    opts = DesignOptions(
+        auto_candidate=True,
+        starts=20,
+        workers=4,                  # parallel on 4 cores
+        random_state=2025,
+        criterion="I",
+    )
+
+    log.info("Starting design search (starts=%d, workers=%d)…", opts.starts, opts.workers)
+
+    result = i_optimal_powered_design(
+        formula, factors, power_cfg, opts,
+        export_report_to=str(OUTPUT_DIR / "report.html"),
+        progress_callback=log_iteration,
+    )
+
+    rep = result["report"]
+    log.info(
+        "Done: n=%d, power=%.4f, λ=%.4f, elapsed=%.1fs",
+        rep["n"], rep["achieved_power"], rep["noncentrality_lambda"], rep["elapsed_sec"],
+    )
+
+    # Save artefacts
+    result["design_df"].to_csv(OUTPUT_DIR / "design.csv", index=False)
+    result["buckets_df"].to_csv(OUTPUT_DIR / "buckets.csv", index=False)
+    log.info("Design written to %s", OUTPUT_DIR / "design.csv")
+
+    if rep.get("warnings"):
+        for msg in rep["warnings"]:
+            log.warning("Search warning: %s", msg)
+    if "report_path" in rep:
+        log.info("HTML report written to %s", rep["report_path"])
+```
+
+This script produces four output files: `design.csv`, `buckets.csv`, `report.html`, and the console log. It is structured to be importable without triggering the search (the `if __name__ == "__main__":` guard) and uses `workers=4` safely on all platforms.
+
+> **Note on L construction for 3-level categoricals.** The formula above includes `Catalyst` with three levels, which produces two dummy columns (`Catalyst[T.B]` and `Catalyst[T.C]`), plus two interaction columns each. Before using a hardcoded L in production, verify the column order by running `build_model_matrix` on a small candidate and checking the column names, or use `contrast_from_scenarios` as described in Chapter 3. The `L=[[0,1,0,0,0,0,0,0,0]]` in the example above targets the `Temp` main effect and is correct for the stated formula, but any formula change requires re-verifying the L indices.
 
 ---
 
