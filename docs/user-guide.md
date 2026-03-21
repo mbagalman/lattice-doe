@@ -2795,23 +2795,330 @@ The dry-run step acts as a config linter, catching YAML errors and path issues b
 
 ### Chapter 10 — Streamlit web UI: interactive design without coding
 
-- 10.1 What the Streamlit app is and what it is not
-  - Who it is for: domain experts, collaborators without Python access, rapid exploration
-  - What it supports: contrast, R², GLM, multi-response, split-plot, sensitivity analysis, power curves, report export
-- 10.2 Launching the app locally: `streamlit run app/app.py`
-- 10.3 Page-by-page walkthrough
-  - **Page 1 — Factors**: defining factor names, types (categorical / continuous), and levels
-  - **Page 2 — Power Config**: selecting power mode, entering the contrast or R² target, setting α, power, σ
-  - **Page 3 — Run & Results**: running the design, reading the design table and power summary, downloading CSV and the HTML report
-  - **Page 4 — Analysis**: power curves (by n, by effect size), sensitivity sweeps, MDE, criteria comparison (contrast and R² modes; multi-response analysis and power-by-baseline curves require the Python API)
-- 10.4 Deploying to Streamlit Community Cloud (free, no server required)
-  - Step-by-step: push to GitHub → share.streamlit.io → deploy
-  - No secrets or environment variables needed for the core app
-- 10.5 Docker deployment
-  - Building the image, running with `docker run -p 8501:8501`
-  - Customising the Dockerfile for restricted environments
-- 10.6 **Full worked example** (end-to-end Streamlit walkthrough with screenshots / annotated descriptions of each UI state)
-  - Scenario: a non-programmer statistician designing a three-factor binomial study
+The Streamlit app provides the same I-optimal, power-assured design capability as the Python API and CLI, but through a point-and-click web interface. No Python knowledge is required to use it.
+
+---
+
+#### 10.1 What the app is and what it is not
+
+**Who it is for.** The Streamlit app is designed for:
+
+- Domain experts and experimenters who need a correct powered design but do not write Python
+- Collaborators and reviewers who want to explore assumptions interactively (change σ, adjust α, see the power curve update)
+- Rapid prototyping before committing a design to a YAML config or Python script
+
+**What it supports.** The app exposes the full range of standard design capabilities:
+
+- All three power modes: contrast-based, global R², and GLM (binomial/Poisson)
+- Multi-response designs (the `responses:` path from Chapter 6)
+- Split-plot and blocked designs
+- Sensitivity analysis, minimum detectable effect (MDE), and criteria comparison
+- CSV, JSON, Excel, and HTML report downloads
+
+**What it does not support.** A small number of capabilities are Python-API-only:
+
+- Power curves **by baseline** (`power_curve_by_baseline`) and **by whole-plot variance** (`power_curve_by_wp`) — the UI exposes power curves by n and by effect size only
+- **Multi-response power curves and sensitivity** — `power_curve_by_n_multiresponse` and `multiresponse_sensitivity` require the Python API (the UI notes this explicitly when a multi-response result is present)
+- **Feasibility constraints** via `constraint_func` (the callable form) — use `constraint_expr` (YAML string) for CLI or restrict to Python for callable constraints
+
+**The four-page flow.** The app is structured as a linear four-step wizard:
+
+```
+1 · Factors  →  2 · Power Config  →  3 · Run & Results  →  4 · Analysis
+```
+
+Session state is preserved as you navigate between pages — you can go back to Page 1, adjust a factor, and then return to Page 3 to re-run without re-entering everything. Use the sidebar to jump between pages at any point.
+
+---
+
+#### 10.2 Launching the app
+
+**Local run.** Install the `app` extras group and start Streamlit:
+
+```bash
+pip install -e ".[app]"
+streamlit run app/app.py
+```
+
+The app opens automatically in your browser at `http://localhost:8501`. The home page shows a four-column overview of the workflow and a quick-reference expander that summarises factor types, formula syntax, and criteria.
+
+**From the project root.** The `app/` directory is added to `sys.path` by Streamlit, so all pages can import from `state.py` and `components/` without any path manipulation. Run only from the project root.
+
+---
+
+#### 10.3 Page-by-page walkthrough
+
+---
+
+**Page 1 — Factors & Formula**
+
+This page defines the experimental factors and the Patsy model formula.
+
+*Adding factors.* Click **Add factor** to insert a new row into the factor table. For each factor, specify:
+
+- **Name** — the column name that will appear in the design table (e.g. `Temperature`, `Catalyst`)
+- **Type** — `Continuous` or `Categorical`
+- **Range / Levels** — for continuous factors, enter the numeric low and high bounds; for categorical factors, enter a comma-separated list of level names
+
+Factors persist in session state. Navigating away and back does not clear them. The **Clear all factors** button resets all factors and the formula to defaults without affecting the power configuration on Page 2.
+
+*Model formula.* The formula input below the factor table accepts standard Patsy notation. As you type, the page evaluates the formula against the current factors and displays the resulting model parameter count **p** live. This p value is the number you need when constructing a contrast matrix L on Page 2.
+
+```
+~ 1 + A + B + A:B   →  p = 4  (Intercept, A[T.high], B, A[T.high]:B)
+```
+
+The formula must be consistent with the factors defined above — Patsy will raise an error if a factor name in the formula does not appear in the factor table.
+
+---
+
+**Page 2 — Power Configuration & Design Options**
+
+This page specifies what the design should be powered to detect and how the search should be run.
+
+*Power mode.* A radio selector at the top switches between three modes:
+
+| Mode | UI label | Underlying config |
+|------|----------|-------------------|
+| Contrast-based | "Contrast-based" | `PowerContrastConfig` |
+| Global R² | "Global R²" | `PowerR2Config` |
+| GLM | "GLM (logistic/Poisson)" | `PowerGLMContrastConfig` |
+
+*Contrast-based mode.* Two sub-options appear:
+
+- **Scenario-based** (recommended): enter values for all factors in Scenario A and Scenario B, then specify the SESOI (smallest effect of interest in response units). The app calls `contrast_from_scenarios` automatically and displays the derived L matrix and δ for inspection before running.
+- **Matrix mode** (advanced): paste the L matrix and δ vector directly as space- or comma-separated text.
+
+The current p (from Page 1) is shown as a reminder when entering L in matrix mode, reducing the risk of column-count mismatches.
+
+*Global R² mode.* A single numeric input for `r2_target` (the minimum R² to detect), plus controls for `alpha`, `power`, and `lambda_mode` (`"n"` or `"n_minus_p"`).
+
+*GLM mode.* Family (binomial / Poisson) and baseline (p₀ or μ₀) selectors appear. The contrast can again be entered in scenario or matrix form. The Fisher weight is computed and displayed so you can verify the effective effect size before running.
+
+*Common power settings.* Below the mode-specific section, all modes share:
+
+| Control | Default | Description |
+|---------|---------|-------------|
+| α | 0.05 | Significance level |
+| Target power | 0.80 | Minimum acceptable power |
+| σ | 1.0 | Residual standard deviation (contrast/GLM modes) |
+| Max n | 500 | Upper bound for the binary search |
+
+*Design options.* A collapsible section exposes the `DesignOptions` fields: criterion (I/D/A), starts, random state, auto-candidate toggle, and workers. Defaults are appropriate for most studies.
+
+*Advanced design structures.* Two toggles appear below design options:
+
+- **Multi-response mode** — enables the responses list. When active, Page 3 calls `i_optimal_multiresponse_design` instead of `i_optimal_powered_design`. Each response gets its own power mode, σ, and contrast specification.
+- **Split-plot design** — exposes `htc_factors`, `n_whole_plots`, `eta`, `subplots_per_wp`, and `df_method`. When active, the split-plot exchange algorithm is used (Chapter 15).
+
+A **Number of blocks** input beneath the advanced toggles activates blocked design mode (Chapter 16). Split-plot and blocking cannot be active simultaneously; the page warns if both are enabled.
+
+---
+
+**Page 3 — Run & Results**
+
+*Running the design.* The large **Generate design** button at the top of the page triggers the search. A spinner is displayed during the run. The search runs synchronously in the Streamlit server process; for long runs (high `max_n`, many starts, complex models), expect to wait. The run time is reported after completion.
+
+*Power summary.* After a successful run, a summary card displays:
+
+- **n** — minimum run count found
+- **Achieved power** — power of the returned design
+- **λ** (noncentrality) — for single-response contrast and R² modes
+- **df** — numerator and denominator degrees of freedom
+- **Criterion** and **Search strategy** used
+- **Elapsed time**
+
+For multi-response results, per-response powers are shown alongside the combined power and combination rule.
+
+*Design and buckets tables.* The design DataFrame and the factor-level bucket counts are displayed in scrollable tables directly on the page.
+
+*Downloading results.* The Export section at the bottom of the page provides:
+
+| Download | File | Notes |
+|----------|------|-------|
+| Design CSV | `design.csv` | Run table (n × factors) |
+| Buckets CSV | `buckets.csv` | Factor-level bucket counts |
+| Full report JSON | `report.json` | Complete `result["report"]` dict |
+| HTML report | `design_report.html` | Self-contained; requires `[report]` extra |
+| Excel workbook | `design.xlsx` | Design, Buckets, Report sheets; requires `xlsxwriter` |
+
+The HTML report download button is present regardless of whether the `[report]` extra is installed; it shows an informational message if `jinja2` is missing.
+
+*Power curve.* A collapsible expander on Page 3 shows an approximate power-vs-n curve (analytical noncentral-F approximation) for contrast-based and R² single-response designs. This is an approximation computed without re-running the design search at each n; for an accurate sweep use Page 4 or `power_curve_by_n` from the Python API.
+
+For **GLM** results, the expander notes that the noncentral-F approximation is not valid for Wald χ² tests and directs users to Page 4.
+
+For **multi-response** results, the expander notes that the per-response power curve requires `power_curve_by_n_multiresponse` from the Python API.
+
+---
+
+**Page 4 — Advanced Analysis & Export**
+
+This page provides post-design analysis tools. It requires a completed run on Page 3.
+
+*Export configuration (top of page).* A **Download YAML config** button generates a CLI-compatible `config.yml` representing the current session state. This is the recommended bridge between the Streamlit UI and reproducible file-based pipelines: explore interactively in the UI, then export the YAML and commit it to version control for reproducibility.
+
+*F1 — Sensitivity analysis.* Sweeps σ (for contrast mode) or R² target (for R² mode) across a range, building a new design at each point and reporting achieved power. The resulting table is displayed and can be downloaded as CSV. The sweep runs the full design search at each point, so it can be slow for large `max_n`.
+
+*F2 — Minimum detectable effect (MDE).* Given a fixed design (the one returned on Page 3), reports the smallest effect size detectable at a specified power level. For contrast mode, MDE is expressed as a multiplier of the δ vector; for R² mode, as a minimum detectable R².
+
+*F3 — Compare optimality criteria.* Runs `compare_criteria` for the current formula, factors, and power config under all three criteria (I, D, A). Displays the summary table comparing n, achieved power, d_efficiency, and condition number. A bar chart is shown inline.
+
+*F4 — Split-plot η sensitivity.* Appears only when the Page 3 result is a split-plot design. Sweeps the variance ratio η (σ²_wp / σ²_sp) and shows how the achieved power changes as the whole-plot variance assumption changes. Useful for understanding how sensitive the sample size is to the variance ratio estimate.
+
+---
+
+#### 10.4 Deploying to Streamlit Community Cloud
+
+Streamlit Community Cloud (share.streamlit.io) provides free hosting for public GitHub repositories, with no server setup required.
+
+**Steps:**
+
+1. Push the repository to GitHub (or fork it if you are working from a public repo).
+2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with your GitHub account.
+3. Click **New app**.
+4. Select your repository and branch.
+5. Set **Main file path** to `app/app.py`.
+6. Click **Deploy**.
+
+The app will be live at `https://<your-app-name>.streamlit.app` within a few minutes.
+
+**No secrets or environment variables are required** for the core app. The `[app]` dependencies (`streamlit`, `plotly`) are listed in `requirements.txt` (or `pyproject.toml`), which Streamlit Cloud reads automatically. The Google Sheets integration (Chapter 12) requires a service account credentials file, which should be stored as a Streamlit secret rather than committed to the repository.
+
+**Resource limits.** Streamlit Community Cloud free tier has memory and CPU limits. For designs with many factors, high `max_n`, or many starts, the cloud run may time out or run slowly. For production use with resource-intensive designs, a self-hosted deployment (Docker or a cloud VM) is more reliable.
+
+---
+
+#### 10.5 Docker deployment
+
+The repository includes a `Dockerfile` that builds a self-contained image:
+
+```bash
+# Build (from the project root)
+docker build -t iopt-doe .
+
+# Run — app available at http://localhost:8501
+docker run -p 8501:8501 iopt-doe
+```
+
+The default image installs all extras (`[app]`, `[report]`, `[extras]`) so the full feature set including HTML reports and Excel download is available.
+
+**Customising for restricted environments.** If your environment has no internet access at build time, copy the package wheel and install from the local copy:
+
+```dockerfile
+# Add to Dockerfile before the pip install step
+COPY iopt_power_design-*.whl /tmp/
+RUN pip install /tmp/iopt_power_design-*.whl[app,report,extras]
+```
+
+**Running with a service account for Sheets.** Mount the credentials file at runtime rather than baking it into the image:
+
+```bash
+docker run -p 8501:8501 \
+  -v /path/to/credentials.json:/app/credentials.json \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json \
+  iopt-doe
+```
+
+---
+
+#### 10.6 Full worked example
+
+**Scenario.** A regulatory statistician at a pharmaceutical company needs to design a dose-response study for a new formulation. The response is binary (patient responds: yes/no), so the study requires a GLM (binomial/logistic) powered design. The statistician does not write Python but is comfortable with a web interface.
+
+The study has two factors:
+- **Dose** — continuous, range [1, 10] mg/kg
+- **Age** — continuous covariate, range [18, 65] years
+
+The model includes both main effects: `~ 1 + Dose + Age`. The minimum detectable effect is an increase in log-odds of 1.0 (corresponding approximately to doubling the odds ratio), tested on the Dose main effect. Baseline probability p₀ = 0.20. Target: 80% power at α = 0.05.
+
+---
+
+**Step 1: Factors (Page 1)**
+
+Open the app and navigate to **1 · Factors**.
+
+Click **Add factor** twice to create two rows:
+
+| Name | Type | Range |
+|------|------|-------|
+| Dose | Continuous | Low: 1.0 / High: 10.0 |
+| Age | Continuous | Low: 18.0 / High: 65.0 |
+
+In the formula box, enter:
+
+```
+~ 1 + Dose + Age
+```
+
+The page immediately shows **p = 3** (Intercept, Dose, Age), confirming the model matrix has three columns.
+
+---
+
+**Step 2: Power configuration (Page 2)**
+
+Navigate to **2 · Power Config**.
+
+Select **GLM (logistic/Poisson)** as the power mode.
+
+In the GLM Specification section:
+- Family: **Binomial (logistic)**
+- Baseline: **0.20** (20% baseline response probability)
+
+For the contrast, choose **Matrix mode** and enter:
+- L: `0 1 0` (tests the Dose main effect, the second column)
+- δ: `1.0` (minimum detectable log-odds change)
+
+The page shows the effective Fisher weight w = p₀(1 − p₀) = 0.20 × 0.80 = **0.16** and the noncentrality contribution λ = w × δ² = 0.16 for a reminder of the scale.
+
+Common power settings:
+- α = 0.05, target power = 0.80, σ = 1.0 (placeholder — ignored for GLM), max n = 300
+
+Design options: auto candidate, starts = 5, criterion = I, random state = 42.
+
+---
+
+**Step 3: Run & Results (Page 3)**
+
+Navigate to **3 · Run & Results** and click **Generate design**.
+
+After the search completes (~20–40 seconds), the summary shows:
+
+```
+n = 139    achieved power = 0.8007    λ = 7.8629    df = (1, 136)
+Criterion: I    Search strategy: bisection+verification    Elapsed: ~30s
+```
+
+The design table shows 139 rows with Dose and Age columns. As expected for I-optimal GLM designs, runs cluster at the extreme Dose values (near 1 and near 10 mg/kg), since extreme values provide the most information about the dose-response slope.
+
+Click **Download design CSV** to save the run table. Click **Download HTML report** to save a self-contained report suitable for sharing with collaborators.
+
+In the Export section, click **Download YAML config** to capture the full study specification as a CLI-compatible `config.yml`. This file can be committed to the study's version-control repository for a reproducible record.
+
+---
+
+**Step 4: Analysis (Page 4)**
+
+Navigate to **4 · Analysis**.
+
+*Sensitivity sweep.* Under **F1 · Sensitivity Analysis**, run a σ sweep. For GLM mode, the app sweeps the effect size δ (as a scale factor on the baseline δ) rather than σ. Adjust the sweep range to 0.5×–2.0× and click **Run sensitivity**. The table shows:
+
+| δ scale | Achieved power |
+|---------|----------------|
+| 0.5 | ~0.42 |
+| 1.0 | ~0.80 (design point) |
+| 1.5 | ~0.97 |
+| 2.0 | ~1.00 |
+
+This confirms that the design is appropriately powered at the specified δ = 1.0, and that power drops sharply if the actual effect is smaller than assumed.
+
+*MDE.* Under **F2 · Minimum Detectable Effect**, set target power = 0.80 and click **Compute MDE**. The result reports the minimum detectable log-odds change on the current 139-run design — if the true effect is above this threshold, the study has ≥ 80% power to detect it.
+
+*Criteria comparison.* Under **F3 · Compare Optimality Criteria**, click **Run comparison**. For this GLM main-effects model, all three criteria (I, D, A) return similar n values with d_efficiency close to 1.0, confirming that the criterion choice is not material for this simple model structure.
+
+---
+
+> **Tip — bridging UI and reproducible pipelines.** The YAML export on Page 4 produces a config that runs identically with `iopt-design --config study.yml --out ./output/study`. This makes the Streamlit UI a useful design-exploration tool even for users who ultimately prefer reproducible CLI pipelines: explore in the UI, lock in the assumptions, export the YAML, then run from the CLI for the production record.
 
 ---
 
