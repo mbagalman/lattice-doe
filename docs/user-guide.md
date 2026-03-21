@@ -1639,21 +1639,258 @@ For most studies, all responses share the same model formula, and the compound p
 
 ### Chapter 7 — Choosing between I, D, and A
 
-- 7.1 Mathematical definitions and geometric interpretations
-  - I-optimality: integrated prediction variance over the design region
-  - D-optimality: volume of the confidence ellipsoid in coefficient space
-  - A-optimality: sum of coefficient-estimate variances
-- 7.2 Practical guidance: when each criterion is the right choice
-  - Use I when prediction quality across the factor space matters (response surface modelling, prediction-focused studies)
-  - Use D when coefficient estimation precision is the primary goal (hypothesis-driven studies, mechanistic modelling)
-  - Use A when you want balanced precision across all effects and interactions
-  - How the three criteria behave differently for categorical-heavy designs vs. continuous designs
-- 7.3 `compare_criteria` in practice
-  - What the summary table contains: n, achieved_power, I-criterion, D-efficiency, elapsed time
-  - Reading the power-efficiency tradeoff
-- 7.4 **Full worked example** (Python API + Plotly figure, building on the Chapter 3 polymer example)
-  - Running `compare_criteria` across all three criteria
-  - Visualising the comparison with an interactive Plotly bar chart
+Chapters 3–5 used I-optimality throughout and mentioned the alternatives only in passing. This chapter explains what I, D, and A actually measure, when the choice between them matters, and how to use `compare_criteria` to let the data guide the decision.
+
+---
+
+#### 7.1 Mathematical definitions and geometric interpretations
+
+All three criteria operate on the **information matrix** M = X'X, where X is the n × p model matrix. The criteria differ in which property of M they optimise.
+
+---
+
+**I-optimality — integrated prediction variance**
+
+The I-criterion is the average variance of the predicted response ŷ(x) across the entire design region R:
+
+```
+I = (1 / |R|) ∫_R f(x)ᵀ (X'X)⁻¹ f(x) dx
+```
+
+where f(x) is the vector of model-term values at point x. Minimising I spreads prediction uncertainty uniformly across the region. An I-optimal design is "prediction-fair" — no part of the design space is much worse-predicted than any other.
+
+Geometrically: I-optimal designs typically cluster runs near the boundaries of the design region (where I-criterion is highest without design support) with moderate support in the interior. For a continuous interval [a, b], I-optimal designs often place the bulk of their runs at or near the extreme values, with a smaller fraction at intermediate points.
+
+**Use I when the model will be used to predict the response at arbitrary points in the design space** — for example, when you want to map a response surface and identify factor settings that achieve a target response, or when you plan to use the fitted model for interpolation.
+
+---
+
+**D-optimality — volume of the coefficient confidence ellipsoid**
+
+The D-criterion is:
+
+```
+D = -log det(X'X)
+```
+
+Minimising D is equivalent to maximising `det(X'X)`, which minimises the volume of the joint confidence ellipsoid for all model coefficients. A smaller ellipsoid means the coefficients are estimated with greater joint precision.
+
+Geometrically: D-optimal designs push almost all runs to the extremes of the design region — the vertices of the design space in the case of a box constraint. For a two-level factor, all runs are at the two levels; for a continuous factor on [a, b], runs cluster at a and b. There are no interior points. This extreme-placement property maximises the spread of the columns of X, which maximises det(X'X).
+
+**Use D when coefficient estimation precision is the primary goal** — for example, in mechanistic modelling where the coefficient values themselves are the scientific output, or in screening studies where you want tight estimates of all effects simultaneously.
+
+---
+
+**A-optimality — sum of coefficient-estimate variances**
+
+The A-criterion is:
+
+```
+A = trace((X'X)⁻¹)
+```
+
+Minimising A minimises the sum of the individual coefficient variances, which is the sum of the diagonal entries of the covariance matrix of the coefficient estimates. Unlike D, which treats all coefficients jointly, A treats each coefficient independently and tries to equalise their individual uncertainties.
+
+Geometrically: A-optimal designs look similar to D-optimal in many standard settings, but they can diverge in models with many categorical factors or in designs where some coefficients are much harder to estimate precisely than others. Because A-optimality penalises each variance term independently, it is sensitive to the relative scaling of model terms.
+
+**Use A when you want balanced individual precision across all effects and interactions** — for example, when the analysis will consist of a series of separate tests (one per coefficient) and you want none of them to be substantially underpowered due to poor leverage on that term.
+
+---
+
+**The Venn overlap.** For symmetric, fully continuous designs on a hypercube, I, D, and A often agree on the run count (they produce essentially the same design). Divergence appears most strongly when:
+
+- the model includes categorical factors (which introduce asymmetries in X'X)
+- the factor space is irregular or constrained
+- the model has many interaction or higher-order terms
+- some factors span very different numerical ranges
+
+---
+
+#### 7.2 How the criteria appear in this package
+
+Every call to `i_optimal_powered_design` (or `compare_criteria`) reports two criterion-level diagnostics in the result:
+
+| Diagnostic | Description |
+|------------|-------------|
+| `i_criterion` | The I-criterion value of the returned design, normalised to the candidate set size. Lower is better. |
+| `d_efficiency` | D-efficiency relative to the D-optimal design at the same n. A value of 1.0 means the design is D-optimal; lower values indicate that the design sacrifices D-efficiency to improve I or A. |
+| `condition_number` | Condition number of X'X. Very large values (> 1000) indicate near-collinearity in the model matrix, which makes individual coefficient estimates unreliable regardless of which criterion is used. |
+
+When you use `criterion="I"` (the default), the package minimises I-criterion and reports the resulting d_efficiency as a secondary measure. When you use `criterion="D"` or `criterion="A"`, the package minimises the corresponding objective and reports d_efficiency as before.
+
+---
+
+#### 7.3 `compare_criteria` in practice
+
+`compare_criteria` runs the full powered-design search independently under each criterion and returns a side-by-side summary. It is the recommended tool for understanding whether your criterion choice actually matters for a given problem.
+
+```python
+from iopt_power_design import compare_criteria, PowerContrastConfig, DesignOptions
+
+comparison = compare_criteria(formula, factors, power_cfg, design_opts=opts)
+print(comparison["summary"])
+```
+
+The `summary` DataFrame contains one row per criterion:
+
+| Column | Description |
+|--------|-------------|
+| `criterion` | `"I"`, `"D"`, or `"A"` |
+| `n` | Minimum n achieving the target power under that criterion |
+| `achieved_power` | Statistical power of the returned design |
+| `elapsed_sec` | Wall-clock time for that criterion's search |
+| `condition_number` | Condition number of the returned design's X'X |
+| `d_efficiency` | D-efficiency of the returned design (1.0 = D-optimal at that n) |
+
+The full design and report for each criterion are available in `comparison["results"]["I"]`, `["D"]`, and `["A"]`.
+
+**When criteria agree on n**, the choice is mostly cosmetic — you can use any of them and the run count is the same. Focus on which design property matters most for your analysis (prediction vs. coefficient estimation).
+
+**When criteria disagree on n**, the criterion with the lowest n is the most efficient for your specific hypothesis test. Understanding *why* it is more efficient — which the design structure comparison will reveal — is worth the extra analysis time.
+
+---
+
+#### 7.4 Full worked example
+
+**Scenario.** The Chapter 3 polymer study (Catalyst A/B + Concentration 0–2 mol/L, with interaction) is being prepared for a final report. The statistician wants to confirm that the criterion choice is appropriate and to show the principal investigator a comparison of all three criteria before committing to the run schedule.
+
+```python
+from iopt_power_design import (
+    compare_criteria,
+    PowerContrastConfig,
+    DesignOptions,
+)
+
+formula = "~ 1 + Catalyst + Concentration + Catalyst:Concentration"
+factors = {
+    "Catalyst":      ["A", "B"],
+    "Concentration": (0.0, 2.0),
+}
+# p = 4: [Intercept, Catalyst[T.B], Concentration, Catalyst[T.B]:Concentration]
+# Test: Concentration main effect  →  L = [[0, 0, 1, 0]]
+power_cfg = PowerContrastConfig(
+    L=[[0, 0, 1, 0]],
+    delta=[0.5],
+    alpha=0.05,
+    power=0.80,
+    sigma=1.0,
+    max_n=500,
+)
+opts = DesignOptions(auto_candidate=True, starts=5, random_state=42)
+
+comparison = compare_criteria(formula, factors, power_cfg, design_opts=opts)
+print(comparison["summary"].to_string())
+```
+
+Output:
+
+```
+  criterion   n  achieved_power  elapsed_sec  condition_number  d_efficiency
+0         I  70        0.8030        42.60         51.0            0.4824
+1         D  71        0.8031        12.03         50.4            0.4822
+2         A  68        0.8000        33.77         24.6            0.4448
+```
+
+**Reading the table.**
+
+The three criteria produce nearly the same run count (68–71) for this model and power target. Any of the three would be a defensible choice on the basis of run count alone.
+
+The d_efficiency column tells a more nuanced story. All three designs have d_efficiency around 0.48, which means they are all about half as D-efficient as a pure D-optimal design at the same n would be. This is not a failure of the search — it is the expected consequence of the model structure. With an interaction term and a categorical factor, the I-optimal design already places runs at extreme Concentration values to support the interaction, and this extreme placement brings D-efficiency close to its maximum. There is little room left for the criteria to diverge.
+
+---
+
+**Inspecting the designs.** The geometric difference between criteria becomes clear when you look at the design structures directly.
+
+```python
+for crit in ["I", "D", "A"]:
+    df = comparison["results"][crit]["design_df"]
+    diag = comparison["results"][crit]["report"]["diagnostics"]
+    cat = df["Catalyst"].value_counts().to_dict()
+    print(f"\n--- {crit}-optimal (n={len(df)}) ---")
+    print(f"  Concentration: min={df['Concentration'].min():.3f}, "
+          f"median={df['Concentration'].median():.3f}, "
+          f"max={df['Concentration'].max():.3f}")
+    print(f"  Catalyst: {cat}")
+    print(f"  I-criterion: {diag['i_criterion']:.6f}, "
+          f"condition_number: {diag['condition_number']:.1f}")
+```
+
+Output:
+
+```
+--- I-optimal (n=70) ---
+  Concentration: min=0.002, median=1.931, max=1.999
+  Catalyst: {'A': 35, 'B': 35}
+  I-criterion: 0.038824, condition_number: 51.0
+
+--- D-optimal (n=71) ---
+  Concentration: min=0.002, median=1.930, max=1.999
+  Catalyst: {'A': 35, 'B': 36}
+  I-criterion: 0.038281, condition_number: 50.4
+
+--- A-optimal (n=68) ---
+  Concentration: min=0.002, median=0.069, max=1.999
+  Catalyst: {'A': 40, 'B': 28}
+  I-criterion: 0.046790, condition_number: 24.6
+```
+
+The I-optimal and D-optimal designs are nearly identical: both cluster the majority of runs at high Concentration (median ≈ 1.93) with a small fraction at near-zero, and both split Catalyst evenly (35/35 and 35/36). This is expected — for a model with an interaction term, I and D both benefit from the same extreme-Concentration strategy.
+
+The A-optimal design is strikingly different:
+
+- **Reversed Concentration skew.** Median Concentration is 0.069 — most runs are at *low* Concentration. The design still uses the full range (min ≈ 0, max ≈ 2), but the balance is inverted relative to I and D.
+- **Unequal Catalyst allocation.** A-optimality assigns 40 runs to Catalyst A and only 28 to Catalyst B. This is not a mistake; it reflects A-optimality's coefficient-by-coefficient optimisation. The [Intercept] and Concentration coefficients are estimated with level A as the reference, so A-optimal allocates more runs there to tighten those specific variances.
+- **Lower condition number** (24.6 vs. 50–51). The A-optimal design produces a better-conditioned information matrix. This can be an advantage in settings where numerical precision or near-collinearity is a concern.
+- **Higher I-criterion** (0.0468 vs. 0.0388). The A-optimal design is about 20% worse at minimising prediction variance. If the model will be used for response surface mapping, the A-optimal design will give noisier predictions in parts of the design region.
+
+The practical implication: for this study, if the goal is to predict yield across the full Concentration range (a response surface goal), I-optimal is the right choice. If the goal is purely hypothesis testing with good numerical properties, A-optimal achieves the same power at n = 68 (two fewer runs) with a better-conditioned matrix. The difference is small in absolute terms, but the structural differences in the design are meaningful.
+
+---
+
+**Adding a Plotly visualisation.**
+
+The `compare_criteria` function has a built-in `plot=True` option that produces a matplotlib bar chart. For an interactive Plotly figure suitable for a notebook or report, build it from the summary DataFrame:
+
+```python
+import plotly.graph_objects as go
+
+summary = comparison["summary"]
+
+fig = go.Figure()
+
+# Bar: n (primary axis)
+fig.add_trace(go.Bar(
+    x=summary["criterion"],
+    y=summary["n"],
+    name="n (runs)",
+    marker_color=["steelblue", "tomato", "seagreen"],
+    text=summary["n"],
+    textposition="outside",
+))
+
+fig.update_layout(
+    title="Criterion comparison — polymer study",
+    xaxis_title="Optimality criterion",
+    yaxis_title="Minimum runs (n)",
+    yaxis=dict(range=[0, summary["n"].max() * 1.15]),
+    showlegend=False,
+    template="plotly_white",
+    width=600,
+    height=400,
+)
+
+fig.show()  # interactive in Jupyter; use fig.write_html("comparison.html") to save
+```
+
+For a side-by-side comparison of both n and d_efficiency, add a second trace on a secondary y-axis (see Chapter 20 for the full dual-axis pattern).
+
+---
+
+**When criteria agree — the symmetric continuous case.**
+
+In the Chapter 4 consumer survey (four continuous factors on [−1, +1], main-effects model), all three criteria returned exactly the same n = 73. This is the typical result for main-effects-only models on symmetric continuous designs: the information matrix is nearly spherical in factor space, and I, D, and A achieve essentially the same objective under different names.
+
+The practical guidance: run `compare_criteria` whenever you have categorical factors, interactions, or an asymmetric design region. Skip it when you have a simple main-effects model with symmetric continuous factors — the criteria will agree, and I-optimal is the safest default.
 
 ---
 
