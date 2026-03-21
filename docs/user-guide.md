@@ -5122,16 +5122,339 @@ asymmetry is the fundamental design challenge of split-plot experiments.
 
 ### Chapter 16 — Blocked designs: accounting for nuisance variation
 
-- 16.1 What blocking is and when it is necessary
-  - Day-to-day variation, batch effects, operator differences, equipment lots
-  - Block effects as nuisance parameters: estimated but not the focus of inference
-  - The cost of blocking: (n_blocks − 1) denominator degrees of freedom lost
-- 16.2 The `n_blocks` and `block_factor_name` parameters in `DesignOptions`
-- 16.3 `blocked_formula`, `balanced_block_sizes`, and `build_blocked_design`
-  - When these low-level utilities are useful vs. when `DesignOptions.n_blocks` is sufficient
-- 16.4 **Full worked example** (Python API, clinical-style study across 4 operators)
-  - Two-factor design, 4 blocks (one per operator), contrast-mode power
-  - Showing the power cost from blocking vs. an unblocked design of the same n
+Experimental runs are rarely performed under perfectly homogeneous conditions.
+A multi-day study sees day-to-day instrument drift. A multi-operator study sees
+operator-to-operator differences. A batch process has batch-to-batch raw
+material variation. Blocking is the statistical tool for accounting for these
+known, structured sources of nuisance variation.
+
+---
+
+#### 16.1 What blocking is and when it is necessary
+
+A **block** is a group of experimental runs performed under similar conditions
+— the same day, the same operator, the same batch of material. Variation
+*between* blocks is real but irrelevant to the treatment question. Including
+block effects in the model as nuisance parameters lets you remove that
+between-block variation from the error term, leaving the within-block
+residuals to estimate your treatment effects cleanly.
+
+**When blocking matters**
+
+| Source of nuisance variation | Block factor |
+|------------------------------|-------------|
+| Equipment calibration drifts day to day | Day of experiment |
+| Multiple operators run the experiment | Operator |
+| Different reagent batches | Batch number |
+| Equipment lots (separate runs of an instrument) | Equipment lot |
+| Split across multiple labs | Lab |
+
+**When blocking is not needed**
+
+If all runs are genuinely exchangeable — same day, same operator, same batch
+— there is no need to block. Adding unnecessary blocks only costs degrees of
+freedom without any compensating reduction in error variance.
+
+**The cost of blocking**
+
+Adding `n_blocks` blocks to the model introduces `n_blocks − 1` nuisance
+parameters (block dummy columns). The denominator degrees of freedom for the
+F-test decreases accordingly:
+
+```
+df_denom (unblocked) = n − p_treat
+df_denom (blocked)   = n − p_treat − (n_blocks − 1)
+                     = n − (p_treat + n_blocks − 1)
+```
+
+For a small number of large blocks this cost is minor. For many small blocks
+it can be substantial, and each block must have enough runs to support the
+within-block design.
+
+**Block effects as nuisance parameters**
+
+Block effects are estimated and included in the model but are not the focus of
+inference. They absorb the between-block variation, leaving the residuals to
+reflect only the within-block (sub-block) experimental error. If blocks
+genuinely capture real variation, the effective residual σ² is lower after
+blocking — which compensates for the df loss.
+
+---
+
+#### 16.2 The `n_blocks` and `block_factor_name` parameters in `DesignOptions`
+
+Blocking is activated by setting `n_blocks` in `DesignOptions`:
+
+```python
+from iopt_power_design.config import DesignOptions
+
+design_opts = DesignOptions(
+    n_blocks=2,               # number of blocks (≥ 2 to activate blocking)
+    block_factor_name="Day",  # column name in the output design (default: "Block")
+    random_state=42,
+    starts=5,
+)
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `n_blocks` | `int` or `None` | `None` | Number of blocks. `None` = unblocked. Must be ≥ 2 when set. |
+| `block_sizes` | `list[int]` or `None` | `None` | Explicit sizes for each block (must sum to design n). `None` = balanced (equal sizes, with first blocks getting 1 extra run if n is not divisible). |
+| `block_factor_name` | `str` | `"Block"` | Name of the block column in the output design. Labels are `"B1"`, `"B2"`, …, `"Bn_blocks"`. |
+
+**Specifying the L matrix with blocking**
+
+The contrast matrix `L` always uses **treatment parameters only** — the same
+columns as if no blocking were present. Block dummy columns are added
+internally by the API; you do not need to include them in `L`. The number of
+columns in `L` must equal `p_treat` (the treatment model parameter count).
+
+```python
+# For formula ~ 1 + A + B (p_treat = 3: Intercept, A, B)
+# L tests the B main effect — same regardless of whether blocking is used
+L = [[0, 0, 1]]
+```
+
+**What the API adds internally**
+
+When `n_blocks ≥ 2`, the API:
+
+1. Augments the formula with block dummy columns: `blocked_formula(formula)` →
+   `"~ 1 + A + B + C(Block)"`.
+2. Searches for I-optimal designs independently within each block (each block
+   gets a distinct random seed derived from `random_state`).
+3. Combines the per-block designs into a single DataFrame with a `Block` column
+   (or the custom `block_factor_name`).
+4. Evaluates power using the augmented model matrix, so the F-test correctly
+   accounts for the block parameters.
+
+The returned design matrix always includes the block column. The `report`
+dict includes a `"block_structure"` key:
+
+```python
+# result["report"]["block_structure"]
+# {"n_blocks": 2, "block_factor_name": "Day"}
+```
+
+---
+
+#### 16.3 Low-level blocking utilities
+
+The `blocked` module exposes the utilities the API uses internally. You rarely
+need them directly, but they are useful for custom pipelines:
+
+**`balanced_block_sizes(n, n_blocks)`** — compute balanced block sizes:
+
+```python
+from iopt_power_design.blocked import balanced_block_sizes
+
+balanced_block_sizes(38, 2)   # [19, 19]
+balanced_block_sizes(10, 3)   # [4, 3, 3]  — first block gets extra run
+balanced_block_sizes(44, 4)   # [11, 11, 11, 11]
+```
+
+**`blocked_formula(formula, block_factor_name)`** — append block term to a
+Patsy formula:
+
+```python
+from iopt_power_design.blocked import blocked_formula
+
+blocked_formula("~ 1 + A + B")
+# "~ 1 + A + B + C(Block)"
+
+blocked_formula("~ 1 + A + B", block_factor_name="Day")
+# "~ 1 + A + B + C(Day)"
+```
+
+**`build_blocked_design`** — low-level function called by `i_optimal_powered_design`
+when blocking is active. It runs independent I-optimal searches for each block
+and assembles the full design. Use this only if you need direct control over
+the within-block optimisation (e.g., if blocks have unequal candidate sets).
+
+---
+
+#### 16.4 Full worked example — two-day study
+
+**Scenario**
+
+A quality team is running a two-factor screening experiment (factors A and B,
+both coded [−1, +1]). The experiment spans two days. Day-to-day instrument
+drift is real but not the focus of study. The team wants to detect a
+half-standard-deviation effect of B (δ = 0.5, σ = 1.0) at 80% power.
+
+**Step 1 — Unblocked baseline**
+
+First, compute the sample size without blocking, as a reference:
+
+```python
+from iopt_power_design import i_optimal_powered_design
+from iopt_power_design.config import PowerContrastConfig, DesignOptions
+
+result_unblocked = i_optimal_powered_design(
+    formula="~ 1 + A + B",
+    factors={"A": (-1.0, 1.0), "B": (-1.0, 1.0)},
+    power_cfg=PowerContrastConfig(
+        L=[[0, 0, 1]],   # B main effect; p_treat=3: Intercept, A, B
+        delta=[0.5],
+        sigma=1.0,
+        power=0.80,
+        alpha=0.05,
+    ),
+    design_opts=DesignOptions(random_state=42),
+)
+r = result_unblocked["report"]
+print(f"Unblocked: n={r['n']}  power={r['achieved_power']:.4f}  "
+      f"df_denom={r['df_denom']}  lambda={r['noncentrality_lambda']:.4f}")
+# Unblocked: n=39  power=0.7960  df_denom=36  lambda=8.2051
+```
+
+**Step 2 — Blocked design (2 days)**
+
+```python
+result_blocked = i_optimal_powered_design(
+    formula="~ 1 + A + B",
+    factors={"A": (-1.0, 1.0), "B": (-1.0, 1.0)},
+    power_cfg=PowerContrastConfig(
+        L=[[0, 0, 1]],   # same L — treatment parameters only, block columns excluded
+        delta=[0.5],
+        sigma=1.0,
+        power=0.80,
+        alpha=0.05,
+    ),
+    design_opts=DesignOptions(
+        n_blocks=2,
+        block_factor_name="Day",
+        random_state=42,
+        starts=5,
+    ),
+)
+r = result_blocked["report"]
+print(f"Blocked (2 days): n={r['n']}  power={r['achieved_power']:.4f}  "
+      f"df_denom={r['df_denom']}  lambda={r['noncentrality_lambda']:.4f}")
+# Blocked (2 days): n=38  power=0.8041  df_denom=34  lambda=8.4050
+print(f"block_structure: {r['block_structure']}")
+# block_structure: {'n_blocks': 2, 'block_factor_name': 'Day'}
+```
+
+**Interpreting the comparison**
+
+| Design | n | p_full | df_denom | λ | Power |
+|--------|---|--------|----------|---|-------|
+| Unblocked | 39 | 3 | 36 | 8.205 | 0.796 |
+| 2-block (days) | 38 | 4 | 34 | 8.405 | 0.804 |
+
+With 2 blocks, the model gains 1 extra parameter (1 day dummy), losing 1
+denominator df (36 → 34 at the same n). The API finds that n = 38 is
+sufficient because the within-block I-optimal design achieves a slightly
+higher noncentrality (8.405 vs 8.205) that more than compensates for the lost
+df. The net result is essentially identical sample sizes.
+
+**Step 3 — Inspect the design**
+
+```python
+df = result_blocked["design_df"]
+print(df.to_string(index=False))
+#      A         B   Day
+# -0.9875  -0.9621   B1
+#  0.9832   0.9814   B1
+# ...
+# -0.9815   0.9881   B2
+#  0.9901  -0.9792   B2
+# ...
+```
+
+Runs are labelled `"B1"` and `"B2"` (the auto-generated block labels) even
+though `block_factor_name="Day"`. The label prefix is always `"B"` followed by
+the block index. If you want more descriptive labels you can rename the column
+after retrieval:
+
+```python
+df["Day"] = df["Day"].map({"B1": "Monday", "B2": "Tuesday"})
+```
+
+**Step 4 — Unbalanced blocks**
+
+If the team can run only 15 experiments on Day 1 and 23 on Day 2, pass
+`block_sizes` explicitly:
+
+```python
+result_unbalanced = i_optimal_powered_design(
+    formula="~ 1 + A + B",
+    factors={"A": (-1.0, 1.0), "B": (-1.0, 1.0)},
+    power_cfg=PowerContrastConfig(
+        L=[[0, 0, 1]], delta=[0.5], sigma=1.0, power=0.80, alpha=0.05,
+    ),
+    design_opts=DesignOptions(
+        n_blocks=2,
+        block_sizes=[15, 23],   # explicit unequal sizes; must sum to n
+        block_factor_name="Day",
+        random_state=42,
+        starts=5,
+    ),
+)
+```
+
+`block_sizes` must have length `n_blocks` and must sum to the total design
+n. Mismatches raise `ValueError`.
+
+---
+
+#### 16.5 How many blocks is too many?
+
+The practical limit on block count comes from **within-block degrees of
+freedom**. Each block has `n_block_i − p_treat` error df. If a block has
+fewer runs than treatment parameters, the within-block design is
+under-determined and the API will raise an error.
+
+A rough guide:
+
+| Scenario | Guidance |
+|----------|----------|
+| 2–3 large blocks | Low df cost, generally safe |
+| 4–6 medium blocks | Manageable if each block has ≥ 2×p_treat runs |
+| Many small blocks | Each block must have ≥ p_treat + 2 runs; df cost is high |
+
+The noncentrality parameter can fall substantially when blocks are small
+relative to the treatment model, because each within-block design has limited
+resolution. If you have many anticipated blocks, consider whether the nuisance
+variation can instead be captured by a continuous covariate (ANCOVA) or whether
+a split-plot structure (Chapter 15) is more appropriate.
+
+---
+
+#### 16.6 YAML equivalent
+
+For a reproducible pipeline, the same design can be specified in YAML:
+
+```yaml
+# two_day_study.yml
+formula: "~ 1 + A + B"
+
+factors:
+  A: [-1.0, 1.0]
+  B: [-1.0, 1.0]
+
+contrast:
+  L: [[0, 0, 1]]
+  delta: [0.5]
+
+alpha: 0.05
+power: 0.80
+sigma: 1.0
+
+design:
+  n_blocks: 2
+  block_factor_name: Day
+  random_state: 42
+  starts: 5
+
+output:
+  basename: two_day_study
+```
+
+```bash
+iopt-design --config two_day_study.yml --out ./output/two_day_study
+```
 
 ---
 
