@@ -1317,27 +1317,321 @@ Both designs concentrate runs at the extreme values of the primary factor (Dose 
 
 ### Chapter 6 — Multi-response designs: powering several outcomes simultaneously
 
-**Running example:** A chemical process engineer is optimising for three responses at once — yield (continuous, contrast mode), colour score (continuous, contrast mode), and particle size (continuous, R² mode). All three must be adequately powered before the run schedule is approved.
+**Running example.** A polymer reactor team is studying how two coded process factors — Temperature (Temp, −1 to +1) and Pressure (Press, −1 to +1) — affect both **yield** and **purity** in the same set of experimental runs. The two responses have different measurement noise: yield has σ = 1.0, purity has σ = 1.5. Both must achieve 80% power before the run schedule is approved.
 
-- 6.1 The multi-response problem: why joint power is harder than single-response power
-  - Trade-offs: designs that are efficient for one response may be poor for another
-  - The design that gets selected is the one that satisfies all responses simultaneously
-- 6.2 Combination rules: how per-response power scores are folded into one objective
-  - `"min"`: the pessimistic rule — overall power equals the weakest response
-  - `"product"`: geometric combination — sensitive to all responses simultaneously
-  - `"weighted_mean"`: assign relative importance weights per response; useful when responses have unequal business priority
-  - Guidance on which rule to choose
-- 6.3 `ResponseSpec` and `MultiResponseOptions`
-  - Defining each response: name, formula, factors, power_cfg, weight
-  - Setting `sigma_joint` for correlated responses (optional)
-  - The `power_combination` parameter
-- 6.4 Running `i_optimal_multiresponse_design` and reading the result
-  - Output structure: `design`, `buckets`, `responses`, summary fields
-  - Per-response power in `result["responses"]`
-- 6.5 **Full worked example** (Python API, three-response chemical process)
-  - Mixed power modes across responses (contrast + R²)
-  - `power_curve_by_n_multiresponse` to visualise how each response's power grows with n
-  - `multiresponse_sensitivity` to probe sensitivity to σ assumptions
+---
+
+#### 6.1 The multi-response problem: why joint power is harder than single-response power
+
+In a single-response experiment, choosing how many runs to run is a straightforward trade-off between cost and power. You specify a minimum detectable effect, a noise level, and a target power, and the binary search finds the smallest n that clears the bar.
+
+With multiple responses, two complications arise.
+
+**First, different responses may require different numbers of runs.** A noisy response or a small target effect size will demand more runs than a precise measurement of a large effect. Suppose you calculate the minimum n for each response independently:
+
+- Yield (σ = 1.0, δ = 0.5): the Fedorov search finds n = 42 runs.
+- Purity (σ = 1.5, δ = 0.5): the Fedorov search finds n = 100 runs.
+
+If you run only 42 experiments, yield is powered but purity is not. You must run enough experiments to satisfy every response simultaneously.
+
+**Second, a single design matrix must serve all responses at once.** You cannot run one set of experiments for yield and a different set for purity — you have one physical experiment and one run table. The design that is I-optimal for yield may not be optimal for purity, and the joint design is a compromise that satisfies both. In practice, when responses share the same model formula and factor space, the I-optimal compromise is usually close to optimal for each individual response; the dominant cost is simply the run count, not the point arrangement.
+
+The package addresses both complications with a joint binary search: it finds the minimum n such that all responses are powered under a user-chosen combination rule, and at each n it builds a single I-optimal design that serves all responses.
+
+---
+
+#### 6.2 Combination rules: how per-response power scores are folded into one objective
+
+At each candidate n during the binary search, the optimiser evaluates the power for every response on the chosen design and must decide whether that n is "good enough." It does this by collapsing per-response powers into one combined scalar and comparing that scalar to a target.
+
+The package offers three rules.
+
+---
+
+**`"min"` — the guaranteed-floor rule (recommended default)**
+
+```
+combined_power = min(power_1, power_2, ..., power_k)
+```
+
+The combined power equals the power of the weakest response. The binary search finds the smallest n where `min(power_i) ≥ max(target_i)` — that is, where every response meets its own individual target. This is the most conservative choice: it gives an unconditional guarantee that no response falls short.
+
+Use `"min"` whenever you need to be able to say "this design has ≥ 80% power for every one of these hypotheses individually."
+
+---
+
+**`"product"` — joint-probability rule**
+
+```
+combined_power = power_1 × power_2 × ... × power_k
+```
+
+The combined power is interpreted as the probability that all hypothesis tests reject simultaneously, under the assumption that the responses are statistically independent. The binary search finds n where `product(power_i) ≥ product(target_i)`.
+
+For two responses with target 80%, the product target is 0.80 × 0.80 = 0.64 — a combined 64% joint-detection probability. This means individual response powers at that n will typically be below 80%. In the running example, `"product"` returns n = 71, but purity power at n = 71 is only 0.68 — purity does not meet its individual 80% target.
+
+Use `"product"` only when (a) responses are genuinely independent (uncorrelated error structure) and (b) you care specifically about the joint-rejection probability rather than individual response guarantees. For correlated responses, use the Hotelling T² path with `sigma_joint` instead (see Section 6.3).
+
+---
+
+**`"weighted_mean"` — importance-weighted rule**
+
+```
+combined_power = Σ (w_i × power_i) / Σ w_i
+```
+
+The combined power is the weighted average of individual powers. Weights are normalised internally, so only the ratios matter: a response with weight 2.0 counts twice as much as one with weight 1.0.
+
+Use `"weighted_mean"` when responses have genuinely unequal business importance and you can accept that a lower-priority response may be underpowered in exchange for a smaller overall n. In the running example with equal weights, `"weighted_mean"` returns n = 68, but purity power is only 0.66.
+
+**The bottom line for most users:** use `"min"`. The run savings from `"product"` or `"weighted_mean"` come directly at the expense of per-response power guarantees. The table below summarises the tradeoff for the running example.
+
+| Rule | n | Combined power | Yield power | Purity power |
+|------|---|----------------|-------------|--------------|
+| `"min"` | 100 | 0.8014 | 0.9868 | 0.8014 |
+| `"product"` | 71 | 0.6405 | 0.9478 | 0.6757 |
+| `"weighted_mean"` | 68 | 0.7997 | 0.9391 | 0.6604 |
+
+Only `"min"` guarantees both responses meet 80%.
+
+---
+
+#### 6.3 `ResponseSpec` and `MultiResponseOptions`
+
+Each response is described by a `ResponseSpec` dataclass, and the collection of responses plus the combination rule are bundled into a `MultiResponseOptions` dataclass.
+
+**`ResponseSpec` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Label for this response. Used as a key in the result dict. |
+| `power_cfg` | `PowerContrastConfig` or `PowerR2Config` | Power requirements for this response. Each response may use a different mode and different parameters. |
+| `formula` | `str` or `None` | Response-specific formula override. If `None`, the global formula passed to the design function is used. Set a different formula only when responses have different model structures (the compound-criterion path). |
+| `weight` | `float` (default 1.0) | Relative importance weight for `"weighted_mean"` combination. Ignored for `"min"` and `"product"`. |
+
+**`MultiResponseOptions` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `responses` | `list[ResponseSpec]` | At least two entries required. Names must be unique. |
+| `power_combination` | `"min"`, `"product"`, or `"weighted_mean"` | Combination rule. Default `"min"`. |
+| `sigma_joint` | `ndarray (k×k)` or `None` | Inter-response error covariance for Hotelling T² joint power. Must be symmetric positive definite. Only valid when all responses share the same formula and use contrast mode. Leave as `None` unless you have a well-estimated cross-response covariance matrix. |
+
+> **Note on `sigma_joint`:** The Hotelling T² path replaces per-response scalar power with a multivariate test. This is theoretically appropriate for correlated responses (for example, yield and purity measured from the same physical sample), but it requires a reliable estimate of the full k×k error covariance matrix. In most practical settings, pilot data does not provide a reliable estimate of this matrix, and the independence assumption behind `"min"` is the more robust choice.
+
+---
+
+#### 6.4 Running `i_optimal_multiresponse_design` and reading the result
+
+The function signature mirrors `i_optimal_powered_design`:
+
+```python
+result = i_optimal_multiresponse_design(
+    formula,     # global Patsy formula (RHS)
+    factors,     # factor definitions dict
+    multi_cfg,   # MultiResponseOptions
+    design_opts, # DesignOptions (optional; defaults to DesignOptions())
+)
+```
+
+The result is a dict with the following keys:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `"design"` | `DataFrame` | The run table (n rows × factor columns). |
+| `"n"` | `int` | Number of runs selected. |
+| `"achieved_power"` | `float` | Combined power at the selected n, under the chosen rule. |
+| `"combination_rule"` | `str` | Which rule was used. |
+| `"responses"` | `list[dict]` | One entry per response. Each dict contains `"name"`, `"power"`, `"lam"` (noncentrality), and `"n"`. |
+| `"buckets"` | `DataFrame` | Run counts by factor-level bucket (same format as single-response). |
+| `"compound_criterion"` | `bool` | `True` if any response has a formula override (different model structure per response). |
+| `"elapsed_sec"` | `float` | Wall-clock time for the search. |
+| `"search_strategy"` | `str` | `"bisection"` or `"bisection+verification"`. |
+| `"warnings"` | `list[str]` | Non-fatal warnings from the search. |
+
+**Reading per-response results.** The `"responses"` list contains one entry per `ResponseSpec`, in the same order you defined them. Each entry is a dict:
+
+```python
+for resp in result["responses"]:
+    print(f"{resp['name']}: power={resp['power']:.4f}, lambda={resp['lam']:.4f}")
+```
+
+When using the `"min"` rule, the `"achieved_power"` at the top level equals the minimum of the per-response powers. The response with the lowest power is the one that determined n.
+
+---
+
+#### 6.5 Full worked example
+
+**Scenario.** A polymer reactor team needs to characterise how Temperature (Temp) and Pressure (Press) affect both yield and purity in a continuous-flow process. Both factors are available in coded form on [−1, +1]. The team has preliminary estimates: yield noise σ = 1.0, purity noise σ = 1.5. Both responses should have ≥ 80% power to detect a main-effect coefficient of 0.5 at α = 0.05.
+
+```python
+from iopt_power_design import (
+    i_optimal_multiresponse_design,
+    PowerContrastConfig,
+    DesignOptions,
+    ResponseSpec,
+    MultiResponseOptions,
+)
+
+formula = "~ 1 + Temp + Press"
+factors = {
+    "Temp":  (-1.0, 1.0),
+    "Press": (-1.0, 1.0),
+}
+# p = 3 model columns: [Intercept, Temp, Press]
+# L = [[0, 1, 0]] tests the Temp main effect
+# L = [[0, 0, 1]] tests the Press main effect
+
+# --- Per-response power configs ---
+yield_cfg = PowerContrastConfig(
+    L=[[0, 1, 0]],   # test Temperature main effect
+    delta=[0.5],      # minimum detectable coefficient
+    alpha=0.05,
+    power=0.80,
+    sigma=1.0,
+    max_n=300,
+)
+
+purity_cfg = PowerContrastConfig(
+    L=[[0, 0, 1]],   # test Pressure main effect
+    delta=[0.5],
+    alpha=0.05,
+    power=0.80,
+    sigma=1.5,        # purity measurements are noisier
+    max_n=300,
+)
+
+# --- Collect responses and set combination rule ---
+responses = [
+    ResponseSpec(name="yield",  power_cfg=yield_cfg),
+    ResponseSpec(name="purity", power_cfg=purity_cfg),
+]
+
+multi_cfg = MultiResponseOptions(
+    responses=responses,
+    power_combination="min",   # guarantee both responses meet target
+)
+
+opts = DesignOptions(auto_candidate=True, starts=5, random_state=42)
+
+# --- Run the joint design search ---
+result = i_optimal_multiresponse_design(formula, factors, multi_cfg, opts)
+```
+
+**Reading the result:**
+
+```python
+print("n:", result["n"])
+print("achieved_power:", round(result["achieved_power"], 4))
+
+for resp in result["responses"]:
+    print(f"  {resp['name']}: power={resp['power']:.4f}, lambda={resp['lam']:.4f}")
+```
+
+Output:
+
+```
+n: 100
+achieved_power: 0.8014
+  yield:  power=0.9868, lambda=17.8171
+  purity: power=0.8014, lambda=8.0354
+```
+
+The search found that n = 100 runs are needed. Purity is the **binding constraint**: it requires n = 100 to achieve 80% power given its higher noise (σ = 1.5). Yield, being less noisy (σ = 1.0), only needed n = 42 on its own; at n = 100 it achieves near-perfect power (0.9868). The combined power reported at the top level equals the minimum across responses (0.8014), which is purity's power.
+
+This is the central feature of the `"min"` rule: the design guarantees at least 80% power for every response, and it is always the noisiest or smallest-effect response that determines the final run count.
+
+---
+
+**Power curve across n.**
+
+To understand how each response's power changes with sample size, use `power_curve_by_n_multiresponse`:
+
+```python
+from iopt_power_design import power_curve_by_n_multiresponse
+
+curve_df = power_curve_by_n_multiresponse(
+    formula, factors, multi_cfg,
+    n_range=(20, 120),
+    n_points=6,
+    design_opts=opts,
+)
+print(curve_df.to_string())
+```
+
+Output:
+
+```
+     n  combined_power  yield_power  purity_power
+0   20        0.2563       0.4880        0.2563
+1   40        0.4525       0.7885        0.4525
+2   60        0.6148       0.9091        0.6148
+3   80        0.7215       0.9657        0.7215
+4  100        0.8014       0.9868        0.8014
+5  120        0.8581       0.9949        0.8581
+```
+
+At n = 40, yield already exceeds 0.78 power but purity is still below 0.45. The combined (min) power curve is entirely driven by purity. This view is useful for communicating the run-count–power tradeoff to stakeholders: if the team can only afford 80 runs, the combined power drops to 0.72, and that shortfall lands entirely on purity.
+
+Pass `plot=True` to get an automatic line chart, or capture the DataFrame and build a custom Plotly or matplotlib figure (see Chapter 20 for plotting patterns).
+
+---
+
+**Sigma sensitivity at fixed n.**
+
+`multiresponse_sensitivity` builds one design at a fixed n and sweeps a common noise scale factor, asking: "How does our joint power change if our preliminary σ estimates turn out to be wrong?"
+
+This function requires all responses to use `PowerContrastConfig` (sigma scaling is undefined for R²-mode responses).
+
+```python
+from iopt_power_design import multiresponse_sensitivity
+
+sens_df = multiresponse_sensitivity(
+    formula, factors, multi_cfg,
+    fixed_n=100,
+    sigma_range=(0.5, 2.5),
+    sigma_points=6,
+    design_opts=opts,
+)
+print(sens_df.to_string())
+```
+
+Output:
+
+```
+   sigma_scale  combined_power  yield_power  purity_power
+0          0.5        0.9999       1.0000        0.9999
+1          0.9        0.8766       0.9964        0.8766
+2          1.3        0.5789       0.8952        0.5789
+3          1.7        0.3788       0.6909        0.3788
+4          2.1        0.2670       0.5121        0.2670
+5          2.5        0.2022       0.3867        0.2022
+```
+
+Each response's σ is multiplied by the scale factor. A scale of 1.0 (not shown; it lies between rows 1 and 2) recovers the nominal design-point power. The table shows that the design is robust to modest noise overestimation: even if purity is 10% noisier than expected (scale = 0.9 × 1.0, scale = 0.9 × 1.5 for purity), combined power stays above 0.87. But if the noise is 30% higher than the pilot estimate (scale = 1.3), combined power falls to 0.58 — a meaningful shortfall. The conclusion is that the σ estimate matters most for purity, and it is worth investing in a tight noise estimate for that response before committing to n = 100.
+
+---
+
+**When responses have different model formulas.**
+
+All of the above assumes that yield and purity share the same formula and factor space. In some experiments, responses have different model structures — for example, one response is fit with a main-effects model while another requires an interaction term. `ResponseSpec` supports this via its `formula` field:
+
+```python
+response_a = ResponseSpec(
+    name="yield",
+    power_cfg=yield_cfg,
+    formula="~ 1 + Temp + Press",            # main effects only
+)
+response_b = ResponseSpec(
+    name="purity",
+    power_cfg=purity_cfg,
+    formula="~ 1 + Temp + Press + Temp:Press",  # interaction added
+)
+```
+
+When any response has a formula that differs from the global formula, the package activates the **compound criterion** path. In this mode, each response has its own model matrix and its own power evaluation, but the design is still chosen from a single shared candidate set and the physical run table is the same for all responses. The `result["compound_criterion"]` key will be `True` when this path is active.
+
+For most studies, all responses share the same model formula, and the compound path is not needed.
 
 ---
 
