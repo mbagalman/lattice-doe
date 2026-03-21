@@ -6571,19 +6571,368 @@ after building the GLM design; for a multi-response design, use
 
 ### Chapter 20 — Sensitivity analysis and robustness
 
-- 20.1 Why assumptions about σ, δ, and the baseline are often wrong
-  - Pilot estimates are noisy; the design that "just barely" meets power may fail in practice
-  - Presenting a "power at risk" framing to stakeholders
-- 20.2 `power_sensitivity`: sweeping σ or R²
-  - `sigma_range` / `sigma_points` for contrast-mode designs
-  - `r2_range` / `r2_points` for R²-mode designs
-  - Interactive Plotly output with reference lines at the nominal assumption
-- 20.3 `robustness_report`: structured sensitivity summary
-  - Table of power at several σ or R² values
-  - Identifying the "breakeven" point where power falls below the target
-- 20.4 `multiresponse_sensitivity`: per-response sensitivity for multi-response designs
-- 20.5 **Full worked example** (Python API + Plotly, polymer chemistry design from Chapter 3)
-  - σ was estimated from a pilot study with n=12; quantifying the risk if σ is 30% higher than estimated
+Every power calculation rests on assumptions that are, at best, educated guesses.
+σ comes from a pilot study or a literature estimate; δ reflects expert judgement
+about what constitutes a "meaningful" effect. When those assumptions are wrong,
+the achieved power can fall far below the target even if the design was built
+correctly.
+
+Sensitivity analysis quantifies that risk. The functions in this chapter let you
+answer: *how far off can my assumptions be before the design fails?*
+
+---
+
+#### 20.1 Why assumptions about σ, δ, and baseline are often wrong
+
+**Residual standard deviation (σ).** The most common source of surprise. A pilot
+study with n = 12 gives a σ estimate with large uncertainty: the 95% confidence
+interval for σ spans roughly 0.7× to 1.6× the estimated value. A design built at
+σ = 2.0 may encounter σ = 2.8 in the actual experiment — dropping power from
+80% to around 55%.
+
+**Minimum detectable effect (δ).** Practitioners often set δ by intuition: "we
+want to detect a 10% improvement." But if the model has been parameterised in
+coded units (−1 to 1) and the 10% improvement corresponds to a coefficient of 0.8
+rather than 1.0, the design is sized for the wrong target.
+
+**GLM baseline probability.** For a binomial endpoint, power depends on the
+baseline event rate p₀ through the Fisher information weight w = p₀(1 − p₀).
+A rate assumed to be 0.30 that turns out to be 0.15 cuts the weight in half,
+roughly halving λ.
+
+**The "just-passing" risk.** A design that achieves exactly 81% power at the
+nominal assumptions has no headroom. If any assumption is slightly pessimistic,
+power drops below target. `power_sensitivity` and `robustness_report` make this
+risk visible before the experiment runs.
+
+---
+
+#### 20.2 `power_sensitivity`: sweeping σ or R²
+
+`power_sensitivity` takes a **fixed** design and analytically evaluates power
+across a range of σ (contrast mode) or R² (R² mode). No new designs are built.
+
+```python
+from iopt_power_design import power_sensitivity
+
+sensitivity = power_sensitivity(
+    formula,
+    factors,
+    power_cfg,          # PowerContrastConfig or PowerR2Config
+    design_df,          # the fixed design to evaluate
+    sigma_range=(1.0, 4.0),   # sweep σ from 1.0 to 4.0
+    sigma_points=13,          # 13 evenly-spaced values
+    plot=False,
+)
+```
+
+**Return value (contrast mode):**
+
+| Key | Type | Contents |
+|---|---|---|
+| `"data"` | `pd.DataFrame` | Columns: `sigma`, `power`, `noncentrality_lambda` |
+| `"nominal_power"` | `float` | Power at `power_cfg.sigma` |
+| `"sigma_nominal"` | `float` | The nominal σ from `power_cfg` |
+| `"figure"` | Figure or `None` | Plot if `plot=True` |
+
+**Return value (R² mode):**
+
+| Key | Type | Contents |
+|---|---|---|
+| `"data"` | `pd.DataFrame` | Columns: `r2_target`, `power`, `noncentrality_lambda` |
+| `"nominal_power"` | `float` | Power at `power_cfg.r2_target` |
+| `"r2_nominal"` | `float` | The nominal R² from `power_cfg` |
+| `"figure"` | Figure or `None` | Plot if `plot=True` |
+
+For a σ sweep, the data looks like:
+
+```
+    sigma     power  noncentrality_lambda
+0    1.00  0.9998             32.56
+1    1.25  0.9933             20.84
+2    1.50  0.9586             14.47
+3    1.75  0.8864             10.63
+4    2.00  0.7916              8.14
+5    2.25  0.6929              6.43
+6    2.50  0.6017              5.21
+7    2.75  0.5225              4.31
+8    3.00  0.4556              3.62
+...
+```
+
+At the nominal σ = 2.0, power is 79.2% (the design achieved n = 38 in this run).
+If σ rises to 2.5 — a 25% increase — power drops to 60%.
+If σ doubles to 4.0, power falls to 28%.
+
+**Plotting with reference lines.** Pass `plot=True` and `plot_backend="plotly"` to
+get an interactive figure with vertical reference lines at the nominal σ and
+horizontal lines at the power target:
+
+```python
+sensitivity = power_sensitivity(
+    formula, factors, power_cfg, design_df,
+    sigma_range=(1.0, 4.0), sigma_points=25,
+    plot=True, plot_backend="plotly",
+)
+fig = sensitivity["figure"]
+```
+
+The Plotly figure shows hover-enabled labels at each σ value and highlights the
+region where power falls below the target — making it easy to communicate the
+risk to collaborators who are not statisticians.
+
+---
+
+#### 20.3 `robustness_report`: structured sensitivity summary
+
+`power_sensitivity` sweeps a single axis. `robustness_report` sweeps three axes
+simultaneously — effect size, σ, and α — and returns a structured summary with
+threshold values and an overall pass-rate statistic.
+
+```python
+from iopt_power_design import robustness_report
+
+rr = robustness_report(
+    design_df,
+    formula,
+    factors,
+    power_cfg,
+    sigma_range=(1.0, 4.0),    sigma_points=11,
+    effect_range=(0.4, 2.0),   effect_points=11,
+    alpha_range=(0.01, 0.10),  alpha_points=9,
+)
+```
+
+**Return value:**
+
+| Key | Type | Contents |
+|---|---|---|
+| `"mode"` | `str` | `"contrast"` or `"r2"` |
+| `"nominal_power"` | `float` | Power at nominal assumptions |
+| `"effect_sweep"` | `pd.DataFrame` | Columns: `effect_scale` (or `r2_target`), `power`, `noncentrality_lambda` |
+| `"sigma_sweep"` | `pd.DataFrame` or `None` | Columns: `sigma`, `power`, `noncentrality_lambda` (contrast only) |
+| `"alpha_sweep"` | `pd.DataFrame` | Columns: `alpha`, `power`, `noncentrality_lambda` |
+| `"summary"` | `dict` | `worst_power`, `median_power`, `best_power`, `power_target`, `pct_scenarios_passing` |
+| `"thresholds"` | `dict` | `max_sigma_for_target`, `min_effect_for_target`, `min_alpha_for_target` |
+| `"figure"` | Figure or `None` | Multi-panel plot if `plot=True` |
+
+**Reading the thresholds.**
+The threshold values are the boundary values where power transitions through the
+target:
+
+```python
+print(rr["thresholds"])
+# {
+#   'max_sigma_for_target': 1.978,
+#   'min_effect_for_target': 1.015,
+#   'min_alpha_for_target': 0.053
+# }
+```
+
+- `max_sigma_for_target = 1.978`: the design meets 80% power only if σ ≤ 1.978.
+  With a nominal σ = 2.0, the design is marginally underpowered — a small σ
+  over-estimate is enough to push power below target.
+- `min_effect_for_target = 1.015`: a true effect of at least 1.015 × δ is required
+  to achieve 80% power. Effects just below the stated δ are not reliably detected.
+- `min_alpha_for_target = 0.053`: the design just barely meets the 80% target at
+  α = 0.053; using the standard α = 0.05 leaves power slightly short.
+
+**Reading the summary.**
+
+```python
+print(rr["summary"])
+# {
+#   'worst_power': 0.199,
+#   'median_power': 0.804,
+#   'best_power': 1.000,
+#   'power_target': 0.80,
+#   'pct_scenarios_passing': 0.516
+# }
+```
+
+The `pct_scenarios_passing` value (51.6%) pools all scenarios from all three
+sweeps and reports the fraction that achieve the power target.
+A value above ~70% is a healthy sign; below 50% suggests the design has little
+robustness and the assumptions should be revisited.
+
+**When to use `robustness_report` vs. `power_sensitivity`.**
+Use `power_sensitivity` when you want a focused, single-axis sweep (e.g., just
+σ) with a plot. Use `robustness_report` when you need a compact executive summary
+covering all three sensitivity axes simultaneously — for example, when preparing
+a study protocol or answering reviewer questions about design adequacy.
+
+---
+
+#### 20.4 `multiresponse_sensitivity`: per-response σ sensitivity
+
+For multi-response designs, `multiresponse_sensitivity` builds a single I-optimal
+design at a fixed n and sweeps a common σ *scale factor* across all responses.
+Each response's σ is multiplied by the scale factor at every point.
+
+```python
+from iopt_power_design import multiresponse_sensitivity, MultiResponseOptions, ResponseSpec
+
+multi_cfg = MultiResponseOptions(
+    responses=[
+        ResponseSpec(
+            name="Yield",
+            power_cfg=PowerContrastConfig(
+                L=[[0,1,0,0]], delta=[1.0], sigma=2.0, alpha=0.05, power=0.80,
+            ),
+        ),
+        ResponseSpec(
+            name="Purity",
+            power_cfg=PowerContrastConfig(
+                L=[[0,0,1,0]], delta=[0.8], sigma=1.5, alpha=0.05, power=0.80,
+            ),
+        ),
+    ],
+    power_combination="all",
+)
+
+df_ms = multiresponse_sensitivity(
+    formula, factors, multi_cfg,
+    fixed_n=42,
+    sigma_range=(0.5, 3.0),   # scale factors: 0.5× to 3.0× each response's sigma
+    sigma_points=20,
+)
+# Columns: sigma_scale, combined_power, Yield_power, Purity_power
+```
+
+**Key point: `sigma_range` is a scale factor, not an absolute σ value.**
+A `sigma_scale` of 1.0 means each response is evaluated at its configured σ.
+A `sigma_scale` of 1.3 multiplies every response's σ by 1.3 simultaneously —
+a scenario where all responses are noisier than expected by the same factor.
+
+**Identifying the bottleneck.**
+The response whose power drops through the target at the smallest σ scale factor
+is the bottleneck. In the example above, if Purity power reaches 80% at
+σ_scale = 0.9 but Yield power reaches 80% only at σ_scale = 0.75, Yield is
+the bottleneck — it drives the required n and is the more fragile assumption.
+
+> **Restriction:** `multiresponse_sensitivity` only supports `PowerContrastConfig`
+> responses. A `TypeError` is raised if any response uses `PowerR2Config`.
+
+---
+
+#### 20.5 Full worked example
+
+**Scenario.** The team has built the A + B + A:B design from Chapter 17 (n = 38
+at σ = 2.0, testing the A main effect with δ = 1.0, α = 0.05). Before running the
+experiment, they want to answer three questions:
+
+1. *If σ turns out to be 30% higher than assumed (σ = 2.6), how much power do we
+   lose?*
+2. *What is the maximum σ at which the design still meets 80% power?*
+3. *Across all plausible combinations of assumptions, what fraction of scenarios
+   still meet the target?*
+
+**Setup:**
+
+```python
+from iopt_power_design import (
+    i_optimal_powered_design, power_sensitivity, robustness_report,
+    PowerContrastConfig, DesignOptions,
+)
+
+formula  = "A + B + A:B"
+factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+power_cfg = PowerContrastConfig(
+    L=[[0, 1, 0, 0]], delta=[1.0], sigma=2.0,
+    alpha=0.05, power=0.80, max_n=60,
+)
+opts = DesignOptions(starts=5, random_state=42)
+
+result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+design_df = result["design_df"]
+r = result["report"]
+print(f"n={r['n']}  power={r['achieved_power']:.4f}")
+```
+
+```
+n=38  power=0.7916
+```
+
+**Question 1 — Power at σ = 2.6:**
+
+```python
+sens = power_sensitivity(
+    formula, factors, power_cfg, design_df,
+    sigma_range=(1.0, 4.0),
+    sigma_points=13,
+)
+df_s = sens["data"]
+# Power at sigma=2.5:
+row = df_s[df_s["sigma"] == 2.5].iloc[0]
+print(f"sigma=2.5  power={row['power']:.4f}")
+```
+
+```
+sigma=2.5  power=0.6017
+```
+
+A 25% increase in σ (from 2.0 to 2.5) reduces power from 79% to 60%.
+For context, a σ estimate from a 12-run pilot has roughly a 90% confidence
+interval of [0.74×, 1.57×] the true σ — meaning σ = 2.5 is well within the
+plausible range.
+
+**Question 2 — Maximum σ for 80% power:**
+
+```python
+rr = robustness_report(
+    design_df, formula, factors, power_cfg,
+    sigma_range=(1.0, 4.0),   sigma_points=11,
+    effect_range=(0.4, 2.0),  effect_points=11,
+    alpha_range=(0.01, 0.10), alpha_points=9,
+)
+print(f"max sigma for 80% power: {rr['thresholds']['max_sigma_for_target']:.3f}")
+```
+
+```
+max sigma for 80% power: 1.978
+```
+
+The design achieves 80% power only if σ ≤ 1.978. With a nominal assumption of
+σ = 2.0, there is essentially no headroom: if the true σ is even slightly above
+the estimate, the design is underpowered.
+
+**Question 3 — Overall pass rate:**
+
+```python
+print(rr["summary"])
+```
+
+```
+{
+  'worst_power': 0.199,
+  'median_power': 0.804,
+  'best_power': 1.000,
+  'power_target': 0.80,
+  'pct_scenarios_passing': 0.516
+}
+```
+
+Only 52% of all plausible assumption scenarios (pooled from the three sweeps)
+achieve 80% power. This confirms that the design is fragile: it was built right
+at the edge of the target, with no buffer for assumption error.
+
+**What to do with this result.**
+Three options:
+
+1. **Increase n.** Adding ≈10 runs raises power to ≈85% at σ = 2.0, giving more
+   headroom against σ uncertainty. The power-vs-n curve from Chapter 19 shows
+   exactly how many runs are needed.
+
+2. **Widen σ assumption.** Re-estimate σ from historical data or accept a higher
+   nominal σ and re-run the solver. This will increase the required n but produce
+   a design that is accurately powered.
+
+3. **Accept the risk.** If the experiment is cheap and a false-negative (missed
+   effect) is recoverable, running at n = 38 with the understanding that power
+   may be 60–80% is a deliberate, informed decision — not an oversight.
+
+Sensitivity analysis does not mandate a particular choice; it ensures the choice
+is made with clear information about the risks.
 
 ---
 
