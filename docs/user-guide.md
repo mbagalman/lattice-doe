@@ -5460,21 +5460,353 @@ iopt-design --config two_day_study.yml --out ./output/two_day_study
 
 ### Chapter 17 — Feasibility constraints: excluding impossible factor combinations
 
-- 17.1 When factor combinations are physically impossible or dangerous
-  - High temperature + short time (fire risk), extreme pH combinations, equipment limits
-- 17.2 String expression constraints: `constraint_expr`
-  - Python-expression syntax evaluated per candidate row
-  - YAML-safe: works in CLI configs, Sheets, and Excel templates
-  - Example: `"not (Temperature > 200 and Time < 5)"`
-- 17.3 Callable constraints: `constraint_func`
-  - Accepts a DataFrame row and returns bool
-  - For complex multi-factor logic that string expressions cannot capture
-  - Note: Python callables only; not usable in YAML/Sheets/Excel configs
-- 17.4 How constraints interact with candidate sizing
-  - When a tight constraint reduces the effective candidate set: `allow_candidate_growth` and `growth_factor`
-- 17.5 **Full worked example** (Python API, two-factor pharmaceutical synthesis)
-  - A compound process constraint ruling out high-concentration / high-temperature combinations
-  - Visualising the feasible vs. infeasible region
+Every experiment lives inside a design space, but not every corner of that space is
+accessible. Equipment ratings, safety regulations, material compatibility, and economic
+limits all define regions where experiments cannot, or should not, be run.
+This chapter explains how to encode those limits so that the design search
+automatically respects them.
+
+---
+
+#### 17.1 When factor combinations are physically impossible or dangerous
+
+Consider a process with two continuous factors: temperature and pressure.
+Individually, high temperature and high pressure are each achievable.
+Together, they may exceed a vessel's rated limit, create an explosion risk, or
+trigger an unwanted side-reaction.
+The constraint is **compound**: both factors must be at their extreme simultaneously
+for the problem to arise.
+Ruling out only the individual extremes would be unnecessarily conservative and
+would reduce the design space far more than necessary.
+
+Other common scenarios follow the same pattern:
+
+- **Pharmaceutical stability**: high concentration + high temperature accelerates
+  degradation. Individual extremes are needed for a full quadratic model;
+  the joint extreme is avoided.
+- **Fermentation**: extreme pH + extreme temperature together kill the culture,
+  while either alone is tolerable briefly.
+- **Chemical synthesis**: some solvent/catalyst combinations are incompatible
+  independent of other factor levels, creating a purely categorical exclusion.
+- **Equipment limits**: a linear combination of factor values (e.g., total
+  electrical load) must not exceed a rated maximum.
+
+The package represents all of these through a single mechanism: a **filter applied
+to the candidate set** before the design search begins.
+The Fedorov exchange never sees infeasible candidate points,
+so every design it produces is guaranteed to contain only feasible runs.
+
+---
+
+#### 17.2 String expression constraints: `constraint_expr`
+
+The `constraint_expr` field of `DesignOptions` accepts a Python boolean expression
+that is evaluated once per candidate row.
+The expression can reference any factor column by name; rows where the expression
+evaluates to `True` are kept; rows where it evaluates to `False` are removed.
+
+```python
+from iopt_power_design.config import DesignOptions
+
+# Keep candidates only where the joint extreme is avoided
+opts = DesignOptions(
+    constraint_expr="not (Temperature > 150 and Pressure > 4.0)",
+)
+```
+
+**Operator support.** The expression supports:
+
+| Feature | Examples |
+|---|---|
+| Comparison | `>`, `>=`, `<`, `<=`, `==`, `!=` |
+| Boolean logic | `and`, `or`, `not` |
+| Arithmetic | `+`, `-`, `*`, `/`, `**`, `%`, `//` |
+| Membership | `in`, `not in` (for categorical levels) |
+| Math helpers | `sqrt`, `log`, `log10`, `log2`, `exp`, `floor`, `ceil`, `abs`, `min`, `max`, `round`, `pi` |
+
+**What you cannot use.** For security, the expression is **AST-validated** before
+execution. Any of the following raises a `ValueError` at `DesignOptions` construction
+time, not at run time:
+
+- Attribute access (`row.__class__`, `x.items()`)
+- Subscripts (`x[0]`)
+- Comprehensions, lambdas, or generator expressions
+- Import statements
+- Names starting with `_`
+- Function calls other than the whitelisted math helpers
+
+This makes `constraint_expr` safe to store in YAML files, Sheets configurations,
+and Excel templates — it is never passed to `eval()` without validation.
+
+**YAML usage.** Exactly the same string goes in a YAML config:
+
+```yaml
+design:
+  constraint_expr: "not (Temperature > 150 and Pressure > 4.0)"
+```
+
+**Categorical constraints.** The `in` and `not in` operators work on categorical
+factor columns:
+
+```python
+# Exclude a catalyst that is incompatible with high pH
+opts = DesignOptions(
+    constraint_expr="not (Catalyst == 'Pd' and pH > 9)",
+)
+```
+
+---
+
+#### 17.3 Callable constraints: `constraint_func`
+
+When the logic is too complex for a single expression — involving Python objects,
+external lookup tables, or multi-step computation — use `constraint_func` instead.
+
+```python
+from iopt_power_design.config import DesignOptions
+
+def feasible(row):
+    """Keep rows that don't combine high temperature with high pressure."""
+    return not (row["Temperature"] > 150 and row["Pressure"] > 4.0)
+
+opts = DesignOptions(constraint_func=feasible)
+```
+
+The callable must accept a single `pandas.Series` (one candidate row) and return
+a `bool`.
+It is called once per candidate point via `DataFrame.apply(constraint_func, axis=1)`.
+
+**When to use `constraint_func` instead of `constraint_expr`:**
+
+| Use `constraint_expr` | Use `constraint_func` |
+|---|---|
+| Simple arithmetic or logical combinations of factor columns | Logic requiring Python objects, loops, or lookup tables |
+| Configs stored in YAML / Sheets / Excel | Code-only workflows |
+| The expression reads naturally in a single line | Multi-step conditionals that span many lines |
+
+**Mutual exclusivity.** If both `constraint_expr` and `constraint_func` are provided,
+`constraint_expr` takes precedence: it is compiled to a callable and overwrites
+`constraint_func`.
+This lets `dataclasses.replace` copies preserve the expression string
+without creating ambiguity.
+
+---
+
+#### 17.4 How constraints interact with candidate sizing
+
+The constraint is applied to the candidate set **after** it is generated.
+If the constraint removes a large fraction of candidates, the search operates
+on a smaller feasible pool, which can have two consequences.
+
+**Consequence 1 — more runs may be needed.** If the excluded region contains the
+most informative points for estimating the effect of interest
+(typically factor-level extremes), the design search must compensate with
+more runs at the remaining feasible points to achieve the same power.
+The bisection loop handles this automatically: it finds the minimum feasible `n`
+that still achieves target power from the constrained candidate set.
+
+**Consequence 2 — poor numerical conditioning.** With very few feasible candidates
+(relative to the number of model parameters `p`), the initial candidate set may
+produce a near-singular model matrix.
+The `allow_candidate_growth` option addresses this: if the first design found
+has a condition number above `1e6`, the candidate set is grown by `growth_factor`
+(default `2.0`) up to `cand_max` and the search is re-run at the same `n`.
+This one-time growth step is tried at most once per bisection iteration.
+
+```python
+opts = DesignOptions(
+    constraint_expr="A + B <= -0.3",   # tight constraint: only ~35% of box remains
+    allow_candidate_growth=True,        # grow if conditioning is poor
+    growth_factor=3.0,                  # triple the candidate set (capped at cand_max)
+)
+```
+
+**How to tell if growth helped.** The `report["search_strategy"]` key includes
+`"growth"` if the candidate set was expanded during the search.
+
+**When `allow_candidate_growth` is not needed.** For most practical constraints
+that remove one quadrant or less of the design space, the default `candidate_points=2000`
+is more than sufficient and conditioning is not an issue.
+`allow_candidate_growth` is primarily useful for very tight constraints that
+leave fewer than `5 × p` feasible candidates in the initial set.
+
+---
+
+#### 17.5 Full worked example
+
+**Scenario.** A chemical engineering team is optimising a batch process.
+Two factors are varied in coded units:
+
+- **A** (Temperature): coded `−1` = 60 °C, `+1` = 180 °C
+- **B** (Pressure): coded `−1` = 1 bar, `+1` = 5 bar
+
+The response is dimensionless product yield.
+A reactor safety assessment has flagged that simultaneously running at
+very high temperature (A > 0.5, above 150 °C) **and** very high pressure
+(B > 0.5, above 4 bar) exceeds the vessel's rated limit.
+Either extreme alone is acceptable; the prohibition is compound.
+
+The team wants to detect a main-effect shift of 1 coded unit in Temperature
+(equivalent to a half-range effect) with 80% power at α = 0.05,
+assuming residual standard deviation σ = 2.
+
+**Setting up the unconstrained design first.**
+
+```python
+from iopt_power_design.api import i_optimal_powered_design
+from iopt_power_design.config import DesignOptions, PowerContrastConfig
+
+formula = "A + B + A:B"
+factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+
+power_cfg = PowerContrastConfig(
+    L=[[0, 1, 0, 0]],    # test A (Temperature) main effect
+    delta=[1.0],           # minimum half-range effect
+    sigma=2.0,
+    alpha=0.05,
+    power=0.80,
+    max_n=100,
+)
+
+opts_unc = DesignOptions(starts=5, random_state=42)
+res_unc = i_optimal_powered_design(formula, factors, power_cfg, opts_unc)
+r = res_unc["report"]
+print(f"n={r['n']}  power={r['achieved_power']:.4f}  "
+      f"lambda={r['noncentrality_lambda']:.4f}  "
+      f"df=({r['df_num']},{r['df_denom']})")
+```
+
+```
+n=39  power=0.8070  lambda=8.4541  df=(1,35)
+```
+
+The unconstrained I-optimal design requires **39 runs**.
+At this sample size, λ = 8.45 is sufficient to achieve 80.7% power with 35 error
+degrees of freedom.
+The design concentrates runs near the four corners of the coded factor space,
+where the contrast between A = −1 and A = +1 is sharpest.
+
+**Adding the safety constraint.**
+
+```python
+opts_con = DesignOptions(
+    starts=5,
+    random_state=42,
+    constraint_expr="not (A > 0.5 and B > 0.5)",
+)
+res_con = i_optimal_powered_design(formula, factors, power_cfg, opts_con)
+r2 = res_con["report"]
+print(f"n={r2['n']}  power={r2['achieved_power']:.4f}  "
+      f"lambda={r2['noncentrality_lambda']:.4f}  "
+      f"df=({r2['df_num']},{r2['df_denom']})")
+```
+
+```
+n=46  power=0.8038  lambda=8.3049  df=(1,42)
+```
+
+The constrained design requires **7 additional runs** (46 vs. 39) to achieve the same
+power target.
+The excluded corner (A > 0.5 **and** B > 0.5) covers only about 6% of the factor box,
+but it contains one of the four extreme-corner support points that the unconstrained
+I-optimal design uses.
+The algorithm compensates by placing points just outside the boundary
+(e.g. A = 0.5, B = 1 or A = 1, B = 0.5), which provide slightly less per-run information,
+requiring a modest increase in sample size to recover the target power.
+
+**What happens with a more restrictive constraint?** The run count increases
+when the constraint removes a region that is genuinely informative for the
+model you are fitting.
+For comparison, excluding the full quadrant (A > 0 **and** B > 0) — four times
+the area — creates a severe non-orthogonality between the A main effect and
+the A×B interaction column.
+The algorithm compensates with many additional runs and, depending on
+`max_n`, may not fully recover the target power within a practical budget.
+The key principle: **the cost of a constraint depends on how much of the
+high-leverage region it removes, not just its area.**
+
+**Verifying feasibility.** The design respects the constraint by construction — the
+Fedorov exchange operates only on feasible candidates — but it is worth verifying
+explicitly:
+
+```python
+d = res_con["design_df"]
+violations = d[(d["A"] > 0.5) & (d["B"] > 0.5)]
+print(f"Constraint violations: {len(violations)}")  # → 0
+```
+
+```
+Constraint violations: 0
+```
+
+**Using `constraint_func` for the same constraint.** If the constraint logic is
+written programmatically and YAML portability is not required, `constraint_func`
+produces the same result:
+
+```python
+def safe_region(row):
+    """Return True if the run is in the safe operating region."""
+    return not (row["A"] > 0.5 and row["B"] > 0.5)
+
+opts_func = DesignOptions(
+    starts=5,
+    random_state=42,
+    constraint_func=safe_region,
+)
+res_func = i_optimal_powered_design(formula, factors, power_cfg, opts_func)
+# → same n and power as constraint_expr version
+```
+
+**YAML equivalent.** The constrained design can be reproduced from the command line
+without any Python code:
+
+```yaml
+formula: "A + B + A:B"
+
+factors:
+  A: [-1.0, 1.0]
+  B: [-1.0, 1.0]
+
+power:
+  mode: contrast
+  L: [[0, 1, 0, 0]]
+  delta: [1.0]
+  sigma: 2.0
+
+alpha: 0.05
+power: 0.80
+
+design:
+  constraint_expr: "not (A > 0.5 and B > 0.5)"
+  starts: 5
+  random_state: 42
+```
+
+**When does the constraint add more runs?**
+
+A 7-run increase (≈18%) for excluding 6% of the factor space is a modest but
+real cost.
+Whether a constraint is "cheap" or "expensive" depends not on its area alone but
+on whether it removes high-leverage support points.
+The increase becomes significant when:
+
+- The constraint removes a **majority of the high-information corners or extremes**
+  (e.g., excluding the entire right half of the A range halves the useful range of A,
+  roughly doubling the required n for a test of the A main effect)
+- The excluded region **creates non-orthogonality** between model columns: for
+  interaction models, excluding a region where one factor is positive forces a
+  dependency between the main effect and the interaction column, inflating both
+  their variances simultaneously
+- The model has many terms (large `p`), making each feasible high-leverage point
+  more critical
+- The feasible region is a small fraction of the full factor box (less than ~20%),
+  in which case `allow_candidate_growth=True` is also advisable
+
+Conversely, the constraint adds **zero runs** when the excluded region does not
+overlap with any of the design's preferred high-leverage positions.
+For example, restricting a factor's upper end by a few percent rarely changes
+the required sample size at all, because the optimal design would not concentrate
+runs at the very extreme tip anyway.
 
 ---
 
