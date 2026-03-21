@@ -342,30 +342,366 @@ The backward-compat wrappers (`design.py`, `diagnostics.py`) exist because those
 
 ### Chapter 3 — Linear contrasts: detecting a specific effect
 
-**Running example:** A polymer chemistry lab is testing whether reaction temperature (continuous, 150–250 °C) and catalyst type (categorical: A / B / C) affect yield. The team wants 80% power to detect a 0.5 standard-deviation shift in yield attributable to temperature.
+**Running example:** A polymer chemistry lab is optimising a synthesis reaction. Two factors are under investigation: catalyst type (categorical: A or B) and reagent concentration (continuous: 0.0–2.0 mol/L). Yield (%) is the response. The team's goal is 80% power to detect an effect of concentration on yield — specifically, a slope of at least 0.5 yield units per mol/L, with a residual standard deviation of σ = 1.0.
 
-- 3.1 What a contrast is: L, δ, and the F-test for Lβ = δ
-  - The model matrix X and its columns
-  - The contrast matrix L: selecting one coefficient, combining several, or comparing treatment groups
-  - δ: the minimum effect size worth detecting, in response units / σ
-  - The noncentrality parameter λ = δᵀ [L(X'X)⁻¹Lᵀ]⁺ δ / σ² and where it comes from
-- 3.2 Setting up `PowerContrastConfig`
-  - Counting model-matrix columns from a Patsy formula (the most common source of confusion)
-  - Constructing L manually for a single main-effect contrast
-  - Setting δ, α, power, σ, and max_n
-- 3.3 `contrast_from_scenarios`: building L and δ from two experimental scenarios
-  - When to use scenarios vs. manual L
-  - The `sesoi` parameter (smallest effect of interest) and its units
-- 3.4 Running `i_optimal_powered_design` and reading the result
-  - `design_df`: the run table
-  - `buckets_df`: unique run allocations with counts
-  - `report`: achieved power, n, noncentrality λ, degrees of freedom, timing
-- 3.5 Multi-contrast tests: q > 1 rows in L
-  - Joint F-test interpretation
-  - Example: testing all treatment contrasts simultaneously
-- 3.6 **Full worked example** (Python API, I-optimal, contrast mode, polymer chemistry)
-  - Annotated code from formula definition through result interpretation
-  - *(This example is also used as the baseline in Chapters 19–21)*
+---
+
+#### 3.1 What a contrast is: L, δ, and the F-test
+
+A **linear contrast** is a specific linear combination of model coefficients that you want to test. The test asks: is this combination equal to zero (null hypothesis), or does it differ from zero by at least δ (the alternative)?
+
+To make this concrete, start from the model. Fitting the linear model
+
+```
+yield ~ Intercept + Catalyst[T.B] + Concentration + Catalyst[T.B]:Concentration
+```
+
+produces a vector of coefficient estimates β̂ with four entries:
+
+| Index | Column name | Meaning |
+|---|---|---|
+| 0 | `Intercept` | expected yield when Catalyst=A, Concentration=0 |
+| 1 | `Catalyst[T.B]` | extra yield when switching to Catalyst B (at Concentration=0) |
+| 2 | `Concentration` | slope: yield change per mol/L (with Catalyst=A) |
+| 3 | `Catalyst[T.B]:Concentration` | how much the Concentration slope differs for Catalyst B |
+
+The **contrast matrix L** is a *q* × *p* matrix where each row selects one linear combination of these *p* coefficients. To test whether the Concentration main effect is non-zero, you write:
+
+```
+L = [[0, 0, 1, 0]]
+```
+
+Row 0 picks out β₂ (the Concentration coefficient) and ignores the rest. The corresponding **minimum detectable effect δ** is the smallest value of β₂ you care to detect: if δ = 0.5, you are asking the design to be powerful enough to detect a Concentration slope of at least 0.5 yield units per mol/L.
+
+The test statistic is an F-statistic based on the noncentrality parameter:
+
+```
+λ = δᵀ [L (X'X)⁻¹ Lᵀ]⁺ δ / σ²
+```
+
+where X is the *n* × *p* model matrix assembled from your design, and σ is the residual standard deviation. A few things are worth noting:
+
+- λ depends on the **design** through (X'X)⁻¹. A better design (larger, better-placed) gives a larger λ, which gives higher power.
+- λ scales with 1/σ². If σ is larger than expected, λ drops and power falls. This is why sensitivity analysis (Chapter 20) is important.
+- The test has `df_num` = rank(L) numerator degrees of freedom and `df_denom` = n − rank(X) denominator degrees of freedom. With one contrast row and a four-parameter model, `df_num` = 1 and `df_denom` = n − 4.
+
+The package finds the minimum n such that the F-test at significance level α achieves at least the target power — evaluated at an I-optimal (or D- or A-optimal) design of size n.
+
+---
+
+#### 3.2 Setting up `PowerContrastConfig`
+
+**Step 1: Count the model-matrix columns.**
+
+This is the most common source of errors. You must construct L with exactly *p* columns, where *p* is the number of columns Patsy will generate for your formula and factors. Patsy's encoding depends on both the formula and the factor levels. The rules are:
+
+- `~ 1` contributes one column (Intercept).
+- A continuous factor contributes one column.
+- A categorical factor with *k* levels contributes *k* − 1 dummy columns (reference level = first level alphabetically by default).
+- An interaction `A:B` contributes one column per combination of dummy columns from A and B.
+
+For the polymer chemistry example:
+
+```
+formula = "~ 1 + Catalyst + Concentration + Catalyst:Concentration"
+factors  = {"Catalyst": ["A", "B"], "Concentration": (0.0, 2.0)}
+```
+
+Working through the rules:
+- `1` → 1 column (Intercept)
+- `Catalyst` with levels A, B → 1 dummy column (`Catalyst[T.B]`, since A is the reference)
+- `Concentration` → 1 column
+- `Catalyst:Concentration` → 1 column (`Catalyst[T.B]:Concentration`)
+- **Total: p = 4 columns**, indexed 0 through 3.
+
+If you are unsure, you can confirm the column names directly with Patsy:
+
+```python
+import patsy, pandas as pd
+
+sample = pd.DataFrame({"Catalyst": ["A", "A", "B", "B"],
+                        "Concentration": [0.0, 2.0, 0.0, 2.0]})
+dm = patsy.dmatrix("~ 1 + Catalyst + Concentration + Catalyst:Concentration", sample)
+print(dm.design_info.column_names)
+# ['Intercept', 'Catalyst[T.B]', 'Concentration', 'Catalyst[T.B]:Concentration']
+```
+
+> **Important:** the sample DataFrame passed to `patsy.dmatrix` must include all factor levels; otherwise Patsy may drop dummy columns that have no variation, giving you a column count that differs from the design-generation run.
+
+**Step 2: Construct L.**
+
+With the column names confirmed, writing L is mechanical: place a 1 in the column you want to test, and 0 everywhere else.
+
+```python
+# Test the Concentration main effect (column index 2):
+L = [[0, 0, 1, 0]]
+```
+
+L is always a list of lists (or a 2D array). Even if you have a single-row contrast, the outer list is required.
+
+**Step 3: Choose δ.**
+
+δ must be in the same units as the corresponding coefficient. Here, the Concentration coefficient has units of (yield units) / (mol/L), so `delta = [0.5]` means "detect a slope of 0.5 yield units per mol/L."
+
+> **Common mistake: mismatching scales.** If your continuous factor spans a large range (e.g., Temperature from 150 to 250 °C), the corresponding coefficient has units of "yield per degree C," which is typically a small number. Setting δ to a round number like 1.0 may be asking to detect an enormous effect, making the required n unrealistically small. The `contrast_from_scenarios` approach in section 3.3 avoids this by working in terms of total effect over a defined scenario shift rather than in terms of the raw coefficient.
+
+**Step 4: Set the remaining parameters.**
+
+```python
+from iopt_power_design import PowerContrastConfig
+
+power_cfg = PowerContrastConfig(
+    L=[[0, 0, 1, 0]],   # contrast matrix: test the Concentration coefficient
+    delta=[0.5],         # minimum detectable slope: 0.5 yield units per mol/L
+    alpha=0.05,          # significance level
+    power=0.80,          # target power
+    sigma=1.0,           # assumed residual standard deviation
+    max_n=200,           # hard cap on the sample-size search
+)
+```
+
+`max_n` is a safety cap. If the binary search reaches `max_n` without achieving the target power, the function returns the best design it found at `max_n` rather than raising an error — the `achieved_power` in the report will be below the target. Set `max_n` large enough that the search is unlikely to hit it; 200–500 is a reasonable default for most problems.
+
+---
+
+#### 3.3 `contrast_from_scenarios`: building L and δ from two experimental scenarios
+
+Constructing L manually requires you to know the exact column order in the model matrix and to express δ in units of the raw coefficient. An alternative that sidesteps both requirements is `contrast_from_scenarios`, which builds L and δ by comparing the model-matrix row for two named factor settings.
+
+The idea is simple: if scenario A and scenario B differ in factor values, the vector x_B − x_A encodes exactly which coefficients change and by how much when you move from A to B. That vector becomes L. The corresponding δ is the `sesoi` — the smallest total effect on the response scale that you care to detect at that scenario shift.
+
+```python
+from iopt_power_design.contrasts import contrast_from_scenarios
+
+# Compare Catalyst B against Catalyst A, holding Concentration fixed at 1.0 mol/L.
+# sesoi=0.5 means: detect a yield difference of at least 0.5 between the two catalysts.
+L, delta = contrast_from_scenarios(
+    formula="~ 1 + Catalyst + Concentration + Catalyst:Concentration",
+    factors={"Catalyst": ["A", "B"], "Concentration": (0.0, 2.0)},
+    scenario_a={"Catalyst": "A", "Concentration": 1.0},
+    scenario_b={"Catalyst": "B", "Concentration": 1.0},
+    sesoi=0.5,
+)
+# L = [[0., 1., 0., 1.]]  — the difference x_B - x_A at Concentration=1.0
+# delta = [0.5]
+```
+
+This L = [[0, 1, 0, 1]] says: the total effect being tested is `β₁ + β₃ × 1.0`, which is the difference in predicted yield between Catalyst B and Catalyst A at Concentration = 1.0 mol/L. The `sesoi=0.5` means: power the design to detect a yield difference of 0.5 at that operating point.
+
+**When to use scenarios vs. manual L:**
+
+- Use **scenarios** when thinking about the effect is natural in terms of "what happens when I change these settings from here to there?" This is the right mental model for most practitioners and avoids the coefficient-scale confusion.
+- Use **manual L** when you need precise control over the mathematical contrast — for example, when testing a specific coefficient regardless of operating point, or constructing multi-contrast joint tests.
+
+> **A practical note on coverage.** `contrast_from_scenarios` builds the model matrix from a small candidate set plus your two scenario rows. For the built L to have the correct number of columns, the candidate set must include all categorical factor levels. This works automatically when your scenarios together span multiple levels of each categorical factor, or when the auto-generated candidate set is large enough to include all levels. If you see a `ValueError` about column count mismatch, use manual L construction instead.
+
+---
+
+#### 3.4 Running the design and reading the result
+
+With `power_cfg` and `DesignOptions` in hand, the call is:
+
+```python
+from iopt_power_design import DesignOptions, i_optimal_powered_design
+
+opts = DesignOptions(
+    auto_candidate=True,  # recommended: adaptive candidate sizing
+    starts=8,             # number of multi-start runs (more = less likely to hit a local optimum)
+    random_state=42,      # integer seed for reproducibility
+)
+
+result = i_optimal_powered_design(
+    formula="~ 1 + Catalyst + Concentration + Catalyst:Concentration",
+    factors={"Catalyst": ["A", "B"], "Concentration": (0.0, 2.0)},
+    power_cfg=power_cfg,
+    design_opts=opts,
+)
+```
+
+The return value is a dict with three keys.
+
+**`result["design_df"]`** is a DataFrame with `n` rows, one per experimental run. Each row gives the factor settings for that run:
+
+```
+     Concentration Catalyst
+0         0.002416        B
+1         0.003419        A
+2         0.005392        A
+...
+68        1.997221        A
+69        1.998796        B
+```
+
+For this problem the design has `n = 70` runs. You will notice that all runs are at concentrations very close to either 0.0 or 2.0 mol/L, with none in the middle range. This is not a coincidence: for a linear slope model, the I-optimal design maximises information about the slope by placing runs at the extreme ends of the range. A middle-of-the-range run contributes less information per run about the slope than an extreme-range run, so the exchange algorithm discards it.
+
+**`result["buckets_df"]`** groups identical-or-near-identical run settings and shows replication counts. For continuous factors, floating-point values rarely match exactly even when the design intends repetition, so buckets often show count = 1 per row. The pattern in the factor values (concentrations clustered near 0 and near 2) is still clearly visible.
+
+**`result["report"]`** is a dict of diagnostics:
+
+```python
+r = result["report"]
+print(r["n"])                    # 70
+print(r["achieved_power"])       # 0.8030
+print(r["noncentrality_lambda"]) # 8.1453
+print(r["df_num"])               # 1
+print(r["df_denom"])             # 66
+print(r["elapsed_sec"])          # wall time for the search
+print(r["criterion"])            # "I"
+print(r["random_state"])         # 42
+```
+
+Reading these in order:
+
+- `n = 70`: the search found that 70 runs are needed to reach 80% power. Fewer runs at this σ and δ produce power below the target.
+- `achieved_power = 0.8030`: the actual power at the returned design, which is slightly above the 0.80 target due to the binary-search step size.
+- `noncentrality_lambda = 8.1453`: the value of λ at the returned design. You can use this to understand how close you are to the power boundary — a design with λ roughly 7.9 achieves just under 80% for `df_num=1` and `df_denom=66` at α=0.05.
+- `df_num = 1`, `df_denom = 66`: the degrees of freedom of the F-test. `df_num = rank(L) = 1` because L has one row. `df_denom = n − rank(X) = 70 − 4 = 66`.
+
+---
+
+#### 3.5 Multi-contrast tests: testing several effects jointly
+
+L can have more than one row. A contrast matrix with *q* rows tests the joint hypothesis that *all q* contrasts are simultaneously zero (H₀: Lβ = 0). The test uses an F-statistic with `df_num = rank(L) = q` numerator degrees of freedom.
+
+```python
+# Test Concentration slope AND Catalyst main effect simultaneously (joint F-test)
+power_cfg_joint = PowerContrastConfig(
+    L=[[0, 0, 1, 0],   # row 0: Concentration coefficient
+       [0, 1, 0, 0]],  # row 1: Catalyst[T.B] main effect
+    delta=[0.5, 0.5],  # detect at least 0.5 in each direction
+    alpha=0.05,
+    power=0.80,
+    sigma=1.0,
+    max_n=200,
+)
+```
+
+With `delta = [0.5, 0.5]`, the power calculation asks: for what n does the design achieve 80% power to jointly detect that *both* the Concentration slope and the Catalyst main effect are at least 0.5? This is a more demanding test than either single-row test alone, which is why the required n increases:
+
+```python
+result_joint = i_optimal_powered_design(formula, factors, power_cfg_joint, opts)
+print(result_joint["report"]["n"])           # 88
+print(result_joint["report"]["df_num"])      # 2
+print(result_joint["report"]["df_denom"])    # 84
+print(result_joint["report"]["achieved_power"])  # 0.803
+```
+
+**When is a joint test appropriate?** Use it when you need to conclude that *all* tested effects are non-negligible — for example, when a regulatory review requires simultaneous evidence for both a treatment effect and a covariate effect. For most exploratory studies where you are interested in each effect independently, separate single-row contrasts are easier to interpret.
+
+---
+
+#### 3.6 Full worked example
+
+The following script is self-contained and runs the complete contrast-mode workflow from formula definition through result interpretation. It is the reference example used in later chapters on power curves (Chapter 19), sensitivity analysis (Chapter 20), and minimum detectable effect (Chapter 21).
+
+```python
+# chapter3_example.py
+from iopt_power_design import (
+    i_optimal_powered_design,
+    PowerContrastConfig,
+    DesignOptions,
+)
+from iopt_power_design.contrasts import contrast_from_scenarios
+
+# ── 1. Define the model ────────────────────────────────────────────────────
+formula = "~ 1 + Catalyst + Concentration + Catalyst:Concentration"
+factors = {
+    "Catalyst":     ["A", "B"],      # categorical: 2 levels → 1 dummy column
+    "Concentration": (0.0, 2.0),     # continuous: mol/L
+}
+# Patsy model-matrix columns (p = 4):
+#   0: Intercept
+#   1: Catalyst[T.B]
+#   2: Concentration
+#   3: Catalyst[T.B]:Concentration
+
+# ── 2. Specify what to detect ──────────────────────────────────────────────
+# Goal: detect a Concentration slope of at least 0.5 yield units per mol/L.
+# L selects the Concentration coefficient (column index 2).
+power_cfg = PowerContrastConfig(
+    L=[[0, 0, 1, 0]],  # test H₀: β_Concentration = 0
+    delta=[0.5],        # minimum effect: 0.5 yield units per mol/L
+    alpha=0.05,
+    power=0.80,
+    sigma=1.0,          # assumed residual standard deviation (yield units)
+    max_n=200,
+)
+
+# ── 3. Set design search options ───────────────────────────────────────────
+opts = DesignOptions(
+    auto_candidate=True,   # adaptive candidate sizing (recommended)
+    starts=8,              # multi-start count: more starts → lower risk of local optimum
+    random_state=42,       # integer seed for reproducibility
+)
+
+# ── 4. Run the design search ───────────────────────────────────────────────
+result = i_optimal_powered_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=opts,
+)
+
+# ── 5. Inspect the results ─────────────────────────────────────────────────
+r = result["report"]
+print(f"Minimum n: {r['n']}")
+print(f"Achieved power: {r['achieved_power']:.4f}")
+print(f"Noncentrality λ: {r['noncentrality_lambda']:.4f}")
+print(f"F-test df: ({r['df_num']}, {r['df_denom']})")
+print(f"Criterion: {r['criterion']}")
+print(f"Search time: {r['elapsed_sec']:.1f}s")
+print()
+print("Design (first 5 runs):")
+print(result["design_df"].head())
+print()
+print("Run allocation summary:")
+print(result["buckets_df"].head(8))
+print("  ...")
+print(result["buckets_df"].tail(8))
+```
+
+**Expected output:**
+
+```
+Minimum n: 70
+Achieved power: 0.8030
+Noncentrality λ: 8.1453
+F-test df: (1, 66)
+Criterion: I
+Search time: 3.2s
+
+Design (first 5 runs):
+   Concentration Catalyst
+0       0.002416        B
+1       0.003419        A
+2       0.005392        A
+3       0.007839        B
+4       0.009636        A
+
+Run allocation summary:
+   Concentration Catalyst  count
+0       0.002416        B      1
+1       0.003419        A      1
+2       0.005392        A      1
+3       0.007839        B      1
+4       0.009636        A      1
+5       0.010438        B      1
+6       0.013741        B      1
+7       0.015441        A      1
+  ...
+62      1.986864        A      1
+63      1.987920        B      1
+64      1.988179        B      1
+65      1.989635        A      1
+66      1.992647        B      1
+67      1.993081        A      1
+68      1.997221        A      1
+69      1.998796        B      1
+```
+
+**Interpreting the design.** All 70 runs sit at concentrations very close to 0.0 or 2.0 mol/L, split roughly evenly between Catalyst A and B. This is the I-optimal solution for detecting a linear slope: runs at the extreme ends of the range give the most information about the slope, so the exchange algorithm discards every middle-range candidate. In practice, you might round the run-table concentrations to 0.0 and 2.0 and recheck power — the achieved power would remain essentially unchanged because the design was already effectively a two-point layout in Concentration.
+
+> **Cross-reference:** To visualise how power changes as a function of sample size for this design, see Chapter 19 (`power_curve_by_n`). To quantify the risk if σ = 1.0 was underestimated from pilot data, see Chapter 20 (`power_sensitivity`). To determine the smallest effect this fixed design can detect, see Chapter 21 (`min_detectable_effect`).
 
 ---
 
