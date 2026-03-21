@@ -8122,7 +8122,299 @@ On Windows, WeasyPrint requires the GTK runtime. The [WeasyPrint documentation](
 
 ## Appendix A — Configuration quick reference
 
-Summary tables for all configuration parameters: `PowerContrastConfig`, `PowerR2Config`, `PowerGLMContrastConfig`, `DesignOptions`, `SplitPlotOptions`, `ResponseSpec`, `MultiResponseOptions`. (Cross-reference to the full README tables.)
+This appendix is a single-stop reference for every parameter in every configuration class. It is intended for quick look-up, not first-time learning — see the chapter cross-references for full explanations.
+
+All classes are dataclasses. Instantiate them with keyword arguments. Required parameters have no default and must always be supplied. Parameters marked "rarely needed" are advanced knobs that are safe to leave at their defaults.
+
+---
+
+### A.1 `PowerContrastConfig`
+
+Used with `i_optimal_powered_design` and the analysis functions for **contrast-based linear hypothesis tests**. See Chapters 3 and 6.
+
+| Parameter | Type | Default | Description | Valid range |
+|---|---|---|---|---|
+| `L` | `ndarray (q × p)` | — **required** | Contrast matrix. Each row encodes one linear contrast over the `p` model parameters. | 2-D, no all-zero rows |
+| `delta` | `ndarray (q,)` or scalar | — **required** | Minimum detectable effect (SESOI). One value per row of `L`, on the response scale. | All non-zero |
+| `sigma` | `float` | `1.0` | Residual standard deviation. | `> 0` |
+| `alpha` | `float` | `0.05` | Significance level (two-sided F-test). | `(0, 1)` |
+| `power` | `float` | `0.80` | Target statistical power. | `(0, 1)` |
+| `tol_power` | `float` | `1e-3` | Bisection convergence tolerance: stop when `|achieved − target| ≤ tol_power`. | `> 0` |
+| `max_iter` | `int` | `200` | Maximum bisection steps. | `> 0` |
+| `max_n` | `int` | `2000` | Hard ceiling on sample size. Must exceed `p` (see §25.1). | `> 0` |
+| `verbose` | `bool` | `False` | Print search progress to stdout. | — |
+
+**Scalar shorthand.** `L` and `delta` are automatically promoted: a 1-D array `[0, 1, 0, 0]` is treated as a `(1, 4)` matrix; a scalar `1.0` becomes `array([1.0])`.
+
+**Example.**
+
+```python
+import numpy as np
+from iopt_power_design import PowerContrastConfig
+
+cfg = PowerContrastConfig(
+    L=np.array([[0, 1, 0, 0]]),   # test coefficient of A
+    delta=1.0,                     # minimum detectable difference = 1 unit
+    sigma=2.0,
+    alpha=0.05,
+    power=0.80,
+)
+```
+
+---
+
+### A.2 `PowerR2Config`
+
+Used for **global model F-tests** (is the full regression model significant?). See Chapter 7.
+
+| Parameter | Type | Default | Description | Valid range |
+|---|---|---|---|---|
+| `r2_target` | `float` | — **required** | Target population R² effect size. | `(0, 1)` |
+| `alpha` | `float` | `0.05` | Significance level (F-test). | `(0, 1)` |
+| `power` | `float` | `0.80` | Target statistical power. | `(0, 1)` |
+| `lambda_mode` | `str` | `"n"` | Noncentrality convention: `"n"` (statsmodels / G\*Power convention) or `"n_minus_p"` (more conservative). | `"n"` or `"n_minus_p"` |
+| `tol_power` | `float` | `1e-3` | Bisection convergence tolerance. | `> 0` |
+| `max_iter` | `int` | `200` | Maximum bisection steps. | `> 0` |
+| `max_n` | `int` | `2000` | Hard ceiling on sample size. | `> 0` |
+| `verbose` | `bool` | `False` | Print search progress. | — |
+
+**Note.** R² mode tests the entire model, not individual coefficients. It does not use a contrast matrix `L`. Use `PowerContrastConfig` for targeted hypothesis tests.
+
+**Example.**
+
+```python
+from iopt_power_design import PowerR2Config
+
+cfg = PowerR2Config(
+    r2_target=0.25,   # expect the model to explain 25 % of variance
+    alpha=0.05,
+    power=0.80,
+)
+```
+
+---
+
+### A.3 `PowerGLMContrastConfig`
+
+Used for **GLM contrast tests** (logistic or Poisson regression). See Chapter 9.
+
+| Parameter | Type | Default | Description | Valid range |
+|---|---|---|---|---|
+| `L` | `ndarray (q × p)` | — **required** | Contrast matrix (same semantics as `PowerContrastConfig.L`). | 2-D, no all-zero rows |
+| `delta` | `ndarray (q,)` or scalar | — **required** | Effect size on the **linear predictor scale**: log-odds difference (binomial) or log-rate difference (Poisson). | All non-zero |
+| `baseline` | `float` | — **required** | Null-model mean on the **response scale**. Binomial: probability ∈ (0, 1). Poisson: expected count > 0. | See description |
+| `family` | `str` | `"binomial"` | Distributional family. | `"binomial"` or `"poisson"` |
+| `link` | `str` or `None` | `None` | Link function. `None` selects the canonical link (`"logit"` for binomial, `"log"` for Poisson). | `"logit"`, `"log"`, or `None` |
+| `alpha` | `float` | `0.05` | Significance level (Wald chi-square test). | `(0, 1)` |
+| `power` | `float` | `0.80` | Target statistical power. | `(0, 1)` |
+| `tol_power` | `float` | `1e-3` | Bisection convergence tolerance. | `> 0` |
+| `max_iter` | `int` | `200` | Maximum bisection steps. | `> 0` |
+| `max_n` | `int` | `2000` | Hard ceiling on sample size. | `> 0` |
+
+**Fisher weight.** The information matrix used in design search is `M = w · X'X`, where `w = baseline × (1 − baseline)` (binomial) or `w = baseline` (Poisson). Because `w` is a scalar it does not affect which design is chosen, only how power scales with `n`.
+
+**Boundary warning.** If `min(baseline, 1 − baseline) < 0.05` a `RuntimeWarning` is issued at construction time. Very small or very large baselines produce tiny Fisher weights and may require impractically large `n`.
+
+**Example.**
+
+```python
+import numpy as np
+from iopt_power_design import PowerGLMContrastConfig
+
+cfg = PowerGLMContrastConfig(
+    L=np.array([[0, 1, 0, 0]]),
+    delta=np.log(1.5),    # odds ratio = 1.5, i.e. log(OR) on logit scale
+    baseline=0.20,        # 20 % event rate at null
+    family="binomial",
+    alpha=0.05,
+    power=0.80,
+)
+```
+
+---
+
+### A.4 `DesignOptions`
+
+Controls candidate generation, the Fedorov exchange search, parallelism, blocking, split-plot structure, and feasibility constraints. Passed as the optional `design_opts` argument. See Chapters 2, 12, 13, and 14.
+
+#### Core search parameters
+
+| Parameter | Type | Default | Description | Valid range |
+|---|---|---|---|---|
+| `random_state` | `int` | `123` | Global random seed. Must be a plain integer (not `bool`). | Any integer |
+| `criterion` | `str` | `"I"` | Optimality criterion: `"I"` (minimise average prediction variance), `"D"` (maximise `det(X'X)`), `"A"` (minimise `trace((X'X)⁻¹)`). | `"I"`, `"D"`, `"A"` |
+| `algo` | `str` | `"fedorov"` | Exchange algorithm: `"fedorov"` (row-swap exchange) or `"coordinate"` (coordinate-wise). | `"fedorov"`, `"coordinate"` |
+| `starts` | `int` | `5` | Number of independent random starts. The best result is returned. | `> 0` |
+| `max_iter` | `int` | `1000` | Maximum exchange iterations per start. | `> 0` |
+| `xtx_jitter` | `float` | `1e-8` | Diagonal regularisation for `(X'X)⁻¹` inversion. Increase if designs are near-singular. | `> 0` |
+
+#### Candidate generation
+
+| Parameter | Type | Default | Description | Valid range |
+|---|---|---|---|---|
+| `candidate_points` | `int` | `2000` | Candidate set size for continuous factors when `auto_candidate=False`. | `> 0` |
+| `auto_candidate` | `bool` | `False` | Scale candidate set automatically to factor-space complexity. | — |
+| `cand_min` | `int` | `1000` | Minimum candidate size when `auto_candidate=True`. | `> 0` |
+| `cand_max` | `int` | `10000` | Maximum candidate size when `auto_candidate=True`. | `≥ cand_min` |
+| `cat_cells_cap` | `int` | `10000` | Cap on categorical-cell enumeration to avoid combinatorial explosion. | `> 0` |
+| `per_cell_alpha` | `float` | `1.5` | Multiplier on cell count for purely categorical designs under `auto_candidate`. | `> 0` |
+| `per_cell_min` | `int` | `5` | Minimum continuous samples per categorical cell (mixed designs). | `> 0` |
+| `per_cell_max` | `int` | `20` | Maximum continuous samples per categorical cell (mixed designs). | `≥ per_cell_min` |
+| `allow_candidate_growth` | `bool` | `False` | Grow the candidate set once if condition number exceeds 1e6 after the first iteration. Rarely needed. | — |
+| `growth_factor` | `float` | `2.0` | Multiplier applied when growing the candidate set. Capped at `cand_max`. | `> 1.0` |
+
+#### Parallelism
+
+| Parameter | Type | Default | Description | Valid range |
+|---|---|---|---|---|
+| `workers` | `int` or `None` | `None` | Number of parallel processes. `None` or `≤ 1` runs serially. See §25.3 for the `if __name__ == "__main__":` guard requirement on macOS/Windows. | `None` or `> 0` |
+| `parallel_seed_stride` | `int` | `10000` | Seed offset between workers: worker `i` uses `random_state + i × stride`. | `> 0` |
+
+#### Feasibility constraints
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `constraint_func` | `callable` or `None` | `None` | Python callable `f(row: pd.Series) → bool`. Return `True` to keep a candidate point. |
+| `constraint_expr` | `str` or `None` | `None` | String expression equivalent of `constraint_func`, usable in YAML configs. Safe subset of Python arithmetic and comparison operators. Takes precedence over `constraint_func` when both are set. |
+
+#### Blocking
+
+| Parameter | Type | Default | Description | Valid range |
+|---|---|---|---|---|
+| `n_blocks` | `int` or `None` | `None` | Number of blocks. `None` = no blocking. Must be `≥ 2`. | `None` or `≥ 2` |
+| `block_sizes` | `list[int]` or `None` | `None` | Sizes of individual blocks. Must have `len = n_blocks` and all entries `≥ 1`. `None` = equal sizes. | — |
+| `block_factor_name` | `str` | `"Block"` | Column name for the block assignment column in the output design. | Non-empty string |
+
+#### Split-plot
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `split_plot` | `SplitPlotOptions` or `None` | `None` | Split-plot configuration. Setting this activates the two-stratum GLS power path. See §A.5 and Chapter 13. |
+
+#### Categorical pre-allocation (advanced)
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `preallocate_categorical` | `bool` | `False` | Pre-allocate runs across categorical cells before exchange. Rarely needed. |
+| `alloc_min_per_cell` | `int` | `1` | Minimum runs per categorical cell during pre-allocation. |
+| `alloc_max_per_cell` | `int` or `None` | `None` | Maximum runs per cell (`None` = unconstrained). |
+| `alloc_wynn_max_iter` | `int` | `500` | Maximum iterations for Wynn-algorithm pre-allocator. |
+| `alloc_wynn_tol` | `float` | `1e-6` | Convergence tolerance for Wynn pre-allocator. |
+
+---
+
+### A.5 `SplitPlotOptions`
+
+Nested inside `DesignOptions.split_plot`. Activates two-stratum (whole-plot / sub-plot) design generation and GLS power calculations. See Chapter 13.
+
+| Parameter | Type | Default | Description | Valid range |
+|---|---|---|---|---|
+| `htc_factors` | `list[str]` | — **required** | Names of the hard-to-change (whole-plot) factors. Must be a non-empty subset of the factor names passed to the API. | Non-empty, unique strings |
+| `n_whole_plots` | `int` | — **required** | Number of whole plots (outer randomisation units). | `≥ 2` |
+| `eta` | `float` | `1.0` | Variance ratio `σ²_wp / σ²_sp`. `0` = equivalent to standard OLS. | `≥ 0` |
+| `subplots_per_wp` | `int` or `None` | `None` | Sub-plots per whole plot. `None` → auto-computed as `max(2, ceil(p / n_whole_plots) + 1)`. | `None` or `≥ 1` |
+| `df_method` | `str` | `"auto"` | Denominator degrees-of-freedom rule for power. `"auto"` classifies each contrast row as WP or SP; `"conservative"` always uses WP df; `"sp_only"` always uses SP df. | `"auto"`, `"conservative"`, `"sp_only"` |
+| `criterion_ignore_vr` | `bool` | `False` | Use OLS criterion (ignore variance ratio) during design search. For comparison studies only; not recommended for production. | — |
+
+**Example.**
+
+```python
+from iopt_power_design import DesignOptions, SplitPlotOptions
+
+opts = DesignOptions(
+    split_plot=SplitPlotOptions(
+        htc_factors=["Temperature"],
+        n_whole_plots=8,
+        eta=2.0,         # whole-plot variance twice sub-plot variance
+    ),
+    random_state=42,
+)
+```
+
+---
+
+### A.6 `ResponseSpec`
+
+One entry per response in a multi-response design. Passed as a list inside `MultiResponseOptions.responses`. See Chapter 16.
+
+| Parameter | Type | Default | Description | Valid range |
+|---|---|---|---|---|
+| `name` | `str` | — **required** | Label for this response. Used in output dict keys and reports. | Non-empty string |
+| `power_cfg` | `PowerContrastConfig` or `PowerR2Config` or `PowerGLMContrastConfig` | — **required** | Power requirements for this response. Each response may use a different mode, sigma, L, delta, etc. | — |
+| `formula` | `str` or `None` | `None` | Per-response Patsy formula. `None` uses the global formula passed to `i_optimal_multiresponse_design`. Setting per-response formulas activates the compound criterion path. | — |
+| `weight` | `float` | `1.0` | Relative importance for `power_combination="weighted_mean"`. Weights are normalised internally. | `> 0` |
+
+---
+
+### A.7 `MultiResponseOptions`
+
+Top-level container for multi-response design configuration. Passed as the `multi_opts` argument to `i_optimal_multiresponse_design`. See Chapter 16.
+
+| Parameter | Type | Default | Description | Valid range |
+|---|---|---|---|---|
+| `responses` | `list[ResponseSpec]` | — **required** | One `ResponseSpec` per response. Must contain at least two entries. Response names must be unique. | `len ≥ 2`, unique names |
+| `power_combination` | `str` | `"min"` | Rule for aggregating per-response powers into the scalar used by the n-search bisection. See table below. | `"min"`, `"product"`, `"weighted_mean"` |
+| `sigma_joint` | `ndarray (k × k)` or `None` | `None` | Inter-response error covariance for Hotelling T² joint power. Requires all responses to share the same formula and use contrast mode. | Symmetric positive-definite, shape `(k, k)` |
+
+**Power combination rules.**
+
+| Value | Behaviour | When to use |
+|---|---|---|
+| `"min"` | Design passes when *all* responses meet their individual power targets. Conservative default. | Always safe; recommended when response correlations are unknown |
+| `"product"` | Combined power = ∏ individual powers, interpreted as joint probability. | Only statistically valid when responses are independent |
+| `"weighted_mean"` | Weighted average of individual powers using `ResponseSpec.weight`. | When a weaker minor response is acceptable if the primary responses are well powered |
+
+**Example.**
+
+```python
+import numpy as np
+from iopt_power_design import (
+    ResponseSpec, MultiResponseOptions,
+    PowerContrastConfig, PowerR2Config,
+)
+
+L = np.array([[0, 1, 0, 0]])
+responses = [
+    ResponseSpec(
+        name="Yield",
+        power_cfg=PowerContrastConfig(L=L, delta=1.0, sigma=2.0),
+    ),
+    ResponseSpec(
+        name="Purity",
+        power_cfg=PowerR2Config(r2_target=0.30),
+        weight=0.5,   # lower importance
+    ),
+]
+multi_opts = MultiResponseOptions(
+    responses=responses,
+    power_combination="weighted_mean",
+)
+```
+
+---
+
+### A.8 Quick parameter cross-reference
+
+The table below maps the most frequently adjusted parameters to the chapter that explains them.
+
+| Parameter | Class | Chapter |
+|---|---|---|
+| `L`, `delta` | `PowerContrastConfig`, `PowerGLMContrastConfig` | §3.3, §6.1 |
+| `sigma` | `PowerContrastConfig` | §3.4, §6.2 |
+| `r2_target` | `PowerR2Config` | §7.1 |
+| `baseline`, `family`, `link` | `PowerGLMContrastConfig` | §9.2 |
+| `alpha`, `power` | All power configs | §3.2 |
+| `max_n`, `tol_power`, `max_iter` | All power configs | §25.1, §25.2 |
+| `random_state` | `DesignOptions` | §15.1 |
+| `starts`, `workers` | `DesignOptions` | §15.2, §25.3 |
+| `criterion` | `DesignOptions` | §2.2 |
+| `auto_candidate` | `DesignOptions` | §25.2 |
+| `constraint_func`, `constraint_expr` | `DesignOptions` | §11.1 |
+| `n_blocks`, `block_sizes` | `DesignOptions` | §12.1 |
+| `split_plot` | `DesignOptions` | §13.1 |
+| `htc_factors`, `n_whole_plots`, `eta` | `SplitPlotOptions` | §13.2 |
+| `responses`, `power_combination` | `MultiResponseOptions` | §16.1 |
+| `sigma_joint` | `MultiResponseOptions` | §16.4 |
 
 ---
 
