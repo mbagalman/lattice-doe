@@ -4629,26 +4629,494 @@ There is no shared state between workers — every request is stateless.
 
 ### Chapter 15 — Split-plot designs: hard-to-change factors
 
-- 15.1 The split-plot problem: why some factors are expensive to change
-  - Whole-plot (HTC) factors: those reset between groups of runs — e.g., oven temperature, batch material, operator
-  - Sub-plot (ETC) factors: those that vary freely within each group — e.g., reaction time, reagent concentration
-  - The η parameter: the ratio of whole-plot variance to sub-plot variance
-  - Why ordinary (CRD) designs are wrong for split-plot structures
-- 15.2 The GLS information matrix for split-plot designs
-  - How the covariance structure changes the effective information
-  - Degrees of freedom: how the approximation method (`df_method`) affects power calculations
-- 15.3 Setting up `SplitPlotOptions`
-  - `htc_factors`: list of whole-plot factor names
-  - `n_whole_plots`: how many WP groups to run
-  - `subplots_per_wp`: sub-plot runs per whole-plot group
-  - `eta`: the variance ratio assumption
-  - `df_method`: `"auto"` (default), `"conservative"` (always use WP df), `"sp_only"` (always use SP df)
-- 15.4 The whole-plot cost-power curve: `power_curve_by_wp`
-  - Presenting the whole-plot count vs. power tradeoff to stakeholders
-- 15.5 **Full worked example** (Python API + Plotly, industrial baking process)
-  - Oven temperature and flour type as HTC factors; baking time and humidity as ETC factors
-  - WP cost-power curve: minimum whole-plot resets to hit 80% power
-  - CLI equivalent using a split-plot YAML config
+In most experimental designs, every run is treated as independent: you can set
+any factor to any value for each run. This is a completely randomised design
+(CRD). Split-plot designs arise when one or more factors are physically
+expensive or slow to change — resetting an oven to a new temperature, changing
+a batch of raw material, or switching an operator — and the experiment must be
+organised around those constraints.
+
+---
+
+#### 15.1 The split-plot problem
+
+Consider an industrial baking study. You want to understand how oven
+temperature (HTC — costly to change), flour type (HTC — requires pre-mixing),
+baking time (ETC — easy to adjust), and humidity (ETC — controlled per run)
+affect bread quality.
+
+Resetting oven temperature and flour type for every run is impractical. The
+natural structure is to fix temperature and flour type for a group of runs
+(a *whole plot*), then vary baking time and humidity freely within that group
+(the *sub-plots*). When the group is done, you reset the HTC factors for the
+next group.
+
+**Whole-plot (WP) factors** — changed only between groups. Every run within
+a group shares the same WP factor settings. Examples: oven temperature, batch
+material, operator, day-of-week.
+
+**Sub-plot (SP) factors** — changed freely within each group. Examples:
+reaction time, reagent concentration, baking time, humidity.
+
+**Why CRD designs are wrong for split-plot structures**
+
+An ordinary CRD design does not account for the within-group correlation. Runs
+in the same whole plot are more alike than runs in different whole plots, because
+they share the same WP factor settings. If you analyse a split-plot experiment
+with CRD software (ignoring the WP structure), you under-estimate the variance
+of WP-factor effects and produce anti-conservative (falsely narrow) confidence
+intervals and inflated power estimates for those effects.
+
+The correct model has two error terms:
+
+```
+y_ij = Xβ + τ_i + ε_ij
+
+τ_i  ~ N(0, σ²_wp)    — whole-plot error, shared within WP group i
+ε_ij ~ N(0, σ²_sp)    — sub-plot error, independent across runs
+
+η = σ²_wp / σ²_sp     — variance ratio
+```
+
+The full observation covariance matrix is:
+
+```
+V = σ²_sp · (η Z Z' + I_n)
+```
+
+where `Z` is the n × n_wp whole-plot indicator matrix (1 if run j belongs to
+WP group i). The GLS information matrix replaces the OLS `X'X` with
+`M = X' V⁻¹ X`.
+
+---
+
+#### 15.2 The GLS information matrix and degrees of freedom
+
+**Why η matters for power**
+
+When η is large (WP variance dominates), runs within the same whole plot are
+nearly perfectly correlated. The WP factor effects are estimated from the
+variation *between* groups, not within them — you only get `n_wp − 1`
+effective denominator degrees of freedom for those effects. That is much
+smaller than `n − p` from an OLS analysis.
+
+Sub-plot factor effects, by contrast, are estimated from variation *within*
+groups and have close to `n_total − n_wp − (rank_SP)` denominator df.
+
+**df_method — how the package assigns denominator degrees of freedom**
+
+Power calculations require a denominator df for the non-central F-test. The
+package provides three options through `SplitPlotOptions.df_method`:
+
+| `df_method` | Rule | When to use |
+|-------------|------|-------------|
+| `"auto"` | WP df for contrasts involving only WP factors; SP df for all others | Default — correct for most studies |
+| `"conservative"` | Always WP df (most conservative) | When in doubt, or when the contrast mixes WP and SP factors ambiguously |
+| `"sp_only"` | Always SP df | Rarely correct; may be anti-conservative for WP contrasts |
+
+The classification uses the model-matrix column labels: a contrast row is
+classified as a WP contrast if every non-zero entry falls within a column that
+involves only HTC factors.
+
+---
+
+#### 15.3 Setting up `SplitPlotOptions`
+
+`SplitPlotOptions` is a dataclass imported from `iopt_power_design.config`.
+Pass it as `design_opts.split_plot`:
+
+```python
+from iopt_power_design.config import SplitPlotOptions, DesignOptions
+
+sp_opts = SplitPlotOptions(
+    htc_factors=["OvenTemp", "FlourType"],   # whole-plot (HTC) factors
+    n_whole_plots=10,                         # minimum WP groups to start bisection
+    eta=1.0,                                  # σ²_wp / σ²_sp = 1 (equal variance)
+    subplots_per_wp=4,                        # sub-plots per WP (None = auto)
+    df_method="auto",                         # auto | conservative | sp_only
+)
+
+design_opts = DesignOptions(
+    split_plot=sp_opts,
+    random_state=42,
+    starts=5,
+)
+```
+
+**`SplitPlotOptions` field reference**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `htc_factors` | `list[str]` | *(required)* | Names of the HTC (whole-plot) factors — must match factor names passed to the API |
+| `n_whole_plots` | `int` | *(required)* | Minimum number of whole-plot groups (≥ 2). The API bisects upward from this value to find the minimum WP count achieving target power. |
+| `eta` | `float` | `1.0` | Variance ratio σ²_wp / σ²_sp. `eta=0` recovers standard OLS (no WP random effect). |
+| `subplots_per_wp` | `int` or `None` | `None` | Number of sub-plots per WP group. `None` auto-computes `max(2, ceil(p / n_whole_plots) + 1)`. |
+| `df_method` | `str` | `"auto"` | Denominator-df rule: `"auto"`, `"conservative"`, or `"sp_only"` |
+| `criterion_ignore_vr` | `bool` | `False` | If `True`, use standard OLS criterion during design search (ignores η). For comparison studies only — not recommended for production. |
+
+**Important constraints**
+
+- `split_plot` and `n_blocks` cannot both be set. Three-stratum (blocked
+  split-plot) designs are not yet supported. Setting both raises `ValueError`.
+- GLM mode (`PowerGLMContrastConfig`) cannot be used with split-plot designs.
+- `workers > 1` is not supported in split-plot mode.
+
+**What the API does in split-plot mode**
+
+`i_optimal_powered_design` bisects over `n_whole_plots`, starting at
+`sp_opts.n_whole_plots` as the lower bound. At each WP count it builds a new
+split-plot design, evaluates GLS power, and continues until the minimum WP
+count achieving the target power is found. The returned design matrix contains
+a `__wp_id__` column identifying which whole-plot group each run belongs to.
+
+The total number of runs in the returned design is always
+`n_whole_plots × subplots_per_wp`.
+
+---
+
+#### 15.4 The whole-plot cost-power curve: `power_curve_by_wp`
+
+In many split-plot studies, the number of whole plots is the primary cost
+driver — each WP reset requires time, material, and setup. Before committing to
+a design, it is useful to see the full tradeoff: how does power grow as the
+number of WP groups increases?
+
+`power_curve_by_wp` sweeps `n_whole_plots` over a range and evaluates GLS
+power at each value, returning a DataFrame with columns `n_wp`, `n_total`,
+`power`, and `noncentrality_lambda`:
+
+```python
+from iopt_power_design import power_curve_by_wp
+from iopt_power_design.config import PowerContrastConfig, DesignOptions, SplitPlotOptions
+
+sp_curve_opts = DesignOptions(
+    split_plot=SplitPlotOptions(
+        htc_factors=["OvenTemp", "FlourType"],
+        n_whole_plots=4,    # only used internally; wp_range overrides the sweep
+        eta=1.0,
+        df_method="auto",
+    ),
+    random_state=42,
+    starts=3,
+)
+
+curve_df = power_curve_by_wp(
+    formula="~ 1 + OvenTemp + FlourType + BakeTime + OvenTemp:BakeTime",
+    factors={
+        "OvenTemp":  (160, 200),
+        "FlourType": ["standard", "whole-wheat"],
+        "BakeTime":  (18, 30),
+    },
+    power_cfg=PowerContrastConfig(
+        L=[[0, 0, 0, 1, 0]],   # BakeTime main effect
+        delta=[0.5],
+        sigma=1.0,
+        power=0.80,
+        alpha=0.05,
+    ),
+    subplots_per_wp=4,
+    htc_factors=["OvenTemp", "FlourType"],
+    eta=1.0,
+    wp_range=(4, 20),
+    wp_points=9,
+    design_opts=sp_curve_opts,
+)
+
+print(curve_df[["n_wp", "n_total", "power"]].to_string(index=False))
+```
+
+The curve shows how power grows with WP count for the BakeTime sub-plot
+effect. A typical result for a two-factor split-plot model with η = 1
+(BakeTime tested against the SP error):
+
+```
+ n_wp  n_total   power
+    4       16   0.271
+    6       24   0.403
+    8       32   0.522
+   10       40   0.623
+   12       48   0.708
+   14       56   0.776
+   16       64   0.830
+   18       72   0.873
+   20       80   0.905
+```
+
+The 80% power threshold is crossed between 14 and 16 whole plots (56–64
+total runs). The minimum WP count is the decision point you present to the
+team: *we need at least 15–16 oven setups to detect a half-standard-deviation
+BakeTime effect with 80% confidence.*
+
+**Adding a Plotly visualisation**
+
+```python
+import plotly.graph_objects as go
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=curve_df["n_wp"], y=curve_df["power"],
+    mode="lines+markers", name="Power",
+    line=dict(color="#1f77b4", width=2),
+))
+fig.add_hline(y=0.80, line_dash="dash", line_color="orange",
+              annotation_text="Target 0.80")
+fig.update_layout(
+    title="WP Cost-Power Curve (BakeTime effect)",
+    xaxis_title="Number of whole plots (oven setups)",
+    yaxis_title="Power",
+    yaxis=dict(range=[0, 1.05]),
+    height=350,
+)
+fig.show()
+```
+
+---
+
+#### 15.5 Full worked example — industrial baking process
+
+**Study design**
+
+A food science team is designing an experiment to understand how oven
+temperature, flour type, baking time, and their interaction affect bread
+texture. The factors are:
+
+| Factor | Type | HTC? | Range/Levels |
+|--------|------|------|--------------|
+| OvenTemp | Continuous | Yes (HTC) | 160–200 °C |
+| FlourType | Categorical | Yes (HTC) | standard, whole-wheat |
+| BakeTime | Continuous | No (ETC) | 18–30 min |
+
+Oven temperature and flour type require a batch pre-mix — they cannot be
+changed between individual loaves. BakeTime is set per loaf. The team plans
+4 loaves per oven setup (subplots_per_wp = 4).
+
+The primary objective is to detect a main effect of BakeTime (the most
+controllable and actionable factor) at 80% power, assuming σ = 1.0 (a
+half-standard-deviation effect, δ = 0.5).
+
+**Step 1 — Check the formula's column layout**
+
+With FlourType as a two-level categorical factor (reference = `"standard"`),
+the model matrix for `~ 1 + OvenTemp + FlourType + BakeTime + OvenTemp:BakeTime`
+has p = 5 columns:
+
+```
+0: Intercept
+1: FlourType[T.whole-wheat]
+2: OvenTemp
+3: BakeTime
+4: OvenTemp:BakeTime
+```
+
+The BakeTime main-effect contrast is therefore `L = [[0, 0, 0, 1, 0]]`.
+
+**Step 2 — Run the power-assured design**
+
+```python
+from iopt_power_design import i_optimal_powered_design
+from iopt_power_design.config import (
+    PowerContrastConfig, DesignOptions, SplitPlotOptions
+)
+
+result = i_optimal_powered_design(
+    formula="~ 1 + OvenTemp + FlourType + BakeTime + OvenTemp:BakeTime",
+    factors={
+        "OvenTemp":  (160, 200),
+        "FlourType": ["standard", "whole-wheat"],
+        "BakeTime":  (18, 30),
+    },
+    power_cfg=PowerContrastConfig(
+        L=[[0, 0, 0, 1, 0]],   # BakeTime main effect
+        delta=[0.5],
+        sigma=1.0,
+        power=0.80,
+        alpha=0.05,
+    ),
+    design_opts=DesignOptions(
+        split_plot=SplitPlotOptions(
+            htc_factors=["OvenTemp", "FlourType"],
+            n_whole_plots=4,     # minimum; bisection searches upward
+            subplots_per_wp=4,
+            eta=1.0,
+            df_method="auto",
+        ),
+        random_state=42,
+        starts=5,
+    ),
+)
+
+r = result["report"]
+sp = r["split_plot"]
+
+print(f"n_whole_plots : {sp['n_whole_plots']}")
+print(f"subplots_per_wp: {sp['subplots_per_wp']}")
+print(f"n_total       : {r['n']}")
+print(f"achieved_power: {r['achieved_power']:.4f}")
+print(f"lambda        : {r['noncentrality_lambda']:.4f}")
+print(f"df_denom      : {r['df_denom']}")
+```
+
+The returned design is structured so that each block of 4 rows belongs to one
+oven setup. The `__wp_id__` column identifies which whole-plot group each run
+belongs to:
+
+```python
+df = result["design_df"]
+print(df[["__wp_id__", "OvenTemp", "FlourType", "BakeTime"]].to_string(index=False))
+```
+
+Within each `__wp_id__` group, `OvenTemp` and `FlourType` are constant; only
+`BakeTime` varies.
+
+**Step 3 — Inspect the report split_plot sub-dict**
+
+The `result["report"]["split_plot"]` dictionary contains the design structure:
+
+```python
+# result["report"]["split_plot"] contains:
+# {
+#     "n_whole_plots": <int>,
+#     "subplots_per_wp": <int>,
+#     "eta": 1.0,
+#     "htc_factors": ["OvenTemp", "FlourType"],
+#     "df_method": "auto"
+# }
+```
+
+**Step 4 — Compare df_method choices**
+
+For this study, the BakeTime contrast is a pure SP contrast (BakeTime is an
+ETC factor). Under `df_method="auto"`, it receives SP denominator df.
+Switching to `"conservative"` would assign WP df instead, which is smaller and
+gives lower (more conservative) power. The difference matters most when WP df
+is small (few whole plots):
+
+```python
+# Compare power under different df_method assumptions at the same n
+for method in ["auto", "conservative", "sp_only"]:
+    r2 = i_optimal_powered_design(
+        formula="~ 1 + OvenTemp + FlourType + BakeTime + OvenTemp:BakeTime",
+        factors={
+            "OvenTemp":  (160, 200),
+            "FlourType": ["standard", "whole-wheat"],
+            "BakeTime":  (18, 30),
+        },
+        power_cfg=PowerContrastConfig(
+            L=[[0, 0, 0, 1, 0]], delta=[0.5],
+            sigma=1.0, power=0.80, alpha=0.05,
+        ),
+        design_opts=DesignOptions(
+            split_plot=SplitPlotOptions(
+                htc_factors=["OvenTemp", "FlourType"],
+                n_whole_plots=4,
+                subplots_per_wp=4,
+                eta=1.0,
+                df_method=method,
+            ),
+            random_state=42, starts=3,
+        ),
+    )
+    rr = r2["report"]
+    print(f"df_method={method:12s}  n_wp={rr['split_plot']['n_whole_plots']}  "
+          f"power={rr['achieved_power']:.4f}")
+```
+
+The `"conservative"` result will return a larger n_whole_plots because the
+WP denominator df is small and the F-test critical value is higher.
+
+**Step 5 — CLI equivalent**
+
+The same study can be run from the CLI using a YAML config:
+
+```yaml
+# baking_sp.yml
+formula: "~ 1 + OvenTemp + FlourType + BakeTime + OvenTemp:BakeTime"
+
+factors:
+  OvenTemp:  [160, 200]
+  FlourType: ["standard", "whole-wheat"]
+  BakeTime:  [18, 30]
+
+contrast:
+  L: [[0, 0, 0, 1, 0]]
+  delta: [0.5]
+
+alpha: 0.05
+power: 0.80
+sigma: 1.0
+
+design:
+  random_state: 42
+  starts: 5
+  criterion: I
+
+split_plot:
+  htc_factors: [OvenTemp, FlourType]
+  n_whole_plots: 4
+  eta: 1.0
+  subplots_per_wp: 4
+  df_method: auto
+
+output:
+  basename: baking_sp
+```
+
+```bash
+iopt-design --config baking_sp.yml --out ./output/baking_sp --html-report
+```
+
+---
+
+#### 15.6 η sensitivity — how the variance ratio assumption affects results
+
+The η parameter (σ²_wp / σ²_sp) is rarely known precisely in advance. It is
+common to try several values before running an experiment:
+
+```python
+print("eta sensitivity for BakeTime effect:")
+for eta in [0.5, 1.0, 2.0, 5.0]:
+    r3 = i_optimal_powered_design(
+        formula="~ 1 + OvenTemp + FlourType + BakeTime + OvenTemp:BakeTime",
+        factors={
+            "OvenTemp":  (160, 200),
+            "FlourType": ["standard", "whole-wheat"],
+            "BakeTime":  (18, 30),
+        },
+        power_cfg=PowerContrastConfig(
+            L=[[0, 0, 0, 1, 0]], delta=[0.5],
+            sigma=1.0, power=0.80, alpha=0.05,
+        ),
+        design_opts=DesignOptions(
+            split_plot=SplitPlotOptions(
+                htc_factors=["OvenTemp", "FlourType"],
+                n_whole_plots=4,
+                subplots_per_wp=4,
+                eta=eta,
+                df_method="auto",
+            ),
+            random_state=42, starts=3,
+        ),
+    )
+    rr = r3["report"]
+    print(f"  eta={eta:4.1f}  n_wp={rr['split_plot']['n_whole_plots']:2d}  "
+          f"n={rr['n']:3d}  power={rr['achieved_power']:.4f}")
+```
+
+As η increases, WP variance dominates more and you need more whole plots to
+detect the same effect. The SP factor effects become cheaper to detect (more
+within-group replication) while WP factor effects become more expensive. This
+asymmetry is the fundamental design challenge of split-plot experiments.
+
+**Practical guidance on η**
+
+- **η = 0**: No whole-plot random effect — identical to CRD. Use only if you
+  are certain there is no batch-to-batch variation.
+- **η = 1**: Equal WP and SP variance. A common conservative default.
+- **η > 1**: WP variance dominates — typical for batch processes or when
+  operators differ substantially.
+- **Unknown η**: Run the analysis at η = 1 and η = 2. If the required WP
+  counts are similar, the design is robust. If they differ substantially,
+  collect a pilot estimate of η before committing.
 
 ---
 
