@@ -240,7 +240,7 @@ pip install -e ".[all]"
 
 After installing, run a one-line smoke test to confirm the core package and its dependencies are working:
 
-```python
+```bash
 python -c "import iopt_power_design; print(iopt_power_design.__version__)"
 ```
 
