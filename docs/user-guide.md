@@ -7794,27 +7794,329 @@ and candidate set size.
 
 ### Chapter 25 — Troubleshooting
 
-- 25.1 `ValueError: power_cfg.max_n must be greater than p`
-  - Cause: `max_n` is too small for the formula complexity
-  - Fix: increase `max_n` or simplify the formula
-- 25.2 No convergence / low achieved power warnings
-  - Cause: the search did not find an adequately powered design within `max_n`
-  - Fixes: raise `max_n`; increase `starts`; enable `auto_candidate=True`
-- 25.3 Parallel `workers > 1` fails on macOS / Windows
-  - Cause: `multiprocessing` fork-safety requirement
-  - Fix: put all `workers > 1` calls inside `if __name__ == "__main__":`
-- 25.4 Contrast matrix shape mismatch errors
-  - Cause: L has the wrong number of columns for the formula
-  - Diagnosis: `build_model_matrix(formula, factors, pd.DataFrame([...]))` to inspect the column count
-- 25.5 GLM baseline out of range
-  - Cause: `baseline` ≥ 1 for binomial, or ≤ 0 for either family
-  - Fix: pass a probability strictly between 0 and 1 for binomial; a positive count for Poisson
-- 25.6 Sheets / Excel authentication or cell-parsing errors
-  - Sheets: check `GOOGLE_APPLICATION_CREDENTIALS` environment variable and sheet sharing permissions
-  - Excel: check file is not open in Excel; ensure `openpyxl` is installed (`[extras]`)
-- 25.7 Report generation failures
-  - Missing `[report]` or `[report-pdf]` extras
-  - PDF: WeasyPrint system-level dependencies (cairo, pango) not installed
+This chapter catalogues the errors and warnings you are most likely to encounter, explains why each one occurs, and gives the shortest path to a fix.
+
+---
+
+#### 25.1 `ValueError: power_cfg.max_n must be greater than p`
+
+**What you see**
+
+```
+ValueError: power_cfg.max_n (30) must be greater than the number of model parameters p (32).
+```
+
+**Why it happens**
+
+Before starting the bisection search the package counts the number of columns in your model matrix — the number of parameters `p` that your formula requires. For the search to make sense at all, `max_n` must exceed `p`. If it does not, the package raises this error immediately rather than returning a nonsensical result.
+
+The count can be larger than you expect. A formula like `~ 1 + A + B + C + A:B + A:C + B:C + A:B:C` for three two-level categorical factors expands to many more columns than the raw factor count once the categorical dummy-coding is applied.
+
+**How to diagnose**
+
+Use `build_model_matrix` to see exactly how many columns your formula produces before running the full search:
+
+```python
+import pandas as pd
+from iopt_power_design import build_model_matrix
+
+# Construct a single representative row — values do not matter for column counting
+sample = pd.DataFrame([{"A": 0.0, "B": 0.0, "C": "low"}])
+X, col_names = build_model_matrix("~ 1 + A + B + C + A:B", sample)
+
+print(f"p = {X.shape[1]}")
+print("Columns:", col_names)
+```
+
+**Fixes**
+
+| Situation | Fix |
+|---|---|
+| `max_n` was left at its default and the model is large | Set `power_cfg.max_n` to at least `p + 10` |
+| You have more terms than you actually need | Simplify the formula — remove high-order interactions that are not scientifically motivated |
+| You are building a screening design | Use a main-effects-only formula first; add interactions only if resources allow |
+
+The default `max_n` is 200. For most industrial screening designs this is sufficient. Raise it only if your formula genuinely has many parameters.
+
+---
+
+#### 25.2 No convergence / low achieved power warnings
+
+**What you see**
+
+```
+RuntimeWarning: max_iter (50) or max_n (200) reached.
+Final power: 0.6831 (Target: 0.8000).
+```
+
+or, for a singular design at a particular `n`:
+
+```
+RuntimeWarning: Power is NaN at n=12 (singular design). Searching higher n.
+```
+
+**Why it happens**
+
+The bisection search works by incrementally raising `n` until the achieved power at least meets the target. It stops early if it has performed `max_iter` bisection steps without converging, or if `n` has reached `max_n`. Neither condition is a hard failure — the best result found so far is returned — but the achieved power may be below your target.
+
+A `NaN` power result means the design matrix was singular at that `n`, which typically happens when `n` is barely above `p` and the design search could not find a nonsingular arrangement of candidate points. The search automatically advances to a higher `n`.
+
+**Fixes in order of effort**
+
+1. **Raise `max_n`** — the most common fix. If your true minimum `n` is beyond the current ceiling, raise the ceiling.
+
+    ```python
+    from iopt_power_design import PowerContrastConfig
+    cfg = PowerContrastConfig(
+        ...,
+        max_n=500,      # default is 200
+    )
+    ```
+
+2. **Increase `starts`** — more random starts improve the quality of the I-optimal design at each `n`, which can recover power when the default single-start design is weakly conditioned.
+
+    ```python
+    from iopt_power_design import DesignOptions
+    opts = DesignOptions(starts=10)   # default is 5
+    ```
+
+3. **Enable `auto_candidate`** — for complex factor spaces (many categorical levels, feasibility constraints) the default candidate grid may be too sparse to support a good exchange algorithm. Setting `auto_candidate=True` scales the candidate set to the model size.
+
+    ```python
+    opts = DesignOptions(auto_candidate=True)
+    ```
+
+4. **Check `tol_power`** — the default tolerance is 0.005. Tightening it (e.g., `tol_power=0.001`) makes the bisection work harder before declaring convergence, which can recover a few tenths of a percent of power at the cost of an extra bisection step.
+
+If the warning appears even after raising `max_n` substantially, the issue is more likely a very low effect size or a high sigma. Use `min_detectable_effect` (Chapter 22) to check whether your target power is achievable at any realistic `n` before continuing to enlarge the search space.
+
+---
+
+#### 25.3 Parallel `workers > 1` fails on macOS or Windows
+
+**What you see**
+
+On macOS or Windows you may see a `RuntimeError`, a freeze, or spawned processes that die immediately when you set `workers > 1` in `DesignOptions`.
+
+**Why it happens**
+
+Python's `multiprocessing` module uses the *fork* start method on Linux and the *spawn* method on macOS (since Python 3.8) and Windows. The *spawn* method relaunches a clean Python interpreter and re-imports your script from scratch. If your call to `i_optimal_powered_design` lives at module level — outside any `if __name__ == "__main__":` guard — the spawned workers re-execute that call, producing a recursive storm of new processes.
+
+**Fix**
+
+Wrap any call that uses `workers > 1` in the standard guard:
+
+```python
+from iopt_power_design import i_optimal_powered_design, DesignOptions, PowerContrastConfig
+import numpy as np
+
+formula = "~ 1 + A + B + A:B"
+factors = {"A": (-1, 1), "B": (-1, 1)}
+cfg = PowerContrastConfig(L=np.array([[0, 1, 0, 0]]), delta=1.0, sigma=2.0)
+
+if __name__ == "__main__":
+    result = i_optimal_powered_design(
+        formula, factors, cfg,
+        design_opts=DesignOptions(workers=4, random_state=42),
+    )
+    print(result["report"]["n"], result["report"]["achieved_power"])
+```
+
+Inside Jupyter notebooks, the guard is not needed because the notebook kernel manages the `__main__` namespace. The `if __name__ == "__main__":` pattern is only required in `.py` scripts run directly.
+
+Inside a REST API server (Chapter 24), the `workers` field of `DesignOptions` is silently ignored when the server is running inside an ASGI process. Use the `UVICORN_WORKERS` environment variable to scale API concurrency instead.
+
+---
+
+#### 25.4 Contrast matrix shape mismatch errors
+
+**What you see**
+
+```
+ValueError: Contrast L has 3 columns but model has p_treat=4 treatment parameters.
+```
+
+or, from config-level validation:
+
+```
+ValueError: L has 5 columns but X has 4 columns; shapes incompatible.
+```
+
+**Why it happens**
+
+The contrast matrix `L` must have exactly `p` columns, one per model parameter (including the intercept). The most common causes of a mismatch are:
+
+- **Forgetting the intercept column.** A formula like `~ 1 + A + B + A:B` has *four* parameters: intercept, A, B, A:B. A contrast targeting the main effect of A alone needs `L = [[0, 1, 0, 0]]` — four columns, not three.
+- **Changing the formula without updating L.** Adding or removing a term shifts all the column indices to the right of the change.
+- **Categorical factor dummy coding.** A three-level categorical factor `C` with levels `"low"`, `"mid"`, `"high"` contributes *two* columns (treatment contrast coding drops the reference level), not one.
+
+**Diagnosis**
+
+Use `build_model_matrix` to inspect the exact column names and count for your formula, then construct `L` against those names:
+
+```python
+import pandas as pd
+import numpy as np
+from iopt_power_design import build_model_matrix
+
+sample = pd.DataFrame([{"A": 0.0, "B": 0.0}])
+_, col_names = build_model_matrix("~ 1 + A + B + A:B", sample)
+print(col_names)
+# ['Intercept', 'A', 'B', 'A:B']
+
+# Contrast for A main effect (index 1):
+L = np.array([[0, 1, 0, 0]])
+```
+
+For more complex formulas with categorical factors, read all column names from the output and index into them by name rather than hardcoding positions:
+
+```python
+idx = {name: i for i, name in enumerate(col_names)}
+L = np.zeros((1, len(col_names)))
+L[0, idx["A"]] = 1.0
+```
+
+---
+
+#### 25.5 GLM baseline out of range
+
+**What you see**
+
+For a binomial model:
+
+```
+ValueError: baseline must be in (0, 1) for binomial family, got 1.5
+```
+
+or a boundary warning:
+
+```
+RuntimeWarning: GLM baseline 0.03 is near a boundary; required sample size may be very large.
+```
+
+For a Poisson model:
+
+```
+ValueError: baseline must be > 0 for Poisson family, got 0.0
+```
+
+**Why it happens**
+
+The `baseline` field of `PowerGLMContrastConfig` represents the null-model mean:
+
+- **Binomial** — a probability, so it must be strictly in (0, 1). Values of 0 or 1 imply a degenerate distribution with no variance, and the Fisher weight `w = baseline × (1 − baseline)` would be zero.
+- **Poisson** — an expected count, so it must be strictly positive. A rate of zero gives a Fisher weight `w = baseline = 0`, which is also degenerate.
+
+The boundary warning at `min(baseline, 1 − baseline) < 0.05` is a soft alert: baselines very close to 0 or 1 produce very small Fisher weights, which means enormous sample sizes will be needed. The search still runs, but the resulting `n` may be impractically large.
+
+**Fixes**
+
+| Error | Fix |
+|---|---|
+| `baseline ≥ 1` for binomial | Supply the event *probability*, not a count or percentage. `0.20` means 20%, not `20`. |
+| `baseline ≤ 0` for Poisson | Supply the expected count at the null. Must be a positive number, e.g. `2.0`. |
+| Boundary warning | Review whether your baseline assumption is realistic. A binomial baseline of 0.03 requires far more runs than 0.20 to detect the same absolute delta. Consider whether the baseline could be closer to 0.5, or whether a Poisson model with a higher rate is more appropriate. |
+
+---
+
+#### 25.6 Sheets and Excel authentication or parsing errors
+
+**Google Sheets errors**
+
+The Sheets integration authenticates via `gspread`. Two authentication modes are supported:
+
+| Mode | How to activate | Typical error |
+|---|---|---|
+| Service account | Pass `credentials="/path/to/key.json"` | `FileNotFoundError` if path is wrong; `gspread.exceptions.APIError` if the service account lacks Viewer/Editor access to the sheet |
+| OAuth2 browser flow | Pass `credentials=None` (default) | Browser tab opens on first use; `~/.config/gspread/` must be writable; errors if firewall blocks the callback port |
+
+The most common issues:
+
+- **Sheet not shared with the service account.** In Google Drive, share the spreadsheet with the service account's email address (found in the JSON key file as `"client_email"`) and grant at least Editor permission.
+- **Key file path is wrong or the file has been rotated.** Verify the path with `python -c "import json; print(json.load(open('/path/to/key.json'))['client_email'])"`.
+- **API not enabled.** The Google Sheets API and Google Drive API must both be enabled in the Google Cloud project associated with the service account.
+
+```python
+from iopt_power_design.sheets import run_from_sheet
+
+result = run_from_sheet(
+    spreadsheet_id="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
+    credentials="service_account.json",   # or None for OAuth2
+)
+```
+
+**Excel errors**
+
+The Excel integration requires `openpyxl`, which is included in the `[extras]` install target:
+
+```
+pip install "iopt-power-design[extras]"
+```
+
+If `openpyxl` is not installed you will see:
+
+```
+ImportError: openpyxl is required for Excel integration.
+Install it with: pip install "iopt-power-design[extras]"
+```
+
+Other common Excel issues:
+
+- **File is open in Excel.** On Windows, Excel holds an exclusive write lock on `.xlsx` files that are currently open. Close the file in Excel before calling `run_from_excel` or `write_excel_template`.
+- **Wrong sheet names.** The package reads specific sheet names (`SETTINGS`, `FACTORS`, `RESPONSES`). If your workbook was renamed or a sheet was deleted, you will get a `KeyError` on the sheet name. Re-generate the template with `write_excel_template` to restore the expected structure.
+- **Cell format mismatch.** Numeric cells formatted as text (e.g., after copying from another application) parse as empty strings. Select the affected cells in Excel, change their format to *Number*, and re-enter the values.
+
+---
+
+#### 25.7 Report generation failures
+
+**HTML reports**
+
+HTML report generation requires `jinja2`, included in the `[report]` extra:
+
+```
+pip install "iopt-power-design[report]"
+```
+
+Without it:
+
+```
+ImportError: HTML report generation requires jinja2.
+Install it with: pip install "iopt-power-design[report]"
+```
+
+**PDF reports**
+
+PDF generation additionally requires `weasyprint` and its system-level dependencies:
+
+```
+pip install "iopt-power-design[report-pdf]"
+```
+
+Without it:
+
+```
+ImportError: PDF export requires weasyprint.
+Install it with: pip install "iopt-power-design[report-pdf]"
+```
+
+WeasyPrint renders HTML to PDF via the Cairo/Pango/GLib stack. On Linux these are usually available through the system package manager:
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install libpango-1.0-0 libpangoft2-1.0-0 libcairo2
+
+# macOS (Homebrew)
+brew install pango cairo
+```
+
+On Windows, WeasyPrint requires the GTK runtime. The [WeasyPrint documentation](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows) has platform-specific installation instructions.
+
+**Path and permission errors**
+
+- If you pass a directory path to `generate_report`, the output file is named `iopt_report.html` (or `.pdf`) inside that directory. The directory must already exist and be writable.
+- If you pass a full path with a `.pdf` extension but do not have WeasyPrint installed, the error appears at write time, not at design time. Generate the HTML first to verify the report content, then convert to PDF once the dependency is in place.
+- The `export_report_to` shortcut on `i_optimal_powered_design` follows the same path rules. Relative paths are resolved from the working directory at call time.
 
 ---
 
