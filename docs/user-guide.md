@@ -3124,25 +3124,394 @@ This confirms that the design is appropriately powered at the specified δ = 1.0
 
 ### Chapter 11 — Excel: spreadsheet-driven workflows
 
-- 11.1 When to use the Excel interface
-  - Teams working in Excel-first environments
-  - Sharing study configurations without sharing Python scripts
-  - Capturing results in a structured, formatted workbook
-- 11.2 Creating a template workbook: `create_excel_template`
-  - The workbook contains one `Config` sheet with sentinel-delimited sections:
-    - `[SETTINGS]` — key/value pairs: formula, power parameters, design options
-    - `[CONTRAST]` — optional; required when `power_mode = contrast` or `glm`
-    - `[FACTORS]` — factor table: Name | Type | Value 1 | Value 2 | …
-    - `[RESPONSES]` — optional; required for multi-response mode
-  - Output is written to separate sheets: `Results`, `Design`, `Buckets`
-  - Sentinel values: blank cells, zero for absent numeric options
-- 11.3 Running the design from a workbook: `excel_run`
-  - What `excel_run` returns and what it writes back to the workbook
-  - The Results and Buckets sheets written on completion
-  - Error handling: `ExcelError` and how it surfaces to the user
-- 11.4 **Full worked example** (Excel interface, contrast mode, three-factor industrial process)
-  - Creating the template, filling it in, running `excel_run`, reading the output sheets
-  - Comparison: the same design run via the Python API and via Excel
+The Excel interface lets a team member who works entirely in spreadsheets configure and run a powered design without writing any Python. The statistician creates a template workbook from Python (or the CLI), hands it to the experimenter to fill in, and then runs the design from Python (or the CLI) against the completed file. Results are written back into the same workbook as new sheets.
+
+---
+
+#### 11.1 When to use the Excel interface
+
+**Use Excel when:**
+
+- The experimenter who defines factors and power assumptions works in Excel, not Python
+- The study configuration needs to be shared with collaborators or stakeholders as a self-contained file (no Python environment, no YAML editor)
+- You want study inputs and outputs in one auditable `.xlsx` file for archiving or regulatory documentation
+
+**Limitations.** The Excel interface supports all four power modes (contrast, R², GLM, multi-response) and basic design options. A few advanced features are Python-API-only:
+
+- Feasibility constraints (`constraint_expr` / `constraint_func`) — not supported in the Config sheet
+- Progress callbacks — not available from Excel
+- Post-design analysis functions (`power_sensitivity`, `compare_criteria`, etc.) — run these from Python against the returned result dict
+
+---
+
+#### 11.2 Installing Excel support
+
+The Excel interface requires `openpyxl` for reading and writing `.xlsx` files:
+
+```bash
+pip install -e ".[extras]"
+```
+
+The `extras` group includes `openpyxl`, `xlsxwriter`, and the Google Sheets dependencies. If you only need Excel, `pip install openpyxl` also works.
+
+---
+
+#### 11.3 The Config sheet structure
+
+The workbook has one input sheet (`Config`) and up to three output sheets (`Results`, `Design`, `Buckets`). The `Config` sheet uses **sentinel headers** — special values in column A that mark the start of each section. The parser scans column A top-to-bottom for these markers:
+
+| Sentinel | Section | Required? |
+|----------|---------|-----------|
+| `[SETTINGS]` | Key/value configuration pairs | Always |
+| `[CONTRAST]` | L matrix and δ vector | When `power_mode` is `contrast` or `glm` |
+| `[FACTORS]` | Factor definitions table | Always |
+| `[RESPONSES]` | Per-response specs (multi-response) | When using multi-response mode |
+
+The sections can appear in any order in the sheet. The parser finds them by scanning rather than assuming fixed row positions, so you can add blank rows, comments, or formatting between sections without breaking the parser.
+
+---
+
+**`[SETTINGS]` section.** Key/value pairs in columns A (key) and B (value). The keys below are recognised; any key not listed is silently ignored.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `formula` | string | required | Patsy formula (e.g. `~ 1 + A + B + A:B`) |
+| `power_mode` | `r2`, `contrast`, or `glm` | required | Power mode. Omit when `[RESPONSES]` is present. |
+| `alpha` | float | 0.05 | Significance level |
+| `power` | float | 0.80 | Target power |
+| `sigma` | float | 1.0 | Residual SD (contrast mode; ignored for R²) |
+| `r2_target` | float | 0.25 | Minimum R² to detect (R² mode only) |
+| `max_n` | int | 500 | Upper bound for binary search |
+| `criterion` | `I`, `D`, or `A` | `I` | Optimality criterion |
+| `starts` | int | 5 | Number of random starts |
+| `max_iter` | int | 1000 | Maximum iterations per start |
+| `random_state` | int | 123 | Random seed |
+| `family` | `binomial` or `poisson` | `binomial` | GLM response family (GLM mode) |
+| `link` | `logit` or `log` | (canonical) | GLM link function; blank = canonical default |
+| `baseline` | float | required for GLM | Baseline p₀ (binomial) or μ₀ (Poisson) |
+| `n_blocks` | int | 0 | Number of blocks (0 = unblocked; ≥ 2 to enable) |
+| `block_factor_name` | string | `Block` | Column name for the block indicator |
+| `htc_factors` | comma-separated strings | blank | Hard-to-change factor names (split-plot) |
+| `n_whole_plots` | int | 0 | Number of whole plots (0 = disabled; ≥ 2 to enable) |
+| `eta` | float | 1.0 | Variance ratio σ²_wp / σ²_sp (split-plot) |
+| `subplots_per_wp` | int | 0 | Sub-plots per whole plot (0 = auto) |
+| `df_method` | `auto`, `conservative`, or `sp_only` | `auto` | Denominator df method (split-plot) |
+
+The template applies dropdown validation to the `power_mode` and `criterion` cells, so these fields show an in-cell picker in Excel.
+
+---
+
+**`[CONTRAST]` section.** Used when `power_mode` is `contrast` or `glm`. Rows in this section use the key format:
+
+| Key | Value |
+|-----|-------|
+| `L_row` | Comma-separated float values for one row of the L matrix (one row per hypothesis) |
+| `delta` | Comma-separated float values, one per L row |
+
+Example for a 4-column model, testing the third coefficient:
+
+```
+[CONTRAST]
+L_row    0, 0, 1, 0
+delta    0.5
+```
+
+For a two-hypothesis joint test:
+
+```
+[CONTRAST]
+L_row    0, 1, 0, 0
+L_row    0, 0, 1, 0
+delta    0.5, 0.5
+```
+
+---
+
+**`[FACTORS]` section.** A table with a header row (`Name | Type | Value 1 | Value 2 | ...`) followed by one row per factor.
+
+| Column | Description |
+|--------|-------------|
+| Name | Factor name (must match names used in the formula) |
+| Type | `continuous` or `categorical` |
+| Value 1, Value 2, ... | For continuous: low and high bounds; for categorical: level names (as many columns as levels) |
+
+Example:
+
+```
+[FACTORS]
+Name          Type          Value 1    Value 2    Value 3
+Temperature   continuous    50         150
+Pressure      continuous    1          5
+Catalyst      categorical   A          B          C
+```
+
+---
+
+**`[RESPONSES]` section.** Optional; activates multi-response mode. Contains a header row followed by one row per response. Key/value rows for `power_combination` and `sigma_joint` can also appear here. The column layout per response row:
+
+| Col | Field | Description |
+|-----|-------|-------------|
+| 1 | name | Response name |
+| 2 | power_mode | `contrast`, `r2`, or `glm` |
+| 3 | sigma | Residual SD |
+| 4 | alpha | Significance level |
+| 5 | power | Target power |
+| 6 | weight | Weight for `weighted_mean` combination |
+| 7 | L_row | Comma-separated L row (contrast/GLM mode) |
+| 8 | delta | Comma-separated δ values |
+| 9 | r2_target | R² target (R² mode) |
+| 10 | formula | Per-response formula override (optional) |
+
+Special rows (in column A, value in column B):
+
+| Key | Value |
+|-----|-------|
+| `power_combination` | `min`, `product`, or `weighted_mean` |
+| `sigma_joint` | Semicolon-separated matrix rows, comma-separated values |
+
+---
+
+#### 11.4 Creating a template workbook: `create_excel_template`
+
+`create_excel_template` writes a new `.xlsx` workbook pre-populated with a runnable example in the chosen power mode:
+
+```python
+from iopt_power_design import create_excel_template
+
+# Contrast-mode template
+path = create_excel_template("study_template.xlsx", example="contrast")
+print(f"Template written to: {path}")
+```
+
+The `example` parameter chooses which pre-filled values to use:
+
+| Value | Description |
+|-------|-------------|
+| `"r2"` | Global R² mode with two continuous factors |
+| `"contrast"` | Contrast mode with L matrix and δ for two continuous factors |
+| `"multiresponse"` | Two-response joint design with `[RESPONSES]` section |
+| `"glm-binomial"` | GLM binomial (logistic) mode |
+| `"glm-poisson"` | GLM Poisson (log-linear) mode |
+
+The created workbook contains:
+- A **Config** sheet filled with the example configuration, with dropdown validation on `power_mode` and `criterion`
+- Empty placeholder **Results**, **Design**, and **Buckets** sheets that `excel_run` will populate
+
+**Via the CLI.** `create_excel_template` is also accessible through the CLI without writing Python:
+
+```bash
+# Create a contrast-mode starter workbook
+iopt-design --excel-template study_template.xlsx --template-mode contrast
+```
+
+---
+
+#### 11.5 Running the design: `excel_run`
+
+`excel_run` reads the `Config` sheet, runs the design search, and writes three output sheets back into the same workbook:
+
+```python
+from iopt_power_design import excel_run
+
+result = excel_run("study_template.xlsx")
+```
+
+After the call, the workbook at `study_template.xlsx` now contains three new (or updated) sheets:
+
+| Sheet | Contents |
+|-------|----------|
+| **Results** | Key/value summary: n, achieved power, λ, df, criterion, elapsed time, search strategy, warnings |
+| **Design** | Full design DataFrame (n rows × factor columns) |
+| **Buckets** | Factor-level bucket counts |
+
+The function returns the same result dict as `i_optimal_powered_design` (or `i_optimal_multiresponse_design` for multi-response configs), with an additional `"excel_path"` key containing the absolute path of the updated workbook.
+
+```python
+rep = result["report"]
+print(f"n={rep['n']}, power={rep['achieved_power']:.4f}")
+print(f"Updated workbook: {result['excel_path']}")
+```
+
+**Via the CLI:**
+
+```bash
+iopt-design --excel-run study_template.xlsx
+```
+
+This is the fully no-Python workflow: create the template with `--excel-template`, fill it in Excel, run with `--excel-run`. No Python script required.
+
+**Overriding design options.** For programmatic control without modifying the workbook file, pass `design_opts_override`:
+
+```python
+from iopt_power_design import excel_run, DesignOptions
+
+result = excel_run(
+    "study_template.xlsx",
+    design_opts_override=DesignOptions(starts=20, workers=4, random_state=99),
+)
+```
+
+The override replaces the design options read from the Config sheet entirely; power configuration and factors are still read from the file.
+
+**Error handling.** All Excel integration errors raise `ExcelError` (a subclass of `RuntimeError`). The underlying cause is attached as `__cause__`. Common error categories:
+
+| Situation | Error message |
+|-----------|---------------|
+| Missing `[SETTINGS]` sentinel | `"Config sheet is missing the '[SETTINGS]' sentinel."` |
+| Missing `[FACTORS]` sentinel | `"Config sheet is missing the '[FACTORS]' sentinel."` |
+| Missing `[CONTRAST]` when required | `"power_mode is 'contrast' but the '[CONTRAST]' sentinel is missing."` |
+| Non-numeric bound for a continuous factor | `"Factor 'Temperature' continuous bounds must be numeric."` |
+| Wrong `power_mode` value | `"power_mode must be 'r2', 'contrast', or 'glm'."` |
+| Design search failure | `"Design search failed: <underlying error>"` |
+
+Catch `ExcelError` explicitly in scripts that run unattended:
+
+```python
+from iopt_power_design import excel_run, ExcelError
+
+try:
+    result = excel_run("study_template.xlsx")
+except ExcelError as e:
+    print(f"Excel error: {e}")
+    if e.__cause__:
+        print(f"  Caused by: {e.__cause__}")
+    raise
+```
+
+---
+
+#### 11.6 Full worked example
+
+**Scenario.** A process engineer at an industrial manufacturing site is planning a three-factor study on a chemical reactor: Temperature (50–150°C), Pressure (1–5 bar), and Feed Rate (0.5–2.0 L/min), all continuous. The model includes all three main effects and two interactions: Temperature:Pressure and Temperature:FeedRate. The statistician needs the engineer to sign off on the factor ranges and effect assumptions before the study is approved, so the configuration is shared as an Excel file.
+
+**Step 1 — Create the template.**
+
+```python
+from iopt_power_design import create_excel_template
+
+create_excel_template("reactor_study.xlsx", example="contrast")
+```
+
+Open `reactor_study.xlsx` in Excel. The Config sheet looks like this (key entries shown):
+
+```
+[SETTINGS]
+formula         ~ 1 + A + B
+power_mode      contrast        ← dropdown: r2 / contrast / glm
+alpha           0.05
+power           0.80
+sigma           1.0
+max_n           500
+criterion       I               ← dropdown: I / D / A
+starts          5
+random_state    123
+
+[CONTRAST]
+L_row           0, 0, 1, 0
+delta           0.5
+
+[FACTORS]
+Name    Type         Value 1   Value 2
+A       continuous   0.0       10.0
+B       continuous   0.0       10.0
+```
+
+**Step 2 — Edit the file in Excel.**
+
+The engineer edits the file to match the reactor study:
+
+```
+[SETTINGS]
+formula         ~ 1 + Temp + Press + FeedRate + Temp:Press + Temp:FeedRate
+power_mode      contrast
+alpha           0.05
+power           0.80
+sigma           1.0
+max_n           400
+criterion       I
+starts          5
+random_state    42
+
+[CONTRAST]
+L_row           0, 1, 0, 0, 0, 0
+delta           0.5
+
+[FACTORS]
+Name        Type         Value 1   Value 2
+Temp        continuous   50.0      150.0
+Press       continuous   1.0       5.0
+FeedRate    continuous   0.5       2.0
+```
+
+The formula `~ 1 + Temp + Press + FeedRate + Temp:Press + Temp:FeedRate` produces p = 6 model columns: `[Intercept, Temp, Press, FeedRate, Temp:Press, Temp:FeedRate]`. The L row `0, 1, 0, 0, 0, 0` tests the Temp main effect.
+
+**Step 3 — Run the design.**
+
+The statistician receives the file and runs it from Python:
+
+```python
+from iopt_power_design import excel_run
+
+result = excel_run("reactor_study.xlsx")
+
+rep = result["report"]
+print(f"n = {rep['n']}")
+print(f"achieved power = {rep['achieved_power']:.4f}")
+print(f"λ = {rep['noncentrality_lambda']:.4f}")
+print(f"Workbook updated: {result['excel_path']}")
+```
+
+Or equivalently from the CLI (fully no-Python):
+
+```bash
+iopt-design --excel-run reactor_study.xlsx
+```
+
+After the run, `reactor_study.xlsx` contains three new sheets:
+
+- **Results** — `n`, `achieved_power`, `noncentrality_lambda`, `elapsed_sec`, `criterion`, and all other report fields
+- **Design** — the run table with 84 rows and columns `Temp`, `Press`, `FeedRate`
+- **Buckets** — run frequency by factor-level bucket
+
+**Step 4 — The engineer reviews the workbook.**
+
+The engineer opens `reactor_study.xlsx`, looks at the Design sheet to see the run schedule, and checks the Results sheet to confirm the study is powered as agreed. No Python installation is required on the engineer's machine — the output is self-contained in the workbook.
+
+---
+
+**Comparison: same design via Python API.**
+
+For reference, the equivalent Python API call for the same study:
+
+```python
+from iopt_power_design import (
+    i_optimal_powered_design,
+    PowerContrastConfig,
+    DesignOptions,
+)
+
+formula = "~ 1 + Temp + Press + FeedRate + Temp:Press + Temp:FeedRate"
+factors = {
+    "Temp":     (50.0, 150.0),
+    "Press":    (1.0,  5.0),
+    "FeedRate": (0.5,  2.0),
+}
+# p = 6: [Intercept, Temp, Press, FeedRate, Temp:Press, Temp:FeedRate]
+power_cfg = PowerContrastConfig(
+    L=[[0, 1, 0, 0, 0, 0]],   # Temp main effect
+    delta=[0.5],
+    alpha=0.05,
+    power=0.80,
+    sigma=1.0,
+    max_n=400,
+)
+opts = DesignOptions(auto_candidate=True, starts=5, random_state=42)
+
+result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+print(f"n={result['report']['n']}, power={result['report']['achieved_power']:.4f}")
+```
+
+The Excel and Python API paths produce the same design (given the same `random_state` and `starts`), because `excel_run` delegates to `i_optimal_powered_design` internally. The Excel interface is simply a structured input/output layer around the same search engine.
 
 ---
 
