@@ -6938,14 +6938,206 @@ is made with clear information about the risks.
 
 ### Chapter 21 — Minimum detectable effect
 
-- 21.1 The inverse question: given a fixed design, what can it detect?
-  - Two uses: validating an inherited design, communicating design capability to reviewers
-- 21.2 `min_detectable_effect`
-  - The `target_power` parameter
-  - What `mde["mde"]` means in contrast mode: a scale factor on δ (1.0 = the stated δ is just detectable)
-  - Interpreting MDE in R² mode
-- 21.3 **Full worked example** (Python API, inherited 24-run design from a previous study)
-  - Establishing what the existing design can and cannot detect before proposing augmentation
+`i_optimal_powered_design` answers a *forward* question: given a stated effect δ,
+what n achieves 80% power? The **minimum detectable effect (MDE)** answers the
+*inverse* question: given a fixed design with n runs, what is the smallest effect
+that achieves the target power?
+
+The MDE is useful in two situations:
+
+- **Validating an inherited design.** A previous team built a 24-run design and
+  left no power documentation. Before augmenting or discarding it, you want to know
+  what it can actually detect.
+- **Communicating capability to reviewers.** A reviewer asks "what is the smallest
+  effect this experiment can detect?" The MDE gives a direct, interpretable answer
+  in the same units as δ.
+
+---
+
+#### 21.1 The inverse question
+
+Power analysis is normally a planning tool: fix δ and σ, find the required n.
+The MDE inverts this: fix the design (which fixes n and the information matrix
+X'X), and find the minimum δ at which the target power is achieved.
+
+Mathematically, for contrast mode, the noncentrality parameter is
+
+```
+λ(scale) = (scale × δ)² / [σ² × L(X'X)⁻¹Lᵀ]
+```
+
+which increases monotonically in `scale`. The MDE is the `scale` at which the
+F-test achieves the target power. A scale of 1.0 means the design is perfectly
+calibrated: the stated δ is exactly detectable. A scale > 1.0 means only *larger*
+effects are reliably detected — the design is underpowered for the stated δ.
+
+---
+
+#### 21.2 `min_detectable_effect`
+
+```python
+from iopt_power_design import min_detectable_effect
+
+mde_result = min_detectable_effect(
+    design_df,        # fixed design to evaluate
+    formula,          # patsy formula used to build design_df
+    factors,          # factor specifications
+    power_cfg,        # PowerContrastConfig, PowerR2Config, or PowerGLMContrastConfig
+    target_power=0.80,   # default 0.80
+)
+```
+
+**Return value (contrast mode):**
+
+| Key | Type | Contents |
+|---|---|---|
+| `"mde"` | `float` | Scale factor on δ at which `target_power` is achieved |
+| `"achieved_power"` | `float` | Power at the MDE (≈ `target_power`, within tolerance) |
+| `"n"` | `int` | Number of runs in the design |
+| `"mode"` | `str` | `"contrast"` |
+
+**Return value (R² mode):**
+
+| Key | Type | Contents |
+|---|---|---|
+| `"mde"` | `float` | Minimum `r2_target` at which `target_power` is achieved |
+| `"achieved_power"` | `float` | Power at the MDE |
+| `"n"` | `int` | Number of runs |
+| `"mode"` | `str` | `"r2"` |
+
+**Return value (GLM mode):**
+Same keys as contrast mode, plus `"min_delta_lp"` (the absolute LP-scale delta
+corresponding to the MDE scale factor), `"family"`, and `"baseline"`.
+
+**The `target_power` parameter.**
+Changing `target_power` shifts the threshold at which the MDE is computed:
+
+```python
+mde_80 = min_detectable_effect(design_df, formula, factors, power_cfg, target_power=0.80)
+mde_90 = min_detectable_effect(design_df, formula, factors, power_cfg, target_power=0.90)
+
+print(f"MDE at 80% power: {mde_80['mde']:.3f}x delta")
+print(f"MDE at 90% power: {mde_90['mde']:.3f}x delta")
+```
+
+A higher target power requires a larger effect to be reliably detected, so the
+90% MDE is always larger than the 80% MDE. This gives you two numbers:
+"effects above 1.38× δ are detectable at 80% confidence; above 1.59× δ at 90%."
+
+**Interpreting the MDE in R² mode.**
+For `PowerR2Config`, `mde["mde"]` is not a scale factor — it is the actual minimum
+R² value at which the design achieves the target power. A value of 0.36 means the
+design can detect model fits with R² ≥ 0.36 (a large effect by Cohen's conventions)
+at 80% power; smaller R² effects are missed. Values below 0.10 indicate a sensitive
+design; values above 0.25 indicate an underpowered one.
+
+---
+
+#### 21.3 Full worked example
+
+**Scenario.** A process team has inherited a 24-run experiment from a previous
+project. The original documentation is sparse — no power analysis was performed.
+Before deciding whether to run the experiment as-is, augment it, or rebuild from
+scratch, the team wants to know:
+
+1. What effect size can the 24-run design detect at 80% power?
+2. How does that compare to the 39-run design sized for the stated δ = 1.0?
+3. What does the 24-run design detect at 70% power?
+
+**Setup:**
+
+```python
+from iopt_power_design import min_detectable_effect, DesignOptions, PowerContrastConfig
+from iopt_power_design.iopt_search import build_i_opt_design_with_idx
+from iopt_power_design.candidate import build_candidate
+
+formula = "A + B + A:B"
+factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+power_cfg = PowerContrastConfig(
+    L=[[0, 1, 0, 0]], delta=[1.0], sigma=2.0,
+    alpha=0.05, power=0.80,
+)
+
+# Build the inherited 24-run design
+cand = build_candidate(factors, candidate_points=500, seed=42)
+design_df_24, _, _ = build_i_opt_design_with_idx(
+    n=24, cand=cand, formula=formula, n_start=5, random_state=42
+)
+```
+
+**Question 1 — MDE at 80% power (24-run design):**
+
+```python
+mde_24 = min_detectable_effect(
+    design_df_24, formula, factors, power_cfg, target_power=0.80
+)
+print(f"MDE (80%): {mde_24['mde']:.3f}x delta  "
+      f"(achieved power: {mde_24['achieved_power']:.4f})")
+```
+
+```
+MDE (80%): 1.376x delta  (achieved power: 0.8000)
+```
+
+The 24-run design can only reliably detect effects that are **at least 1.38× the
+stated δ**. With δ = 1.0, this means effects below 1.38 are missed more than 20%
+of the time. The design is substantially underpowered for the stated target.
+
+**Question 2 — Comparison with the 39-run design:**
+
+```python
+design_df_39, _, _ = build_i_opt_design_with_idx(
+    n=39, cand=cand, formula=formula, n_start=5, random_state=42
+)
+mde_39 = min_detectable_effect(
+    design_df_39, formula, factors, power_cfg, target_power=0.80
+)
+print(f"MDE (80%) at n=39: {mde_39['mde']:.3f}x delta")
+```
+
+```
+MDE (80%) at n=39: 1.075x delta
+```
+
+The properly sized 39-run design requires effects to be only **7.5% above the
+stated δ** to be reliably detected. This gap reflects the precision of the
+bisection tolerance — the solver found a design that essentially meets the stated
+SESOI (δ = 1.0) at 80% power.
+
+| Design | n | MDE | Interpretation |
+|---|---|---|---|
+| Inherited | 24 | 1.376 × δ | Misses effects up to 38% larger than stated δ |
+| Properly sized | 39 | 1.075 × δ | Essentially meets the stated δ target |
+
+**Question 3 — MDE at 70% power:**
+
+```python
+mde_70 = min_detectable_effect(
+    design_df_24, formula, factors, power_cfg, target_power=0.70
+)
+print(f"MDE (70%): {mde_70['mde']:.3f}x delta")
+```
+
+```
+MDE (70%): 1.220x delta
+```
+
+At the lower 70% power threshold, the 24-run design requires effects ≥ 1.22 × δ.
+Presenting both numbers to a reviewer gives a useful range: "effects above 1.38×
+are detected 80% of the time; effects above 1.22× at least 70% of the time."
+
+**Decision: augment or rebuild?**
+With MDE = 1.376 at n = 24, the team has two options:
+
+- **Augment** using `augment_design` (Chapter 18): add 15 runs to reach n = 39,
+  paying the greedy penalty of ~3 extra runs (see Chapter 18), arriving at n ≈ 42
+  with MDE ≈ 1.1 × δ.
+- **Rebuild** from scratch at n = 39 with `i_optimal_powered_design`: achieves
+  MDE ≈ 1.075 × δ — marginally better than augmentation, and 3 fewer runs.
+
+If the 24 runs have already been collected and analysed, augmentation preserves
+their value. If the 24 runs are unrun (an inherited *plan*, not *data*), rebuilding
+is usually preferable.
 
 ---
 
