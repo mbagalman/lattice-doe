@@ -2354,21 +2354,442 @@ This script produces four output files: `design.csv`, `buckets.csv`, `report.htm
 
 ### Chapter 9 — CLI: reproducible file-based pipelines
 
-- 9.1 Installing CLI support: `pip install -e ".[cli]"`
-- 9.2 Config file structure and all four YAML templates
-  - `--template contrast` — linear contrast mode
-  - `--template r2` — global R² mode
-  - `--template glm-binomial` / `glm-poisson` — GLM modes
-  - Annotated walkthrough of a full contrast YAML
-- 9.3 Running a design: `iopt-design --config config.yml --out ./output/design`
-- 9.4 Output files: `_design.csv`, `_buckets.csv`, `_report.json`, optional `_output.xlsx`
-- 9.5 Dry-run validation: `--dry-run` for CI/CD pipelines
-- 9.6 CLI flags reference: `--excel`, `--verbose`, `--template`, `--dry-run`
-- 9.7 Defining factors in YAML: categorical lists, continuous `[low, high]`, and scenario-based contrasts
-- 9.8 Feasibility constraints in YAML: `constraint_expr` (YAML-safe string)
-- 9.9 **Full worked example** (reproducible pipeline: YAML config → CSV outputs → shell script)
-  - Example YAML for a split-plot design (contrasting the Python API workflow)
-  - Wiring the CLI into a Makefile or CI step
+The CLI is the right tool when you want design generation to be a **reproducible, file-based step** — something you can commit to version control, re-run months later, and wire into a Makefile or CI pipeline without touching Python. Every design produced by the CLI is deterministic given the YAML config; the config file is the single source of truth.
+
+---
+
+#### 9.1 Installing CLI support
+
+The CLI requires PyYAML, which is bundled in the `cli` extras group:
+
+```bash
+pip install -e ".[cli]"
+```
+
+After installation, the `iopt-design` entry point is available in your shell:
+
+```bash
+iopt-design --help
+```
+
+---
+
+#### 9.2 Config file structure and the four YAML templates
+
+The CLI is driven by a single YAML (or JSON) config file. The fastest way to get a correct config is to print one of the four commented templates and edit it:
+
+```bash
+iopt-design --template contrast      > contrast_config.yml
+iopt-design --template r2            > r2_config.yml
+iopt-design --template glm-binomial  > glm_binomial_config.yml
+iopt-design --template glm-poisson   > glm_poisson_config.yml
+```
+
+The four templates correspond to the four power modes:
+
+| Template | Power mode | Key YAML field |
+|----------|------------|----------------|
+| `contrast` | Linear contrast F-test | `contrast:` block with `scenario_a/b` or explicit `L`/`delta` |
+| `r2` | Omnibus global R² F-test | `r2_target: <float>` |
+| `glm-binomial` | Logistic (binomial) Wald test | `family: binomial`, `link: logit`, `baseline: <p0>` |
+| `glm-poisson` | Log-linear (Poisson) Wald test | `family: poisson`, `link: log`, `baseline: <mu0>` |
+
+---
+
+**Annotated contrast template.** The output of `iopt-design --template contrast` is reproduced below with explanatory annotations. Every field shown here is also valid in the other three templates.
+
+```yaml
+# iopt-design config — contrast mode
+
+formula: "~ 1 + A + B + A:B"   # Patsy RHS formula; same syntax as Python API
+
+factors:
+  A: [low, high]      # categorical: a YAML list of level names
+  B: [0.0, 10.0]      # continuous:  a two-element list [low, high]
+
+# ── Power specification ──────────────────────────────────────────────────────
+# For contrast mode: define the hypothesis to test.
+contrast:
+  # Option 1 — scenario-based (recommended)
+  # The CLI builds L and delta automatically from the two factor settings.
+  scenario_a: {A: low,  B: 5.0}
+  scenario_b: {A: high, B: 5.0}
+  sesoi: 1.0           # smallest effect of interest in response units
+
+  # Option 2 — explicit L matrix and delta vector (advanced users)
+  # L: [[0, 0, 1, 0]]  # p columns; must match Patsy column order
+  # delta: [0.5]
+
+alpha: 0.05
+power: 0.80
+sigma: 1.0             # assumed residual standard deviation
+
+# ── Design search options ────────────────────────────────────────────────────
+design:
+  auto_candidate: true     # adaptive candidate sizing (recommended)
+  candidate_points: 2000   # fixed size when auto_candidate: false
+  cand_min: 1000
+  cand_max: 10000
+  starts: 5
+  algo: fedorov            # fedorov | coordinate
+  criterion: I             # I | D | A
+  max_iter: 1000
+  random_state: 123
+  xtx_jitter: 1.0e-8
+  workers: null            # null = serial; integer > 1 for parallel starts
+  # constraint_expr: "Temperature <= 2 * Pressure"
+
+# ── Output options ───────────────────────────────────────────────────────────
+output:
+  basename: design         # prefix for output file names
+  excel: false             # also write a .xlsx workbook
+
+# ── Split-plot (optional; uncomment to activate) ─────────────────────────────
+# split_plot:
+#   htc_factors: [A]       # hard-to-change (whole-plot) factor names
+#   n_whole_plots: 6
+#   eta: 1.0               # variance ratio sigma2_wp / sigma2_sp
+#   subplots_per_wp: 4     # omit for auto
+#   df_method: auto        # auto | conservative | sp_only
+
+# ── Multi-response (optional; replace contrast: block with responses:) ────────
+# power_combination: min   # min | product | weighted_mean
+# responses:
+#   - name: Yield
+#     sigma: 2.0
+#     contrast:
+#       scenario_a: {A: low,  B: 5.0}
+#       scenario_b: {A: high, B: 5.0}
+#       sesoi: 1.0
+#   - name: Purity
+#     sigma: 0.5
+#     r2_target: 0.20
+```
+
+The `formula` and `factors` keys are required for all modes. The power specification (`contrast:`, `r2_target:`, or `family:`/`baseline:`) switches the power mode. Everything in `design:` mirrors the `DesignOptions` fields from Chapter 8.
+
+---
+
+#### 9.3 Running a design
+
+```bash
+iopt-design --config polymer.yml --out ./output/polymer
+```
+
+The `--out` value is a **basename prefix** — not a directory. All output files are written alongside each other with the prefix prepended:
+
+```
+./output/polymer_design.csv
+./output/polymer_buckets.csv
+./output/polymer_report.json
+```
+
+The output directory is created automatically if it does not exist.
+
+**Optional output flags** (can be passed on the command line or set in the `output:` section of the YAML):
+
+```bash
+# Write an Excel workbook alongside the CSVs
+iopt-design --config polymer.yml --out ./output/polymer --excel
+
+# Write a self-contained HTML report (requires pip install -e "[report]")
+iopt-design --config polymer.yml --out ./output/polymer --html-report
+
+# Print a compact robustness summary after the design (single-response only)
+iopt-design --config polymer.yml --out ./output/polymer --robustness-report
+
+# Verbose logging (DEBUG level)
+iopt-design --config polymer.yml --out ./output/polymer -v
+```
+
+---
+
+#### 9.4 Output files
+
+| File | Description |
+|------|-------------|
+| `<basename>_design.csv` | Run table — n rows × factor columns. |
+| `<basename>_buckets.csv` | Factor-level bucket counts. |
+| `<basename>_report.json` | Search metadata, power metrics, and diagnostics. Same fields as `result["report"]` from the Python API. |
+| `<basename>_report.html` | Self-contained HTML report (only with `--html-report`). |
+| `<basename>.xlsx` | Excel workbook with Design, Buckets, and Report sheets (only with `--excel`). |
+
+All CSV and JSON outputs use UTF-8 encoding. The JSON report can be parsed directly in Python with `json.load()` or used as a build artefact in CI to record the design parameters alongside the code that generated them.
+
+---
+
+#### 9.5 Dry-run validation
+
+Add `--dry-run` to validate the config and output path without running the design search:
+
+```bash
+iopt-design --config polymer.yml --out ./output/polymer --dry-run
+```
+
+The dry run:
+- parses and validates the YAML
+- checks that the formula is syntactically valid
+- verifies that the output directory is writable
+- prints a brief summary of what would be run
+
+Exit code is 0 on success, non-zero on validation failure. This makes `--dry-run` useful as a pre-flight check in CI pipelines before committing to a potentially long design search.
+
+---
+
+#### 9.6 Full CLI flag reference
+
+**Core flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--config PATH` | Path to the YAML or JSON config file. Required for design generation. |
+| `--out BASENAME` | Output file basename prefix (default: `design`). |
+| `--template MODE` | Print a commented template to stdout and exit. Modes: `contrast`, `r2`, `glm-binomial`, `glm-poisson`. |
+| `--dry-run` | Validate and exit without running the search. |
+| `-v`, `--verbose` | Enable DEBUG-level logging. |
+
+**Output flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--excel` | Write a `.xlsx` workbook alongside the CSVs. |
+| `--html-report` | Write a self-contained HTML report (requires `[report]` extra). |
+| `--robustness-report` | Print a sigma/effect/alpha sensitivity table after the run (single-response only). |
+
+**GLM override flags** (override the corresponding YAML keys):
+
+| Flag | Description |
+|------|-------------|
+| `--family {binomial,poisson}` | GLM response family. |
+| `--link {logit,log}` | GLM link function. |
+| `--baseline FLOAT` | Baseline probability (binomial) or count rate (Poisson). |
+
+**Split-plot override flags** (override the `split_plot:` YAML block):
+
+| Flag | Description |
+|------|-------------|
+| `--htc-factors A,B,...` | Comma-separated hard-to-change factor names. Activates split-plot mode. |
+| `--n-whole-plots N` | Number of whole plots. Required with `--htc-factors`. |
+| `--eta ETA` | Variance ratio σ²_wp / σ²_sp (default 1.0). |
+| `--subplots-per-wp S` | Sub-plots per whole plot. Omit for automatic. |
+
+**Other interface flags** (covered in their respective chapters):
+
+| Flag | Description |
+|------|-------------|
+| `--sheets URL_OR_ID` | Read from / write to a Google Spreadsheet (Chapter 12). |
+| `--sheets-credentials PATH` | Service account JSON for Google Sheets auth. |
+| `--excel-template PATH` | Create a starter Excel workbook template (Chapter 11). |
+| `--excel-run PATH` | Run from an existing Excel workbook (Chapter 11). |
+| `--multi-response` | Treat the config as a multi-response design (inferred automatically when `responses:` is present). |
+
+---
+
+#### 9.7 Defining factors in YAML
+
+**Continuous factors** — a two-element list of numbers:
+
+```yaml
+factors:
+  Temperature: [50.0, 150.0]    # range [50, 150]
+  Concentration: [0.0, 2.0]     # range [0, 2]
+```
+
+**Categorical factors** — a YAML list of strings:
+
+```yaml
+factors:
+  Catalyst: [A, B, C]           # three-level categorical
+  Solvent:  [Ethanol, Water]    # two-level categorical
+```
+
+When a factor has exactly two numeric elements they are treated as a continuous range. To define a two-level numeric categorical, use strings: `["0", "1"]` or `[low, high]`.
+
+**Scenario-based contrasts.** The `contrast.scenario_a` and `contrast.scenario_b` keys specify two complete factor settings in YAML dict notation. The CLI calls `contrast_from_scenarios` internally and derives L and delta automatically. Use this form whenever possible — it avoids manual column-index counting and is easier to review.
+
+```yaml
+contrast:
+  scenario_a: {Catalyst: A, Temperature: 80.0,  Concentration: 1.0}
+  scenario_b: {Catalyst: A, Temperature: 120.0, Concentration: 1.0}
+  sesoi: 0.5    # minimum detectable change in response units
+```
+
+The `sesoi` (smallest effect of interest) is expressed in response units. The CLI translates this to a coefficient-scale delta by evaluating the linear predictor difference between the two scenarios. If the two scenarios differ in a categorical factor, see the note in Chapter 3 (Section 3.3) about the categorical anchor limitation — the scenario-based approach requires that both scenarios agree on a reference level or that the contrast direction is unambiguous.
+
+**Explicit L matrix.** For advanced users who need precise control over the contrast, the explicit form is available:
+
+```yaml
+contrast:
+  L: [[0, 0, 1, 0]]    # one row per hypothesis; p columns
+  delta: [0.5]          # one element per row
+```
+
+When using explicit L, verify the column order by running `build_model_matrix` in Python first (see Chapter 3, Section 3.2).
+
+---
+
+#### 9.8 Feasibility constraints in YAML
+
+The `constraint_expr` key in the `design:` section applies a filter to the candidate set. It is evaluated as a Python expression with factor column names available as variables:
+
+```yaml
+design:
+  auto_candidate: true
+  random_state: 42
+  constraint_expr: "Temperature + Pressure <= 150.0"
+```
+
+Available math helpers: `sqrt`, `log`, `log10`, `log2`, `exp`, `floor`, `ceil`, `pi`, `abs`, `min`, `max`, `round`. No imports are permitted — the expression must be self-contained.
+
+For multi-factor linear constraints, compound expressions work naturally:
+
+```yaml
+constraint_expr: "Temperature >= 60.0 and Pressure <= Temperature / 2.0"
+```
+
+The constraint is applied once during candidate generation. It does not slow down the Fedorov exchange itself; the exchange only selects from points that already passed the filter.
+
+---
+
+#### 9.9 Full worked example
+
+**Scenario.** A polymer team wants a fully reproducible YAML-driven pipeline they can commit to Git and re-run at any time. The study has two coded factors (Temperature and Pressure, both [−1, +1]) and a split-plot structure: Temperature is hard-to-change (set once per whole plot), Pressure is easy to change between sub-runs.
+
+**Step 1 — Create the config.**
+
+```bash
+iopt-design --template contrast > polymer_sp.yml
+```
+
+Edit the generated file to match the study. The final `polymer_sp.yml`:
+
+```yaml
+# polymer_sp.yml — Split-plot powered design for polymer study
+
+formula: "~ 1 + Temp + Press + Temp:Press"
+
+factors:
+  Temp:  [-1.0, 1.0]
+  Press: [-1.0, 1.0]
+
+# p = 4: [Intercept, Temp, Press, Temp:Press]
+# Test: Temp main effect
+contrast:
+  L: [[0, 1, 0, 0]]
+  delta: [0.5]
+
+alpha: 0.05
+power: 0.80
+sigma: 1.0
+
+design:
+  auto_candidate: true
+  starts: 5
+  criterion: I
+  random_state: 42
+  workers: null
+
+output:
+  basename: polymer_sp
+
+split_plot:
+  htc_factors: [Temp]
+  n_whole_plots: 8
+  eta: 1.0             # equal whole-plot and sub-plot variance
+  df_method: auto
+```
+
+**Step 2 — Validate before running.**
+
+```bash
+iopt-design --config polymer_sp.yml --out ./output/polymer_sp --dry-run
+```
+
+Output:
+
+```
+--- Dry Run Validation Successful ---
+  Formula: ~ 1 + Temp + Press + Temp:Press
+  Factors: ['Temp', 'Press']
+  Power Config: PowerContrastConfig
+  Design Algo: fedorov
+   Output Dir: /path/to/output (writable)
+--- Exiting without design generation ---
+```
+
+**Step 3 — Run the design.**
+
+```bash
+iopt-design --config polymer_sp.yml --out ./output/polymer_sp --html-report
+```
+
+This produces:
+
+```
+./output/polymer_sp_design.csv
+./output/polymer_sp_buckets.csv
+./output/polymer_sp_report.json
+./output/polymer_sp_report.html
+```
+
+**Step 4 — Wire into a Makefile.**
+
+A minimal `Makefile` target that validates before running and only re-runs when the config changes:
+
+```makefile
+# Makefile
+
+OUTPUT_DIR := output
+CONFIG     := polymer_sp.yml
+
+.PHONY: design validate clean
+
+validate:
+	iopt-design --config $(CONFIG) --out $(OUTPUT_DIR)/polymer_sp --dry-run
+
+design: $(OUTPUT_DIR)/polymer_sp_design.csv
+
+$(OUTPUT_DIR)/polymer_sp_design.csv: $(CONFIG)
+	@echo "Running design generation..."
+	iopt-design --config $(CONFIG) \
+	            --out $(OUTPUT_DIR)/polymer_sp \
+	            --html-report \
+	            --verbose
+	@echo "Design written to $(OUTPUT_DIR)/"
+
+clean:
+	rm -f $(OUTPUT_DIR)/polymer_sp_*.csv \
+	      $(OUTPUT_DIR)/polymer_sp_*.json \
+	      $(OUTPUT_DIR)/polymer_sp_*.html
+```
+
+With this setup:
+
+- `make validate` — checks the config is parseable and the output directory is writable, without spending time on the search.
+- `make design` — runs only if `polymer_sp.yml` has changed since the last run (Make's dependency tracking).
+- `make clean` — removes generated artefacts without touching the config.
+
+**GitHub Actions equivalent.** For CI, the same logic works as a workflow step:
+
+```yaml
+# .github/workflows/design.yml
+- name: Validate design config
+  run: iopt-design --config polymer_sp.yml --out ./output/polymer_sp --dry-run
+
+- name: Generate design
+  run: |
+    iopt-design --config polymer_sp.yml \
+                --out ./output/polymer_sp \
+                --html-report
+  # Upload the design artefacts
+- name: Upload design outputs
+  uses: actions/upload-artifact@v4
+  with:
+    name: design-outputs
+    path: output/polymer_sp_*
+```
+
+The dry-run step acts as a config linter, catching YAML errors and path issues before the potentially long design search runs.
 
 ---
 
