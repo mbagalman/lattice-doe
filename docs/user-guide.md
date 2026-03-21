@@ -3517,21 +3517,340 @@ The Excel and Python API paths produce the same design (given the same `random_s
 
 ### Chapter 12 — Google Sheets: collaborative cloud-based workflows
 
-- 12.1 When to use the Sheets interface
-  - Distributed teams and stakeholder collaboration
-  - Cloud-first organizations that avoid local file dependencies
-  - Integration with Google Workspace (Docs, Data Studio, etc.)
-- 12.2 Authentication: service account credentials and the `GOOGLE_APPLICATION_CREDENTIALS` environment variable
-- 12.3 Creating a template spreadsheet: `create_sheet_template`
-  - How the sheet structure maps to the Excel template
-  - Sharing the sheet and setting permissions
-- 12.4 Running the design: `sheets_run`
-  - Passing the spreadsheet URL or ID
-  - What `sheets_run` writes back to the sheet
-  - Error handling: `SheetsError` and how it surfaces
-- 12.5 **Full worked example** (Google Sheets interface, R² mode, consumer research study)
-  - Setting up credentials, creating the template, filling in the config, calling `sheets_run`
-  - Reading results directly in the browser
+The Google Sheets interface works like the Excel interface (Chapter 11) in its structure and configuration syntax, but operates in the cloud. The Config sheet lives in a Google Spreadsheet, multiple team members can edit it simultaneously from anywhere, and results are written back to the same spreadsheet — visible to everyone who has access, no file transfer required.
+
+---
+
+#### 12.1 When to use the Sheets interface
+
+**Use Google Sheets when:**
+
+- The team is geographically distributed and needs a shared, always-current configuration
+- Stakeholders who approve study parameters prefer a browser-based tool over email attachments
+- The organisation uses Google Workspace and the spreadsheet can be linked from Docs, Data Studio, or other G-Suite tools
+- You want a live audit trail: Google Sheets tracks every cell edit with a timestamp and author
+
+**Compared to Excel.** The Config sheet syntax is identical — the same four sentinels (`[SETTINGS]`, `[CONTRAST]`, `[FACTORS]`, `[RESPONSES]`), the same key names, the same factor table format. If you are already familiar with the Excel interface from Chapter 11, the only new concepts are authentication and the cloud-sharing model.
+
+**Limitations.** The same Python-API-only features that are absent from Excel are also absent here: feasibility constraints, progress callbacks, and post-design analysis functions. Feasibility constraints can be added in a post-processing Python step if needed.
+
+---
+
+#### 12.2 Installing Sheets support
+
+The Sheets interface requires `gspread` and `google-auth`:
+
+```bash
+pip install -e ".[sheets]"
+```
+
+The `sheets` extras group installs `gspread` and its Google authentication dependencies. If you use the combined `extras` group (`pip install -e ".[extras]"`), Sheets support is included.
+
+---
+
+#### 12.3 Authentication
+
+Two authentication modes are supported. Choose based on whether you are running interactively or in an automated/CI context.
+
+---
+
+**Option A — OAuth2 browser flow (interactive use)**
+
+Pass `credentials=None` (the default). On the first call, `gspread.oauth()` opens a browser tab and asks you to sign in to your Google account. After approval, the access token is cached in `~/.config/gspread/` and reused on subsequent calls — you only authenticate in the browser once per machine.
+
+```python
+from iopt_power_design import sheets_run
+
+# credentials=None → OAuth2 browser flow on first use
+result = sheets_run("https://docs.google.com/spreadsheets/d/YOUR_ID")
+```
+
+This mode is convenient for local development and one-off runs. It requires a browser and is not suitable for headless CI environments.
+
+---
+
+**Option B — Service account (automation and CI)**
+
+Create a service account in the Google Cloud Console, download its JSON credentials file, and pass the file path to `credentials`. The spreadsheet must be **shared with the service account's email address** (the `client_email` field in the JSON file).
+
+```python
+result = sheets_run(
+    "https://docs.google.com/spreadsheets/d/YOUR_ID",
+    credentials="path/to/service_account.json",
+)
+```
+
+**Setting credentials from an environment variable.** For CI pipelines, store the credentials path in an environment variable rather than hard-coding it:
+
+```python
+import os
+from iopt_power_design import sheets_run
+
+creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+result = sheets_run(spreadsheet_url, credentials=creds)
+```
+
+**Security notes.**
+
+- Never commit a service account JSON file to a public repository. Add `*.json` (or the specific filename) to `.gitignore`.
+- In GitHub Actions or other CI systems, store the JSON contents as a secret and write it to a temp file at runtime:
+
+```yaml
+# .github/workflows/design.yml
+- name: Write credentials
+  run: echo '${{ secrets.GCLOUD_CREDENTIALS }}' > /tmp/sa.json
+
+- name: Run design
+  run: python run_design.py
+  env:
+    GOOGLE_APPLICATION_CREDENTIALS: /tmp/sa.json
+```
+
+---
+
+#### 12.4 Creating a template spreadsheet: `create_sheet_template`
+
+`create_sheet_template` creates a new Google Spreadsheet pre-populated with a runnable example and returns its URL:
+
+```python
+from iopt_power_design import create_sheet_template
+
+url = create_sheet_template(
+    title="Consumer survey — powered design",
+    credentials="path/to/service_account.json",
+    example="r2",
+)
+print(f"Spreadsheet created: {url}")
+```
+
+The new spreadsheet contains four sheets:
+
+| Sheet | Initial contents |
+|-------|-----------------|
+| **Config** | Pre-filled with the chosen example |
+| **Results** | Empty — populated by `sheets_run` |
+| **Design** | Empty — populated by `sheets_run` |
+| **Buckets** | Empty — populated by `sheets_run` |
+
+The `example` parameter accepts the same values as `create_excel_template`: `"r2"`, `"contrast"`, `"multiresponse"`, `"glm-binomial"`, `"glm-poisson"`.
+
+**Sharing the spreadsheet.** By default the new spreadsheet is not shared publicly. To grant link-based write access to anyone (useful for quick prototyping but not for private data):
+
+```python
+url = create_sheet_template(
+    title="Pilot study config",
+    credentials=creds,
+    example="contrast",
+    share_anyone=True,     # grant writer access to anyone with the link
+)
+```
+
+For production use, share the spreadsheet explicitly with specific Google accounts via the Sheets UI (Share → add people by email), rather than using `share_anyone=True`.
+
+If you used a service account to create the spreadsheet, you must also share it with your own Google account if you want to edit it in the browser — the service account owns the spreadsheet by default.
+
+---
+
+#### 12.5 The Config sheet structure
+
+The Config sheet uses the same sentinel-based structure as the Excel interface. The four sentinels and their meanings are identical:
+
+| Sentinel | Section | Required? |
+|----------|---------|-----------|
+| `[SETTINGS]` | Key/value configuration pairs | Always |
+| `[CONTRAST]` | L matrix and δ (contrast/GLM modes) | When `power_mode` is `contrast` or `glm` |
+| `[FACTORS]` | Factor definitions table | Always |
+| `[RESPONSES]` | Per-response specs (multi-response) | Optional |
+
+All `[SETTINGS]` keys from Chapter 11 (Table 11.3) apply here without change. The `[CONTRAST]`, `[FACTORS]`, and `[RESPONSES]` formats are also identical.
+
+**One difference from Excel.** Google Sheets does not support dropdown validation cells the same way Excel does — the `power_mode` and `criterion` cells do not have in-cell pickers. Simply type the value directly: `r2`, `contrast`, or `glm` for `power_mode`; `I`, `D`, or `A` for `criterion`.
+
+---
+
+#### 12.6 Running the design: `sheets_run`
+
+`sheets_run` authenticates, reads the Config sheet, runs the design search, writes results back, and returns the result dict:
+
+```python
+from iopt_power_design import sheets_run
+
+result = sheets_run(
+    spreadsheet_url_or_id,          # full URL or bare spreadsheet ID
+    credentials="service_account.json",  # or None for OAuth2
+)
+```
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `spreadsheet_url_or_id` | required | Full Google Sheets URL or bare spreadsheet ID. |
+| `credentials` | `None` | Path to a service account JSON, or `None` for OAuth2 browser flow. |
+| `config_sheet` | `"Config"` | Name of the configuration worksheet. |
+| `results_sheet` | `"Results"` | Name of the sheet to write the summary to. |
+| `design_sheet` | `"Design"` | Name of the sheet to write the design DataFrame to. |
+| `buckets_sheet` | `"Buckets"` | Name of the sheet to write the bucket counts to. |
+| `clear_results` | `True` | Clear existing content in output sheets before writing. |
+
+The function returns the same result dict as `i_optimal_powered_design`, with one extra key: `"spreadsheet_url"` — the URL of the spreadsheet where results were written.
+
+```python
+rep = result["report"]
+print(f"n={rep['n']}, power={rep['achieved_power']:.4f}")
+print(f"Results written to: {result['spreadsheet_url']}")
+```
+
+After the call, the Results, Design, and Buckets sheets in the spreadsheet are populated and immediately visible to anyone who has access.
+
+**Via the CLI:**
+
+```bash
+iopt-design --sheets "https://docs.google.com/spreadsheets/d/YOUR_ID" \
+            --sheets-credentials path/to/service_account.json
+```
+
+The `--sheets` flag accepts both a full URL and a bare spreadsheet ID. `--sheets-credentials` is optional; if omitted, the CLI falls back to the `GOOGLE_APPLICATION_CREDENTIALS` environment variable and then to the OAuth2 browser flow.
+
+---
+
+**Error handling.** All Sheets integration errors raise `SheetsError`. The most common failure modes:
+
+| Situation | Error message |
+|-----------|---------------|
+| `gspread` not installed | `ImportError: gspread is required…` |
+| Authentication failure | `SheetsError: Authentication failed: <gspread error>` |
+| Spreadsheet not shared with service account | `SheetsError: Could not open spreadsheet … Check that the spreadsheet exists and is shared with your account.` |
+| Config sheet not found | `SheetsError: Worksheet 'Config' not found in spreadsheet.` |
+| Missing `[SETTINGS]` sentinel | `SheetsError: Config sheet is missing the '[SETTINGS]' sentinel.` |
+| Design search failure | `SheetsError: Design optimisation failed: <underlying error>` |
+
+```python
+from iopt_power_design import sheets_run, SheetsError
+
+try:
+    result = sheets_run(url, credentials=creds)
+except SheetsError as e:
+    print(f"Sheets error: {e}")
+    if e.__cause__:
+        print(f"  Caused by: {e.__cause__}")
+    raise
+```
+
+---
+
+#### 12.7 Full worked example
+
+**Scenario.** A consumer research team is running a preference study. Four continuous factors — Price (£5–£25), Quality (1–10), Convenience (1–10), and Brand (1–5) — are studied with a main-effects model. The statistician has determined that an R² of 0.15 or above is worth detecting (consistent with published benchmarks for preference studies). The study protocol is reviewed by a cross-functional team in weekly Sheets-based planning documents. The design configuration will live in a shared Google Spreadsheet and the results will be written back to the same file.
+
+---
+
+**Step 1 — Create the template spreadsheet.**
+
+```python
+import os
+from iopt_power_design import create_sheet_template
+
+url = create_sheet_template(
+    title="Consumer survey — powered design",
+    credentials=os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
+    example="r2",
+)
+print(url)
+# https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms
+```
+
+Open the URL in a browser. You will see the Config sheet pre-filled with the R² example. Share the spreadsheet with the review team using the standard Sheets share button (Share → add email addresses, Editor role).
+
+---
+
+**Step 2 — Edit the Config sheet.**
+
+The review team edits the Config sheet in the browser to match the consumer study. The relevant `[SETTINGS]` changes:
+
+```
+[SETTINGS]
+formula         ~ 1 + Price + Quality + Convenience + Brand
+power_mode      r2
+alpha           0.05
+power           0.80
+r2_target       0.15
+max_n           300
+criterion       I
+starts          5
+random_state    42
+
+[FACTORS]
+Name          Type         Value 1   Value 2
+Price         continuous   5.0       25.0
+Quality       continuous   1.0       10.0
+Convenience   continuous   1.0       10.0
+Brand         continuous   1.0       5.0
+```
+
+No `[CONTRAST]` section is needed — R² mode does not use an L matrix.
+
+---
+
+**Step 3 — Run the design.**
+
+Once the protocol review is complete and the Config sheet is signed off, the statistician runs the design from Python:
+
+```python
+import os
+from iopt_power_design import sheets_run
+
+result = sheets_run(
+    "https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID",
+    credentials=os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
+)
+
+rep = result["report"]
+print(f"n = {rep['n']}")
+print(f"achieved power = {rep['achieved_power']:.4f}")
+print(f"Results written to: {result['spreadsheet_url']}")
+```
+
+The Results, Design, and Buckets sheets in the spreadsheet are now populated. Everyone on the review team can open the spreadsheet in their browser and see:
+
+- **Results sheet:** n, achieved power, R² target, criterion, elapsed time, search strategy
+- **Design sheet:** the full run table with 73 rows and columns Price, Quality, Convenience, Brand
+- **Buckets sheet:** run frequency by factor-level bucket
+
+No one on the team needs a local Python installation to view or share the results.
+
+---
+
+**Step 4 — Automated re-run via CLI.**
+
+If the protocol is revised and the Config sheet is updated, re-running the design requires only one command. In a shared team playbook or Makefile:
+
+```bash
+iopt-design \
+  --sheets "https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID" \
+  --sheets-credentials "${GOOGLE_APPLICATION_CREDENTIALS}"
+```
+
+The output sheets are cleared and rewritten with the updated results. The Config sheet is unchanged — the run does not modify the inputs.
+
+---
+
+> **Tip — combining Sheets config with Python post-processing.** `sheets_run` returns the full result dict, so you can pipe the result directly into Python analysis functions without re-running the design:
+>
+> ```python
+> from iopt_power_design import sheets_run, power_sensitivity
+>
+> result = sheets_run(url, credentials=creds)
+>
+> # Post-design sensitivity analysis in Python
+> sens = power_sensitivity(
+>     formula, factors, result["report"],
+>     sigma_range=(0.5, 2.0),
+> )
+> print(sens)
+> ```
+>
+> This pattern — Sheets for collaborative configuration, Python for analysis — combines the accessibility of a cloud spreadsheet with the full analytical power of the Python API.
 
 ---
 
