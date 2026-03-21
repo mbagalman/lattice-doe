@@ -707,20 +707,246 @@ Run allocation summary:
 
 ### Chapter 4 — Global R²: testing whether the model explains variance
 
-**Running example:** A consumer research team is running a survey study with four continuous predictors and wants to know: is there enough signal in the data to conclude the model is non-trivial? They target R² ≥ 0.15.
+**Running example:** A consumer research team is designing a conjoint-style survey experiment. Respondents rate product preferences on a 0–10 scale. Four attributes are under study — Price, Quality, Convenience, and Brand perception — each scored on a standardised −1 to +1 range. The team's question is not "which specific attribute matters most?" but the more preliminary one: "does this combination of attributes explain a meaningful proportion of preference variance at all?" They target R² ≥ 0.15.
 
-- 4.1 What the omnibus F-test measures and when it is the right power target
-  - Contrast mode vs. R² mode: when you have a specific effect in mind vs. when you don't
-  - Cohen's f²: the effect-size measure underlying R² power calculations
-- 4.2 Setting up `PowerR2Config`
-  - `r2_target`: the minimum R² worth detecting
-  - `lambda_mode`: `"n"` (matches G\*Power / statsmodels) vs. `"n_minus_p"` (more conservative)
-  - How `df_num` is derived from the formula (intercept excluded per G\*Power convention)
-- 4.3 D-optimality for coefficient estimation: why the criterion choice matters more here
-  - When the goal is testing the full model rather than predicting at arbitrary points, D-optimal designs are worth considering
-- 4.4 **Full worked example** (Python API, D-optimal, R² mode, consumer survey)
-  - Side-by-side comparison of I-optimal and D-optimal designs at the same n and power target
-  - Reading `compare_criteria` output to quantify the tradeoff
+---
+
+#### 4.1 The omnibus F-test and when R² mode is the right target
+
+The **omnibus F-test** tests the null hypothesis that every slope in the model is simultaneously zero — equivalently, that R² = 0 and the predictors collectively explain nothing. Rejecting the null means concluding that the model as a whole explains a non-trivial proportion of response variance; it says nothing about which individual predictors drive that explanation.
+
+**When is this the right power target?**
+
+Use R² mode when:
+
+- You are in an early exploratory phase and want to confirm there is signal worth pursuing before committing to more specific hypotheses.
+- Your question is genuinely global: "does this set of factors influence the outcome?" rather than "does this specific factor influence the outcome by this amount?"
+- You are replicating a prior study and want your design to have the same statistical power to detect the same overall effect size, without constraining yourself to a particular contrast.
+- Regulatory or protocol requirements specify a minimum detectable R² rather than a specific effect size.
+
+**When contrast mode is preferable:**
+
+If you already have a theory about which effects matter, or if the eventual analysis will focus on testing individual coefficients or pre-specified comparisons, contrast mode (Chapter 3) is more appropriate. It lets you define exactly what you need to detect and will typically require fewer runs because it targets a narrower, more specific hypothesis. The omnibus F-test is a weaker test — it can be powerful for detecting large effects spread across many predictors while missing a single sharp effect that a contrast would catch easily.
+
+**Cohen's f²: the effect-size measure for R² power.**
+
+The omnibus F-test power depends on the noncentrality parameter λ, which is related to R² through Cohen's f² effect size:
+
+```
+f² = R² / (1 − R²)
+```
+
+For the target R² = 0.15, f² = 0.15 / 0.85 ≈ 0.176. Cohen (1988) classified f² ≈ 0.02 as small, 0.15 as medium, and 0.35 as large. An R² target of 0.15 therefore sits at the medium-to-large boundary — a model that explains 15% of preference variance is a meaningful but not overwhelming effect in consumer research.
+
+The noncentrality parameter is then:
+
+```
+λ = f² × n          (lambda_mode = "n",   the default)
+λ = f² × (n − p)    (lambda_mode = "n_minus_p", more conservative)
+```
+
+with `df_num` = p − 1 (number of slope parameters; intercept excluded) and `df_denom` = n − p.
+
+---
+
+#### 4.2 Setting up `PowerR2Config`
+
+```python
+from iopt_power_design import PowerR2Config
+
+power_cfg = PowerR2Config(
+    r2_target=0.15,      # minimum R² worth detecting
+    alpha=0.05,          # significance level
+    power=0.80,          # target power
+    max_n=300,           # hard cap on the sample-size search
+    lambda_mode="n",     # noncentrality convention (see below)
+)
+```
+
+**`r2_target`** is the minimum proportion of variance that the model must explain for the effect to be practically meaningful. Setting this too low (e.g. 0.02) will demand a very large n for a very weak signal; setting it too high (e.g. 0.50) will underpower you against realistic medium effects. A useful heuristic: use the R² from a comparable published study as a lower bound.
+
+**`lambda_mode`** controls how the noncentrality parameter is computed:
+
+| `lambda_mode` | Formula | Matches |
+|---|---|---|
+| `"n"` (default) | λ = f² × n | G\*Power, statsmodels `FTestAnovaPower` |
+| `"n_minus_p"` | λ = f² × (n − p) | More conservative; closer to the exact non-central F |
+
+The difference is small for large n but meaningful when n is close to p. In the consumer survey example with p = 5 and the target R² = 0.15:
+
+- `lambda_mode="n"` requires **n = 73** (λ = 12.88 at n = 73)
+- `lambda_mode="n_minus_p"` requires **n = 78** (λ = 12.88 at n = 78)
+
+The λ value is the same in both cases; the difference is that `"n_minus_p"` requires 5 more runs to achieve the same λ because it attributes the noncentrality to fewer effective observations. Use `"n_minus_p"` when you want to align with a more conservative reference, or when n is small relative to p.
+
+**`df_num` and how it is derived.** You do not set `df_num` directly — the package derives it from the formula. Specifically, `df_num` = (number of model-matrix columns) − 1. The intercept is excluded from the numerator degrees of freedom, following the G\*Power convention for the omnibus F-test:
+
+```
+formula = "~ 1 + Price + Quality + Convenience + Brand"
+# Model-matrix columns: [Intercept, Price, Quality, Convenience, Brand]  → p = 5
+# df_num = p - 1 = 4
+# df_denom = n - p = n - 5
+```
+
+For the returned design at n = 73: `df_num = 4`, `df_denom = 68`.
+
+---
+
+#### 4.3 Criterion choice in R² mode
+
+For R² mode with continuous factors in a symmetric design space, the three optimality criteria (I, D, A) frequently produce the same required sample size. In the consumer survey example, running `compare_criteria` returns:
+
+```python
+from iopt_power_design import compare_criteria, DesignOptions
+
+comparison = compare_criteria(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=DesignOptions(auto_candidate=True, starts=8, random_state=42),
+)
+print(comparison["summary"][["criterion", "n", "achieved_power", "elapsed_sec"]])
+```
+
+```
+  criterion   n  achieved_power  elapsed_sec
+0         I  73        0.803100        ...
+1         D  73        0.803100        ...
+2         A  73        0.803100        ...
+```
+
+All three criteria find the same n = 73 and the same achieved power. This is a common outcome for main-effects-only models with continuous factors on a symmetric box: the factor space has no asymmetry to exploit, and the omnibus F-test power is insensitive to the fine-grained placement differences between I-, D-, and A-optimal designs at a given n.
+
+**When does the criterion choice matter for R² mode?**
+
+Meaningful differences emerge when:
+
+- The model includes categorical factors (the dummy encoding introduces asymmetry into the design space that the three criteria resolve differently).
+- The model includes interactions or polynomial terms (the information matrix becomes less uniform across the design region).
+- There are feasibility constraints that remove part of the design space.
+
+In those situations, D-optimal designs are generally preferable for R² mode because the omnibus F-test is directly related to the information matrix determinant: det(X'X) governs the joint precision of all coefficient estimates simultaneously, which is exactly what the R² F-test measures. If you are unsure, run `compare_criteria` first — if the n values agree across criteria, the choice is immaterial for required sample size.
+
+---
+
+#### 4.4 Full worked example
+
+The following script is self-contained and runs the complete R²-mode workflow for the consumer survey.
+
+```python
+# chapter4_example.py
+from iopt_power_design import (
+    i_optimal_powered_design,
+    PowerR2Config,
+    DesignOptions,
+    compare_criteria,
+)
+
+# ── 1. Define the model ────────────────────────────────────────────────────
+formula = "~ 1 + Price + Quality + Convenience + Brand"
+factors = {
+    "Price":       (-1.0, 1.0),   # standardised: -1 = lowest tier, +1 = highest tier
+    "Quality":     (-1.0, 1.0),
+    "Convenience": (-1.0, 1.0),
+    "Brand":       (-1.0, 1.0),
+}
+# Patsy model-matrix columns (p = 5):
+#   Intercept, Price, Quality, Convenience, Brand
+# df_num = p - 1 = 4  (intercept excluded from omnibus F-test)
+
+# ── 2. Specify the power target ────────────────────────────────────────────
+# Goal: detect R² ≥ 0.15 (Cohen's f² ≈ 0.176 — medium-to-large effect).
+# Using the default lambda_mode="n" to match G*Power conventions.
+power_cfg = PowerR2Config(
+    r2_target=0.15,
+    alpha=0.05,
+    power=0.80,
+    max_n=300,
+    lambda_mode="n",
+)
+
+# ── 3. Run the design search ───────────────────────────────────────────────
+opts = DesignOptions(
+    auto_candidate=True,
+    starts=8,
+    random_state=42,
+    criterion="D",   # D-optimal preferred for omnibus F-test goals
+)
+
+result = i_optimal_powered_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=opts,
+)
+
+# ── 4. Inspect results ─────────────────────────────────────────────────────
+r = result["report"]
+print(f"Minimum n: {r['n']}")
+print(f"Achieved power: {r['achieved_power']:.4f}")
+print(f"Noncentrality λ: {r['noncentrality_lambda']:.4f}")
+print(f"F-test df: ({r['df_num']}, {r['df_denom']})")
+print(f"Cohen's f²: {0.15 / 0.85:.4f}")
+print()
+print("Design (first 8 runs):")
+print(result["design_df"].head(8).round(3).to_string())
+
+# ── 5. Compare criteria (optional but recommended) ─────────────────────────
+comparison = compare_criteria(
+    formula=formula,
+    factors=factors,
+    power_cfg=power_cfg,
+    design_opts=DesignOptions(auto_candidate=True, starts=8, random_state=42),
+)
+print()
+print("Criteria comparison:")
+print(comparison["summary"][["criterion", "n", "achieved_power"]].to_string())
+
+# ── 6. Check the conservative lambda convention ────────────────────────────
+power_cfg_conservative = PowerR2Config(
+    r2_target=0.15, alpha=0.05, power=0.80, max_n=300, lambda_mode="n_minus_p"
+)
+result_cons = i_optimal_powered_design(formula, factors, power_cfg_conservative, opts)
+print()
+print(f"Conservative (n_minus_p) n: {result_cons['report']['n']}")
+```
+
+**Expected output:**
+
+```
+Minimum n: 73
+Achieved power: 0.8031
+Noncentrality λ: 12.8824
+F-test df: (4, 68)
+Cohen's f²: 0.1765
+
+Design (first 8 runs):
+   Price  Quality  Convenience  Brand
+0 -0.765   -0.967        0.026 -0.762
+1  0.940    0.414       -0.917  0.923
+2 -0.575    0.950        0.848 -0.729
+3 -0.011   -0.907       -0.807  0.883
+4 -0.704    0.602       -0.751  0.979
+5  0.703    0.946        0.183 -0.994
+6 -0.720    0.710       -0.768  0.873
+7  0.587   -0.915        0.466 -0.928
+
+Criteria comparison:
+  criterion   n  achieved_power
+0         I  73        0.803100
+1         D  73        0.803100
+2         A  73        0.803100
+
+Conservative (n_minus_p) n: 78
+```
+
+**Interpreting the design.** The 73 runs do not cluster at any obvious extreme values. Unlike the Chapter 3 concentration-slope design — where every run sat at either 0.0 or 2.0 mol/L — the R²-mode design scatters runs across the full four-dimensional factor space. This reflects the different structure of the two tests: a slope test (contrast mode) extracts the most information from extreme values of the tested factor, while an omnibus F-test needs to estimate all coefficients jointly, which requires broader coverage of the design region.
+
+Each run combination is unique (no replication in the 73-row design). Replication would appear if the optimal design discovered that a few specific factor combinations are more informative than others — as happens in categorical designs — but with four independent continuous factors and a main-effects model, the I/D/A-optimal solution spreads runs roughly evenly.
+
+**The lambda_mode decision in practice.** The five-run difference between `"n"` (n = 73) and `"n_minus_p"` (n = 78) is small here — about 7% more runs for the conservative convention. If your analysis will use a standard regression F-test as computed by R, Python `statsmodels`, or SAS `PROC REG`, use `"n"` for consistency with those tools. Use `"n_minus_p"` if your protocol calls for a more conservative pre-specification, or if n is small enough (< 3p) that the two conventions diverge noticeably.
+
+> **Cross-reference:** If you want to visualise how power changes as a function of the assumed R² target (sensitivity to the r2_target assumption), use `power_sensitivity` with `r2_range` and `r2_points` as described in Chapter 20.
 
 ---
 
