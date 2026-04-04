@@ -1,4 +1,4 @@
-# lattice-doe
+# Lattice DOE
 
 **Power-assured optimal experimental designs for linear and GLM models.**
 

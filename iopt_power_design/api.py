@@ -1,8 +1,8 @@
 # api.py
 # License: MIT
 """
-I-Optimal Powered Design — orchestration entry point
-=====================================================
+Lattice DOE — orchestration entry point
+======================================
 
 This module exposes a single public function:
 

@@ -53,7 +53,7 @@ def create_app() -> FastAPI:
         logger.info("lattice-api shutting down.")
 
     app = FastAPI(
-        title="lattice-doe API",
+        title="Lattice DOE API",
         version=__version__,
         description=(
             "I-optimal experimental designs with power assurance — REST API.\n\n"

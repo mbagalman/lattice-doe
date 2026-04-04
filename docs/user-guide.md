@@ -3007,8 +3007,8 @@ The default image installs all extras (`[app]`, `[report]`, `[extras]`) so the f
 
 ```dockerfile
 # Add to Dockerfile before the pip install step
-COPY iopt_power_design-*.whl /tmp/
-RUN pip install /tmp/iopt_power_design-*.whl[app,report,extras]
+COPY lattice_doe-*.whl /tmp/
+RUN pip install /tmp/lattice_doe-*.whl[app,report,extras]
 ```
 
 **Running with a service account for Sheets.** Mount the credentials file at runtime rather than baking it into the image:
@@ -7203,7 +7203,7 @@ report_path = generate_report(
     factors,         # factor specification dict
     power_cfg,       # PowerContrastConfig or PowerR2Config
     output_path,     # str or Path — file destination
-    title="I-Optimal Design Report",   # optional heading
+    title="Lattice DOE Report",   # optional heading
     include_power_curve=True,          # embed a power-vs-n figure
     design_rows_shown=30,              # max rows in the design table
 )
@@ -8037,10 +8037,10 @@ The most common issues:
 - **API not enabled.** The Google Sheets API and Google Drive API must both be enabled in the Google Cloud project associated with the service account.
 
 ```python
-from iopt_power_design.sheets import run_from_sheet
+from iopt_power_design.sheets import sheets_run
 
-result = run_from_sheet(
-    spreadsheet_id="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
+result = sheets_run(
+    spreadsheet_url_or_id="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
     credentials="service_account.json",   # or None for OAuth2
 )
 ```
@@ -8802,7 +8802,7 @@ Best for: distributed teams, organisations that use Google Workspace, collaborat
 
 Chapter references: §12 (Sheets interface).
 
-Install extra: `pip install "lattice-doe[extras]"` for `gspread` and `google-auth`.
+Install extra: `pip install "lattice-doe[sheets]"` for `gspread` and `google-auth`.
 
 #### Jupyter Widgets
 

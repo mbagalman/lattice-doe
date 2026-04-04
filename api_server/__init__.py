@@ -1,9 +1,9 @@
 # api_server/__init__.py
 # License: MIT
 """
-lattice-doe REST API server
-===================================
-FastAPI application exposing I-optimal DOE with power assurance over HTTP.
+Lattice DOE REST API server
+===========================
+FastAPI application exposing powered optimal design workflows over HTTP.
 
 Quick start::
 

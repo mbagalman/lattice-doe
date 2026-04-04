@@ -1,8 +1,8 @@
 # utils.py
 # License: MIT
 """
-General utilities for Power-Assured I-Optimal DOE
--------------------------------------------------
+General utilities for Lattice DOE
+---------------------------------
 
 Small, dependency-light helpers used across modules (validation, sizing, etc.).
 """
