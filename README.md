@@ -1,4 +1,4 @@
-# iopt-power-design
+# lattice-doe
 
 **Power-assured optimal experimental designs for linear and GLM models.**
 
@@ -91,7 +91,7 @@ Specify which linear combination of coefficients you want to detect and by how m
 
 ```python
 from iopt_power_design import (
-    i_optimal_powered_design,
+    find_optimal_design,
     PowerContrastConfig,
     DesignOptions,
 )
@@ -122,7 +122,7 @@ opts = DesignOptions(
     random_state=42,
 )
 
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,
@@ -173,7 +173,7 @@ power_cfg = PowerR2Config(
     lambda_mode="n",  # "n" (default) or "n_minus_p" (more conservative)
 )
 
-result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+result = find_optimal_design(formula, factors, power_cfg, opts)
 ```
 
 ---
@@ -184,17 +184,17 @@ Install with `pip install -e ".[cli]"` for YAML support, then run:
 
 ```bash
 # Generate a starter config (no installation of PyYAML needed for this step)
-iopt-design --template contrast > config.yml   # contrast mode template
-iopt-design --template r2      > config.yml   # global R² mode template
+lattice --template contrast > config.yml   # contrast mode template
+lattice --template r2      > config.yml   # global R² mode template
 
 # Generate a design
-iopt-design --config config.yml --out ./output/design
+lattice --config config.yml --out ./output/design
 
 # With Excel output and verbose logging
-iopt-design --config config.yml --out ./output/design --excel -v
+lattice --config config.yml --out ./output/design --excel -v
 
 # Validate config without running (dry run)
-iopt-design --config config.yml --dry-run
+lattice --config config.yml --dry-run
 ```
 
 **Contrast mode config (`config.yml`):**
@@ -345,14 +345,14 @@ power_cfg = PowerGLMContrastConfig(
     max_n=500,
 )
 
-result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+result = find_optimal_design(formula, factors, power_cfg, opts)
 ```
 
 Use the CLI template to get started:
 
 ```bash
-iopt-design --template glm-binomial > glm_config.yml
-iopt-design --template glm-poisson  > glm_config.yml
+lattice --template glm-binomial > glm_config.yml
+lattice --template glm-poisson  > glm_config.yml
 ```
 
 ---
@@ -432,7 +432,7 @@ iopt-design --template glm-poisson  > glm_config.yml
 
 ## Output Structure
 
-`i_optimal_powered_design(...)` returns a dict with three keys. (For multi-response designs, see `i_optimal_multiresponse_design(...)` which returns a different structure with `design`, `buckets`, `responses`, and flat summary fields.)
+`find_optimal_design(...)` returns a dict with three keys. (For multi-response designs, see `find_multiresponse_design(...)` which returns a different structure with `design`, `buckets`, `responses`, and flat summary fields.)
 
 ### `result["design_df"]` — `DataFrame`
 
@@ -722,7 +722,7 @@ Ignoring this structure and using standard OLS inflates the apparent precision o
 
 ```python
 from iopt_power_design import (
-    i_optimal_powered_design,
+    find_optimal_design,
     SplitPlotOptions,
     DesignOptions,
     PowerContrastConfig,
@@ -745,7 +745,7 @@ L, delta = contrast_from_scenarios(
 )
 power_cfg = PowerContrastConfig(L=L, delta=delta, power=0.80, sigma=1.0, max_n=200)
 
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,
@@ -827,7 +827,7 @@ Assess how power degrades as the variance ratio η grows:
 ```python
 from iopt_power_design import power_sensitivity
 
-result = i_optimal_powered_design(formula, factors, power_cfg,
+result = find_optimal_design(formula, factors, power_cfg,
     DesignOptions(split_plot=SplitPlotOptions(htc_factors=["A","B"], n_whole_plots=6, eta=1.5),
                   starts=5, random_state=42))
 
@@ -857,7 +857,7 @@ print(sens["data"])        # columns: eta, power, noncentrality_lambda
 Export design quality metrics alongside your design files:
 
 ```python
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,
@@ -895,7 +895,7 @@ pip install -e ".[report-pdf]"      # also enables PDF export via weasyprint
 from iopt_power_design import generate_report
 
 generate_report(
-    result=result,          # dict returned by i_optimal_powered_design()
+    result=result,          # dict returned by find_optimal_design()
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,
@@ -905,10 +905,10 @@ generate_report(
 
 ### Inline with the optimizer
 
-Pass `export_report_to=` directly to `i_optimal_powered_design()` to write the report immediately after the design is found:
+Pass `export_report_to=` directly to `find_optimal_design()` to write the report immediately after the design is found:
 
 ```python
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,
@@ -925,7 +925,7 @@ If report generation fails (e.g. `jinja2` not installed), the error message is s
 ### CLI
 
 ```bash
-iopt-design --config my_config.yaml --out results --html-report
+lattice --config my_config.yaml --out results --html-report
 # writes: results_report.html alongside results_design.csv, etc.
 ```
 
@@ -955,7 +955,7 @@ Connect directly to a Google Spreadsheet to read your design config and write re
 ### Install
 
 ```bash
-pip install "iopt-power-design[sheets]"
+pip install "lattice-doe[sheets]"
 ```
 
 ### Create a starter spreadsheet (once)
@@ -986,7 +986,7 @@ print(f"Achieved power = {result['report']['achieved_power']:.3f}")
 ### CLI
 
 ```bash
-iopt-design --sheets "https://docs.google.com/spreadsheets/d/…" \
+lattice --sheets "https://docs.google.com/spreadsheets/d/…" \
             --sheets-credentials service_account.json
 ```
 

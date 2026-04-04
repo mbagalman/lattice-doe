@@ -11,7 +11,7 @@ Start with Uvicorn::
 
 Or via the installed CLI entry point::
 
-    iopt-api
+    lattice-api
 
 The ``create_app`` factory pattern lets Uvicorn's ``--factory`` flag create a
 fresh app instance per worker process, which is the correct pattern for
@@ -32,7 +32,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("iopt-api")
+logger = logging.getLogger("lattice-api")
 
 
 def create_app() -> FastAPI:
@@ -48,12 +48,12 @@ def create_app() -> FastAPI:
         import numpy  # noqa: F401
         import scipy  # noqa: F401
         import patsy  # noqa: F401
-        logger.info("iopt-api v%s started.", __version__)
+        logger.info("lattice-api v%s started.", __version__)
         yield
-        logger.info("iopt-api shutting down.")
+        logger.info("lattice-api shutting down.")
 
     app = FastAPI(
-        title="iopt-power-design API",
+        title="lattice-doe API",
         version=__version__,
         description=(
             "I-optimal experimental designs with power assurance — REST API.\n\n"
@@ -96,13 +96,13 @@ def create_app() -> FastAPI:
 
 
 def run() -> None:
-    """Entry point for the ``iopt-api`` CLI command."""
+    """Entry point for the ``lattice-api`` CLI command."""
     try:
         import uvicorn
     except ImportError:
         raise SystemExit(
             "uvicorn is required to run the API server. "
-            'Install with: pip install "iopt-power-design[server]"'
+            'Install with: pip install "lattice-doe[server]"'
         )
     uvicorn.run(
         "api_server.main:create_app",

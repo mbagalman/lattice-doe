@@ -249,7 +249,7 @@ def i_optimal_allocation(
     Parameters
     ----------
     formula : str
-        Patsy model formula (same one used by ``i_optimal_powered_design``).
+        Patsy model formula (same one used by ``find_optimal_design``).
     factors : dict
         Factor specification dict.  Continuous factors are ``(lo, hi)`` tuples
         or two-element numeric lists.  Categorical factors are lists with two

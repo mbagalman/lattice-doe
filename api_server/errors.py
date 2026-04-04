@@ -19,7 +19,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-logger = logging.getLogger("iopt-api")
+logger = logging.getLogger("lattice-api")
 
 
 def register_exception_handlers(app: FastAPI) -> None:

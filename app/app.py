@@ -1,5 +1,5 @@
 """
-I-Opt Power Design — Streamlit home page.
+Lattice DOE — Streamlit home page.
 
 Run with:
     streamlit run app/app.py
@@ -12,7 +12,7 @@ import streamlit as st
 from state import init_state, render_sidebar
 
 st.set_page_config(
-    page_title="I-Opt Power Design",
+    page_title="Lattice DOE",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -20,10 +20,10 @@ st.set_page_config(
 init_state()
 render_sidebar()
 
-st.title("I-Opt Power Design")
+st.title("Lattice DOE")
 st.markdown(
     "**I-optimal experimental designs with guaranteed statistical power** — "
-    "a point-and-click interface for the `iopt-power-design` package."
+    "a point-and-click interface for the `lattice-doe` package."
 )
 
 st.markdown("---")

@@ -14,7 +14,7 @@ from iopt_power_design.split_plot import (
     split_plot_df_denom,
 )
 from iopt_power_design.candidate import build_split_plot_candidate
-from iopt_power_design.api import i_optimal_powered_design
+from iopt_power_design.api import find_optimal_design
 from iopt_power_design.analysis import power_curve_by_wp, power_sensitivity
 from iopt_power_design.config import (
     PowerContrastConfig,
@@ -1427,7 +1427,7 @@ class TestSplitPlotAPI:
     # ------------------------------------------------------------------ #
 
     def test_returns_dict_with_required_keys(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
             design_opts=_sp7_opts(),
         )
@@ -1436,7 +1436,7 @@ class TestSplitPlotAPI:
         assert "report" in result
 
     def test_design_df_is_dataframe(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
             design_opts=_sp7_opts(n_wp=4, subplots_per_wp=3),
         )
@@ -1445,7 +1445,7 @@ class TestSplitPlotAPI:
     def test_design_df_row_count_is_n_wp_times_s(self):
         """design_df has n_wp * subplots_per_wp rows."""
         n_wp, s = 4, 3
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
             design_opts=_sp7_opts(n_wp=n_wp, subplots_per_wp=s),
         )
@@ -1458,7 +1458,7 @@ class TestSplitPlotAPI:
 
     def test_htc_constant_within_wp(self):
         """All sub-plots in a WP share the same HTC factor values."""
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
             design_opts=_sp7_opts(n_wp=4, subplots_per_wp=3),
         )
@@ -1475,7 +1475,7 @@ class TestSplitPlotAPI:
     # ------------------------------------------------------------------ #
 
     def test_report_contains_split_plot_dict(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
             design_opts=_sp7_opts(),
         )
@@ -1484,7 +1484,7 @@ class TestSplitPlotAPI:
         assert isinstance(sp, dict)
 
     def test_split_plot_dict_has_required_keys(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
             design_opts=_sp7_opts(),
         )
@@ -1495,7 +1495,7 @@ class TestSplitPlotAPI:
 
     def test_split_plot_dict_values_consistent(self):
         n_wp, s = 4, 3
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
             design_opts=_sp7_opts(n_wp=n_wp, subplots_per_wp=s, eta=2.0),
         )
@@ -1506,14 +1506,14 @@ class TestSplitPlotAPI:
         assert sp["n_whole_plots"] * sp["subplots_per_wp"] == sp["n_total"]
 
     def test_report_n_equals_design_rows(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
             design_opts=_sp7_opts(),
         )
         assert result["report"]["n"] == len(result["design_df"])
 
     def test_achieved_power_in_unit_interval(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
             design_opts=_sp7_opts(),
         )
@@ -1525,7 +1525,7 @@ class TestSplitPlotAPI:
     # ------------------------------------------------------------------ #
 
     def test_r2_power_cfg_works(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_r2_cfg(),
             design_opts=_sp7_opts(),
         )
@@ -1549,7 +1549,7 @@ class TestSplitPlotAPI:
             starts=1, max_iter=3, random_state=0,
         )
         with pytest.raises(ValueError, match="htc_factors"):
-            i_optimal_powered_design(
+            find_optimal_design(
                 _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
                 design_opts=bad_opts,
             )
@@ -1567,7 +1567,7 @@ class TestSplitPlotAPI:
             starts=1, max_iter=3, random_state=0,
         )
         with pytest.raises(ValueError, match="n_blocks"):
-            i_optimal_powered_design(
+            find_optimal_design(
                 _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
                 design_opts=conflict_opts,
             )
@@ -1577,7 +1577,7 @@ class TestSplitPlotAPI:
     # ------------------------------------------------------------------ #
 
     def test_non_sp_path_produces_valid_result(self):
-        """Without split_plot, i_optimal_powered_design behaves as before."""
+        """Without split_plot, find_optimal_design behaves as before."""
         import numpy as np
         ols_cfg = PowerContrastConfig(
             L=np.array([[0.0, 1.0, 0.0, 0.0]]),
@@ -1588,7 +1588,7 @@ class TestSplitPlotAPI:
             max_n=30,
             max_iter=8,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, ols_cfg,
             design_opts=DesignOptions(starts=2, max_iter=5, random_state=0),
         )
@@ -1601,7 +1601,7 @@ class TestSplitPlotAPI:
 
     @pytest.mark.parametrize("df_method", ["auto", "conservative", "sp_only"])
     def test_all_df_methods_run_without_error(self, df_method):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
             design_opts=_sp7_opts(df_method=df_method),
         )
@@ -1620,7 +1620,7 @@ class TestSplitPlotAPI:
             starts=2, max_iter=10, random_state=42, candidate_points=200,
             constraint_expr="A <= -0.3",
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(), design_opts=opts,
         )
         df = result["design_df"]
@@ -1637,7 +1637,7 @@ class TestSplitPlotAPI:
             starts=2, max_iter=10, random_state=42, candidate_points=200,
             constraint_expr="C <= 0.5",
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(), design_opts=opts,
         )
         df = result["design_df"]
@@ -1657,7 +1657,7 @@ class TestSplitPlotAPI:
             starts=2, max_iter=10, random_state=42, candidate_points=200,
             constraint_func=htc_constraint,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(), design_opts=opts,
         )
         df = result["design_df"]
@@ -1732,15 +1732,15 @@ class TestCR25HtcColMapping:
             sigma=1.0, power=0.5, alpha=0.10, max_n=60, max_iter=5,
         )
 
-        result_auto = i_optimal_powered_design(
+        result_auto = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, cfg_auto,
             design_opts=_sp7_opts(df_method="auto"),
         )
-        result_conservative = i_optimal_powered_design(
+        result_conservative = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, cfg_conservative,
             design_opts=_sp7_opts(df_method="conservative"),
         )
-        result_sp_only = i_optimal_powered_design(
+        result_sp_only = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, cfg_sp_only,
             design_opts=_sp7_opts(df_method="sp_only"),
         )
@@ -1773,11 +1773,11 @@ class TestCR25HtcColMapping:
             sigma=1.0, power=0.5, alpha=0.10, max_n=60, max_iter=5,
         )
 
-        result_auto = i_optimal_powered_design(
+        result_auto = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, cfg_auto,
             design_opts=_sp7_opts(df_method="auto"),
         )
-        result_sp_only = i_optimal_powered_design(
+        result_sp_only = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, cfg_sp_only,
             design_opts=_sp7_opts(df_method="sp_only"),
         )
@@ -1846,7 +1846,7 @@ class TestCR27CandidateSizing:
             starts=1, max_iter=5, random_state=0,
             candidate_points=500,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_r2_cfg(), design_opts=opts,
         )
         assert "design_df" in result
@@ -1860,7 +1860,7 @@ class TestCR27CandidateSizing:
             starts=1, max_iter=5, random_state=1,
             candidate_points=50,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_r2_cfg(), design_opts=opts,
         )
         assert "design_df" in result
@@ -1891,7 +1891,7 @@ class TestCR27CandidateSizing:
         )
 
         with patch("iopt_power_design.api.build_split_plot_design", side_effect=_mock_bsd):
-            i_optimal_powered_design(
+            find_optimal_design(
                 _SP7_FORMULA, _SP7_FACTORS, _sp7_r2_cfg(), design_opts=opts,
             )
 
@@ -2026,7 +2026,7 @@ class TestSplitPlotAnalysis:
     def test_eta_sweep_present_for_sp_design(self):
         """power_sensitivity returns eta_sweep DataFrame when eta_range given."""
         # Build a small SP design first
-        result_api = i_optimal_powered_design(
+        result_api = find_optimal_design(
             _SP8_FORMULA, _SP8_FACTORS, _sp8_contrast_cfg(),
             design_opts=DesignOptions(
                 split_plot=SplitPlotOptions(
@@ -2052,7 +2052,7 @@ class TestSplitPlotAnalysis:
 
     def test_eta_sweep_power_decreases_with_eta(self):
         """WP contrast power should decrease as eta increases."""
-        result_api = i_optimal_powered_design(
+        result_api = find_optimal_design(
             _SP8_FORMULA, _SP8_FACTORS, _sp8_contrast_cfg(),
             design_opts=DesignOptions(
                 split_plot=SplitPlotOptions(
@@ -2076,7 +2076,7 @@ class TestSplitPlotAnalysis:
 
     def test_eta_sweep_none_for_non_sp_design(self):
         """power_sensitivity returns eta_sweep=None when __wp_id__ not in design_df."""
-        from iopt_power_design import i_optimal_powered_design as iopt
+        from iopt_power_design import find_optimal_design as iopt
         result_ols = iopt(
             _SP8_FORMULA, _SP8_FACTORS,
             PowerContrastConfig(
@@ -2100,7 +2100,7 @@ class TestSplitPlotAnalysis:
 
     def test_power_sensitivity_ols_unchanged(self):
         """Existing power_sensitivity behavior unaffected when eta_range=None."""
-        from iopt_power_design import i_optimal_powered_design as iopt
+        from iopt_power_design import find_optimal_design as iopt
         result_ols = iopt(
             _SP8_FORMULA, _SP8_FACTORS,
             PowerContrastConfig(

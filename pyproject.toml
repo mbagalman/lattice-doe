@@ -1,7 +1,7 @@
 [project]
-name = "iopt-power-design"
+name = "lattice-doe"
 version = "0.1.0"
-description = "Power-assured optimal experimental designs for linear and GLM models."
+description = "Lattice DOE: power-assured optimal experimental designs for linear and GLM models."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Michael Bagalman", email = "Michael@ParadoxResolution.com" }]
@@ -121,10 +121,10 @@ Issues = "https://github.com/mbagalman/DOE-Idea/issues"
 
 
 [project.scripts]
-# Registers a CLI entry point; users can run `iopt-design` after installation.
-iopt-design = "iopt_power_design.cli:main"
-# REST API server entry point; users can run `iopt-api` after installation.
-iopt-api = "api_server.main:run"
+# Registers a CLI entry point; users can run `lattice` after installation.
+lattice = "iopt_power_design.cli:main"
+# REST API server entry point; users can run `lattice-api` after installation.
+lattice-api = "api_server.main:run"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

@@ -162,7 +162,7 @@ def pydantic_design_opts_to_dataclass(model: Optional[Any]) -> DesignOptions:
 
 
 # ---------------------------------------------------------------------------
-# Result serialization: i_optimal_powered_design return dict → response dict
+# Result serialization: find_optimal_design return dict → response dict
 # ---------------------------------------------------------------------------
 
 def serialize_report(report: dict) -> dict:
@@ -177,7 +177,7 @@ def serialize_report(report: dict) -> dict:
 
 
 def serialize_design_result(result: dict) -> dict:
-    """Convert an i_optimal_powered_design result dict to JSON-safe form."""
+    """Convert an find_optimal_design result dict to JSON-safe form."""
     return {
         "design_df": df_to_records(result["design_df"]),
         "buckets_df": df_to_records(result["buckets_df"]),
@@ -206,7 +206,7 @@ def pydantic_multi_cfg_to_dataclass(model: Any) -> MultiResponseOptions:
 
 
 def serialize_multiresponse_result(result: dict) -> dict:
-    """Convert an i_optimal_multiresponse_design result dict to JSON-safe form."""
+    """Convert an find_multiresponse_design result dict to JSON-safe form."""
     design_df = result.get("design")
     buckets_df = result.get("buckets")
     out: dict = {

@@ -1,7 +1,7 @@
 # excel_template.py
 # License: MIT
 """
-Excel workbook bidirectional connector for iopt-power-design
+Excel workbook bidirectional connector for lattice-doe
 =============================================================
 
 Creates a structured ``.xlsx`` workbook pre-filled with a runnable example
@@ -30,7 +30,7 @@ Output sheets
 
 Install
 -------
-  pip install "iopt-power-design[extras]"
+  pip install "lattice-doe[extras]"
 """
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ try:
 except ImportError:
     _HAS_OPENPYXL = False
 
-_INSTALL_HINT = 'pip install "iopt-power-design[extras]"'
+_INSTALL_HINT = 'pip install "lattice-doe[extras]"'
 
 # ---------------------------------------------------------------------------
 # Section sentinels (must match sheets.py constants for consistency)
@@ -811,7 +811,7 @@ def excel_run(
     Returns
     -------
     dict
-        The full result dict returned by ``i_optimal_powered_design``, with
+        The full result dict returned by ``find_optimal_design``, with
         an additional ``"excel_path"`` key containing the absolute workbook
         path.
 
@@ -824,7 +824,7 @@ def excel_run(
         malformed, or the design run fails.
     """
     _require_openpyxl()
-    from .api import i_optimal_powered_design
+    from .api import find_optimal_design
 
     path = Path(path).resolve()
     if not path.exists():
@@ -859,15 +859,15 @@ def excel_run(
     # ------------------------------------------------------------------
     try:
         if multi_cfg is not None:
-            from .api import i_optimal_multiresponse_design  # noqa: PLC0415
-            result = i_optimal_multiresponse_design(
+            from .api import find_multiresponse_design  # noqa: PLC0415
+            result = find_multiresponse_design(
                 formula=formula,
                 factors=factors,
                 multi_cfg=multi_cfg,
                 design_opts=design_opts,
             )
         else:
-            result = i_optimal_powered_design(
+            result = find_optimal_design(
                 formula=formula,
                 factors=factors,
                 power_cfg=power_cfg,

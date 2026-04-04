@@ -1,7 +1,7 @@
 # sheets.py
 # License: MIT
 """
-Google Sheets bidirectional connector for iopt-power-design
+Google Sheets bidirectional connector for lattice-doe
 ============================================================
 
 Reads a structured configuration from a Google Spreadsheet and writes the
@@ -43,7 +43,7 @@ Two auth modes are supported via the ``credentials`` parameter:
 
 Install
 -------
-  pip install "iopt-power-design[sheets]"
+  pip install "lattice-doe[sheets]"
 """
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_GSPREAD = False
 
-_INSTALL_HINT = 'pip install "iopt-power-design[sheets]"'
+_INSTALL_HINT = 'pip install "lattice-doe[sheets]"'
 
 
 # ---------------------------------------------------------------------------
@@ -692,7 +692,7 @@ def _write_results(
     spreadsheet : gspread.Spreadsheet
         Open spreadsheet object returned by ``gspread.Client.open*()``.
     result : dict
-        Return value of ``i_optimal_powered_design()``.  Expected keys:
+        Return value of ``find_optimal_design()``.  Expected keys:
         ``"report"``, ``"design_df"``, ``"buckets_df"``.
     results_sheet : str, default "Results"
         Name of the summary sheet.
@@ -966,7 +966,7 @@ _TEMPLATE_ROWS: Dict[str, List[List[str]]] = {
 
 
 def create_sheet_template(
-    title: str = "iopt-power-design template",
+    title: str = "lattice-doe template",
     credentials: Optional[str] = None,
     example: str = "r2",
     share_anyone: bool = False,
@@ -986,7 +986,7 @@ def create_sheet_template(
 
     Parameters
     ----------
-    title : str, default "iopt-power-design template"
+    title : str, default "lattice-doe template"
         Title of the new Google Spreadsheet.
     credentials : str or None
         Path to a service account JSON credentials file, or ``None`` to use
@@ -1110,7 +1110,7 @@ def sheets_run(
     Returns
     -------
     dict
-        The return value of ``i_optimal_powered_design()``, with one extra
+        The return value of ``find_optimal_design()``, with one extra
         key added:
 
         ``"spreadsheet_url"``
@@ -1180,16 +1180,16 @@ def sheets_run(
     # ------------------------------------------------------------------
     try:
         if multi_cfg is not None:
-            from .api import i_optimal_multiresponse_design  # noqa: PLC0415
-            result: Dict[str, Any] = i_optimal_multiresponse_design(
+            from .api import find_multiresponse_design  # noqa: PLC0415
+            result: Dict[str, Any] = find_multiresponse_design(
                 formula=formula,
                 factors=factors,
                 multi_cfg=multi_cfg,
                 design_opts=design_opts,
             )
         else:
-            from .api import i_optimal_powered_design  # noqa: PLC0415
-            result = i_optimal_powered_design(
+            from .api import find_optimal_design  # noqa: PLC0415
+            result = find_optimal_design(
                 formula=formula,
                 factors=factors,
                 power_cfg=power_cfg,

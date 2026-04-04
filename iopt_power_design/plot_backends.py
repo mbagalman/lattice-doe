@@ -17,7 +17,7 @@ __all__ = [
 
 _INSTALL_HINT = (
     'plotly is required for plot_backend="plotly". '
-    'Install it with: pip install "iopt-power-design[viz]"'
+    'Install it with: pip install "lattice-doe[viz]"'
 )
 
 

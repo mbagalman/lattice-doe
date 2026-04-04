@@ -20,7 +20,7 @@ Create a small script and run it with `python your_script.py`.
 
 ```python
 from iopt_power_design import (
-    i_optimal_powered_design,
+    find_optimal_design,
     PowerContrastConfig,
     DesignOptions,
 )
@@ -49,7 +49,7 @@ opts = DesignOptions(
     random_state=42,    # must be an int
 )
 
-result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+result = find_optimal_design(formula, factors, power_cfg, opts)
 
 print("n:", result["report"]["n"])
 print("achieved_power:", round(result["report"]["achieved_power"], 4))
@@ -67,10 +67,10 @@ Generate a starter config and run:
 
 ```bash
 # Print a commented template and save it to a file
-iopt-design --template contrast > quickstart.yaml
+lattice --template contrast > quickstart.yaml
 
 # Edit quickstart.yaml as needed, then generate the design
-iopt-design --config quickstart.yaml --out quickstart
+lattice --config quickstart.yaml --out quickstart
 ```
 
 Outputs:
@@ -83,8 +83,8 @@ Outputs:
 1. Compare criteria (`"I"`, `"D"`, `"A"`): use `compare_criteria(...)`.
 2. Add runs to an existing design: use `augment_design(...)`.
 3. Sensitivity and MDE checks: use `power_sensitivity(...)` and `min_detectable_effect(...)`.
-4. **GLM responses** (binomial/Poisson): swap `PowerContrastConfig` for `PowerGLMContrastConfig` and set `family`/`baseline`. See `iopt-design --template glm-binomial` for a full YAML starter.
-5. **Multi-response designs**: use `i_optimal_multiresponse_design(...)` with `MultiResponseOptions` to power several responses simultaneously under a combined rule (`"min"`, `"product"`, or `"weighted_mean"`).
+4. **GLM responses** (binomial/Poisson): swap `PowerContrastConfig` for `PowerGLMContrastConfig` and set `family`/`baseline`. See `lattice --template glm-binomial` for a full YAML starter.
+5. **Multi-response designs**: use `find_multiresponse_design(...)` with `MultiResponseOptions` to power several responses simultaneously under a combined rule (`"min"`, `"product"`, or `"weighted_mean"`).
 
 ## 5b) Export a shareable HTML report
 
@@ -99,7 +99,7 @@ pip install -e ".[report]"
 from iopt_power_design import generate_report
 
 generate_report(
-    result=result,       # dict returned by i_optimal_powered_design()
+    result=result,       # dict returned by find_optimal_design()
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,

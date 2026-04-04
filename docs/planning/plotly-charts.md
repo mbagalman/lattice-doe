@@ -206,7 +206,7 @@ remove them). For this enhancement:
 def plotly_curve_by_n(df, power_cfg, target_n):
     """Two-panel Plotly figure: power vs n (top) + design metrics (bottom)."""
     if not _HAS_PLOTLY:
-        raise ImportError("plotly is required. pip install \"iopt-power-design[viz]\"")
+        raise ImportError("plotly is required. pip install \"lattice-doe[viz]\"")
     from .config import PowerContrastConfig
     fig = make_subplots(
         rows=2, cols=1, shared_xaxes=True,

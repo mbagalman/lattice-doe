@@ -38,7 +38,7 @@ def _make_mock_gspread():
 
 
 def _minimal_result(design_df=None, buckets_df=None):
-    """Minimal result dict matching i_optimal_powered_design() output."""
+    """Minimal result dict matching find_optimal_design() output."""
     if design_df is None:
         design_df = pd.DataFrame({"x1": [0.1, 0.5], "x2": [-1.0, 1.0]})
     if buckets_df is None:
@@ -449,7 +449,7 @@ class TestSheetsRun:
              patch.object(sheets_module, "_get_client", get_client), \
              patch.object(sheets_module, "_parse_config_sheet",
                           return_value=_simple_parse_return()), \
-             patch("iopt_power_design.api.i_optimal_powered_design",
+             patch("iopt_power_design.api.find_optimal_design",
                    side_effect=RuntimeError("solver failed")):
             with pytest.raises(SheetsError, match="Design optimisation"):
                 sheets_module.sheets_run("fake-id")
@@ -462,7 +462,7 @@ class TestSheetsRun:
              patch.object(sheets_module, "_get_client", get_client), \
              patch.object(sheets_module, "_parse_config_sheet",
                           return_value=_simple_parse_return()), \
-             patch("iopt_power_design.api.i_optimal_powered_design",
+             patch("iopt_power_design.api.find_optimal_design",
                    return_value=dr), \
              patch.object(sheets_module, "_write_results"):
             result = sheets_module.sheets_run("fake-id")
@@ -477,7 +477,7 @@ class TestSheetsRun:
              patch.object(sheets_module, "_get_client", get_client), \
              patch.object(sheets_module, "_parse_config_sheet",
                           return_value=_simple_parse_return()), \
-             patch("iopt_power_design.api.i_optimal_powered_design",
+             patch("iopt_power_design.api.find_optimal_design",
                    return_value=dr), \
              patch.object(sheets_module, "_write_results"):
             result = sheets_module.sheets_run("fake-id")
@@ -495,7 +495,7 @@ class TestSheetsRun:
              patch.object(sheets_module, "_get_client", get_client), \
              patch.object(sheets_module, "_parse_config_sheet",
                           return_value=_simple_parse_return()), \
-             patch("iopt_power_design.api.i_optimal_powered_design",
+             patch("iopt_power_design.api.find_optimal_design",
                    return_value=dr), \
              patch.object(sheets_module, "_write_results",
                           side_effect=Exception("API quota exceeded")):

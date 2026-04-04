@@ -45,7 +45,7 @@ try:
 except ImportError:
     _HAS_GSPREAD = False
 
-_INSTALL_HINT = 'pip install "iopt-power-design[sheets]"'
+_INSTALL_HINT = 'pip install "lattice-doe[sheets]"'
 ```
 
 Every public function raises `ImportError` with `_INSTALL_HINT` when
@@ -149,12 +149,12 @@ exist and `clear_results=True` (default), they are cleared before writing.
 
 ### `sheets_run()` return value
 
-Returns the same dict as `i_optimal_powered_design()`:
+Returns the same dict as `find_optimal_design()`:
 ```python
 {
     "design_df": pd.DataFrame,
     "buckets_df": pd.DataFrame,
-    "report": dict,           # same report dict as i_optimal_powered_design
+    "report": dict,           # same report dict as find_optimal_design
     "spreadsheet_url": str,   # URL of the spreadsheet (added by sheets_run)
 }
 ```
@@ -175,7 +175,7 @@ This is the "starter kit" for new users.
 
 ```python
 url = create_sheet_template(
-    title="My DOE — iopt template",
+    title="My DOE — Lattice DOE template",
     credentials="service_account.json",   # or None for OAuth
     example="r2",     # "r2" or "contrast" — which example to populate
 )
@@ -193,14 +193,14 @@ Also add both packages to the `all` extras group.
 
 ### CLI integration
 
-New `--sheets URL` flag on `iopt-design`. The credentials path is read from
+New `--sheets URL` flag on `lattice`. The credentials path is read from
 `--sheets-credentials PATH` or, if absent, from the `GOOGLE_APPLICATION_CREDENTIALS`
 environment variable (standard GCP convention). Falls back to OAuth browser
 flow if neither is set.
 
 ```
-iopt-design --sheets "https://docs.google.com/spreadsheets/d/…"
-iopt-design --sheets "SPREADSHEET_ID" --sheets-credentials /path/to/sa.json
+lattice --sheets "https://docs.google.com/spreadsheets/d/…"
+lattice --sheets "SPREADSHEET_ID" --sheets-credentials /path/to/sa.json
 ```
 
 When `--sheets` is used, `--config` is not required (config is read from the
@@ -249,7 +249,7 @@ Create `iopt_power_design/sheets.py` with:
    except ImportError:
        _HAS_GSPREAD = False
 
-   _INSTALL_HINT = 'pip install "iopt-power-design[sheets]"'
+   _INSTALL_HINT = 'pip install "lattice-doe[sheets]"'
    ```
 
 3. Custom exception:
@@ -367,7 +367,7 @@ Parse the Config worksheet and return `(formula, factors, power_cfg, design_opts
      (comma-separated floats).
    - Find the row where col A == `"delta"` → col B is comma-separated floats.
    - Build `np.ndarray` L (shape: n_contrasts × p_guess; validated later by
-     `i_optimal_powered_design`) and delta.
+     `find_optimal_design`) and delta.
    - Build `PowerContrastConfig(L=L, delta=delta, alpha=..., power=..., sigma=..., max_n=...)`.
 7. Parse `[FACTORS]` section:
    - Skip the header row (first non-sentinel row).
@@ -520,7 +520,7 @@ Implement `create_sheet_template()` in `sheets.py`.
 
 ```python
 def create_sheet_template(
-    title: str = "iopt-power-design template",
+    title: str = "lattice-doe template",
     credentials: Optional[str] = None,
     example: str = "r2",
 ) -> str:
@@ -607,7 +607,7 @@ def create_sheet_template(
 8. Return `sh.url`.
 
 **Invariants:**
-- Do not call `i_optimal_powered_design` — this is a pure template setup function.
+- Do not call `find_optimal_design` — this is a pure template setup function.
 - Use `ws.update("A1", rows)` where `rows` is a list of `[col_A, col_B]` pairs.
 
 **Acceptance criteria:**
@@ -666,7 +666,7 @@ def sheets_run(
     Returns
     -------
     dict
-        Same keys as ``i_optimal_powered_design()`` plus:
+        Same keys as ``find_optimal_design()`` plus:
         - ``"spreadsheet_url"`` (str): URL of the spreadsheet.
 
     Raises
@@ -711,9 +711,9 @@ def sheets_run(
    ```
 6. Run the design:
    ```python
-   from .api import i_optimal_powered_design
+   from .api import find_optimal_design
    try:
-       result = i_optimal_powered_design(
+       result = find_optimal_design(
            formula=formula,
            factors=factors,
            power_cfg=power_cfg,
@@ -749,7 +749,7 @@ def sheets_run(
    ```
 
 **Lazy import of `api.py`:**
-Import `i_optimal_powered_design` inside `sheets_run()` (step 6 above), not at
+Import `find_optimal_design` inside `sheets_run()` (step 6 above), not at
 module level. This prevents a circular import: `api.py` does not import
 `sheets.py`, and `sheets.py` should not be in `api.py`'s import chain.
 
@@ -815,7 +815,7 @@ parser.add_argument(
     help=(
         "Google Spreadsheet URL or ID. Reads config from the 'Config' sheet "
         "and writes design results back to Results/Design/Buckets sheets. "
-        "Requires: pip install 'iopt-power-design[sheets]'"
+        "Requires: pip install 'lattice-doe[sheets]'"
     ),
 )
 parser.add_argument(
@@ -838,7 +838,7 @@ if args.sheets:
     except ImportError:
         print(
             "Error: Google Sheets support requires gspread.\n"
-            "  pip install 'iopt-power-design[sheets]'",
+            "  pip install 'lattice-doe[sheets]'",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1021,7 +1021,7 @@ class TestParseConfigSheet:
    ```
    And the CLI one-liner:
    ```
-   iopt-design --sheets "SPREADSHEET_URL" --sheets-credentials sa.json
+   lattice --sheets "SPREADSHEET_URL" --sheets-credentials sa.json
    ```
 
 **Acceptance criteria:**

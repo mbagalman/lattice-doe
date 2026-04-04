@@ -2,7 +2,7 @@
 Page 3 — Run the design and display results (Epic E, tickets E1–E6).
 
 E1  Config summary + "Generate design" button; builds power_cfg and design_opts
-    from session state; calls i_optimal_powered_design inside a spinner;
+    from session state; calls find_optimal_design inside a spinner;
     captures errors and warnings.
 E2  Report metrics card (6 st.metric columns) + "Full report" JSON expander.
 E3  Design table + CSV download.
@@ -26,12 +26,12 @@ from scipy.stats import ncf as scipy_ncf
 
 from state import init_state, render_sidebar
 
-st.set_page_config(page_title="Run & Results — I-Opt Power Design", layout="wide")
+st.set_page_config(page_title="Run & Results — Lattice DOE", layout="wide")
 init_state()
 render_sidebar()
 
 try:
-    from iopt_power_design import i_optimal_powered_design, i_optimal_multiresponse_design
+    from iopt_power_design import find_optimal_design, find_multiresponse_design
     from iopt_power_design.config import (
         DesignOptions,
         PowerContrastConfig,
@@ -390,7 +390,7 @@ if run_clicked and not _issues and _HAS_IOPT:
         with st.spinner("Searching for the optimal design\u2026"):
             if ss.get("mr_enabled", False):
                 multi_cfg = _build_multi_response_cfg(ss)
-                result = i_optimal_multiresponse_design(
+                result = find_multiresponse_design(
                     formula=formula,
                     factors=factor_spec,
                     multi_cfg=multi_cfg,
@@ -399,7 +399,7 @@ if run_clicked and not _issues and _HAS_IOPT:
                 ss["_last_power_cfg"] = None
             else:
                 power_cfg = _build_power_cfg(ss)
-                result = i_optimal_powered_design(
+                result = find_optimal_design(
                     formula=formula,
                     factors=factor_spec,
                     power_cfg=power_cfg,
@@ -670,12 +670,12 @@ with exp_cols[1]:
         st.download_button(
             "\u2b07 Excel workbook",
             data=_make_excel(design_df, buckets_df, report),
-            file_name="iopt_design.xlsx",
+            file_name="lattice_design.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
     else:
-        st.info("Install `iopt-power-design[extras]` to enable Excel export.")
+        st.info("Install `lattice-doe[extras]` to enable Excel export.")
 
 # G2 — JSON report download
 with exp_cols[2]:
@@ -684,7 +684,7 @@ with exp_cols[2]:
     st.download_button(
         "\u2b07 Report JSON",
         data=_report_json,
-        file_name="iopt_report.json",
+        file_name="lattice_report.json",
         mime="application/json",
         use_container_width=True,
         help="Download the full run report as a JSON file.",
@@ -731,7 +731,7 @@ with exp_cols[3]:
                 st.download_button(
                     "\u2b07 HTML report",
                     data=ss["_html_report_bytes"],
-                    file_name="iopt_report.html",
+                    file_name="lattice_report.html",
                     mime="text/html",
                     use_container_width=True,
                     help="Download a self-contained HTML report (opens offline in any browser).",
@@ -740,4 +740,4 @@ with exp_cols[3]:
             st.button("\u2b07 HTML report", disabled=True, use_container_width=True,
                       help="Re-run the design to generate the report.")
     else:
-        st.info('Install `iopt-power-design[report]` to enable HTML report download.')
+        st.info('Install `lattice-doe[report]` to enable HTML report download.')

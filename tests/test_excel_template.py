@@ -37,7 +37,7 @@ def _minimal_result(
     design_df: pd.DataFrame | None = None,
     buckets_df: pd.DataFrame | None = None,
 ) -> Dict[str, Any]:
-    """Minimal result dict matching i_optimal_powered_design() output."""
+    """Minimal result dict matching find_optimal_design() output."""
     if design_df is None:
         design_df = pd.DataFrame({"x1": [0.1, 0.5], "x2": [-1.0, 1.0]})
     if buckets_df is None:
@@ -397,7 +397,7 @@ class TestExcelRun:
         with tempfile.TemporaryDirectory() as td:
             p = create_excel_template(Path(td) / "test_r2.xlsx", example="r2")
             with patch(
-                "iopt_power_design.api.i_optimal_powered_design",
+                "iopt_power_design.api.find_optimal_design",
                 side_effect=RuntimeError("solver failed"),
             ):
                 with pytest.raises(ExcelError, match="Design search failed"):

@@ -37,7 +37,7 @@ def _get_jinja_env():
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "HTML report generation requires jinja2. "
-            'Install it with: pip install "iopt-power-design[report]"'
+            'Install it with: pip install "lattice-doe[report]"'
         ) from exc
 
     return Environment(
@@ -462,7 +462,7 @@ def generate_report(
     factors: dict,
     power_cfg: Any,
     output_path: str | Path,
-    title: str = "I-Optimal Design Report",
+    title: str = "Lattice DOE Report",
     include_power_curve: bool = True,
     design_rows_shown: int = 30,
 ) -> Path:
@@ -471,7 +471,7 @@ def generate_report(
     Parameters
     ----------
     result:
-        The dict returned by ``i_optimal_powered_design()``.
+        The dict returned by ``find_optimal_design()``.
     formula:
         Patsy formula string used to generate the design.
     factors:
@@ -532,7 +532,7 @@ def generate_report(
     except ImportError as exc:
         raise ImportError(
             "PDF export requires weasyprint. "
-            'Install it with: pip install "iopt-power-design[report-pdf]"'
+            'Install it with: pip install "lattice-doe[report-pdf]"'
         ) from exc
 
     WeasyprintHTML(string=html_str).write_pdf(str(out))

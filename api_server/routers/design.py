@@ -8,8 +8,8 @@ from functools import partial
 
 from fastapi import APIRouter
 
-from iopt_power_design import i_optimal_powered_design
-from iopt_power_design.api import i_optimal_multiresponse_design
+from iopt_power_design import find_optimal_design
+from iopt_power_design.api import find_multiresponse_design
 from api_server.models.design import (
     DesignRequest,
     DesignResponse,
@@ -31,7 +31,7 @@ def _sync_run_design(request: DesignRequest) -> dict:
     """Synchronous wrapper called from the thread-pool executor."""
     power_cfg = pydantic_power_cfg_to_dataclass(request.power_cfg)
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
-    result = i_optimal_powered_design(
+    result = find_optimal_design(
         formula=request.formula,
         factors=dict(request.factors),
         power_cfg=power_cfg,
@@ -63,7 +63,7 @@ def _sync_run_multiresponse_design(request: MultiResponseDesignRequest) -> dict:
     """Synchronous wrapper called from the thread-pool executor."""
     multi_cfg = pydantic_multi_cfg_to_dataclass(request.multi_cfg)
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
-    result = i_optimal_multiresponse_design(
+    result = find_multiresponse_design(
         formula=request.formula,
         factors=dict(request.factors),
         multi_cfg=multi_cfg,

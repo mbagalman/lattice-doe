@@ -20,7 +20,7 @@ from state import init_state, render_sidebar
 from components.factor_table import clear_all_factors, render_factor_table
 
 # set_page_config must be the first Streamlit call.
-st.set_page_config(page_title="Factors — I-Opt Power Design", layout="wide")
+st.set_page_config(page_title="Factors — Lattice DOE", layout="wide")
 init_state()
 render_sidebar()
 

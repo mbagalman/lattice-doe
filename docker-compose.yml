@@ -1,4 +1,4 @@
-# docker-compose.yml — one-command deployment for iopt-power-design REST API
+# docker-compose.yml — one-command deployment for lattice-doe REST API
 #
 # Quick start:
 #   docker compose up --build

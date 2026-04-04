@@ -1,7 +1,7 @@
 # tests/test_api_server.py
 # License: MIT
 """
-Tests for the iopt-power-design FastAPI REST API server.
+Tests for the lattice-doe FastAPI REST API server.
 
 Test layers
 -----------
@@ -428,7 +428,7 @@ class TestErrorHandling:
 @pytest.mark.anyio
 @pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
 class TestDesignEndpointMocked:
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_design_returns_200_with_mock(self, mock_run, client):
         mock_run.return_value = {
             "design_df": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
@@ -453,7 +453,7 @@ class TestDesignEndpointMocked:
         assert "report" in body
         assert body["report"]["n"] == 5
 
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_design_ValueError_returns_422(self, mock_run, client):
         mock_run.side_effect = ValueError("bad formula")
         r = await client.post("/design", json={
@@ -464,7 +464,7 @@ class TestDesignEndpointMocked:
         assert r.status_code == 422
         assert "bad formula" in r.json()["detail"]
 
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_design_contrast_mode(self, mock_run, client):
         mock_run.return_value = {
             "design_df": pd.DataFrame({"A": [0.1], "B": [-0.1]}),
@@ -754,7 +754,7 @@ class TestMultiResponseModels:
 class TestMultiResponseEndpoint:
     """MR-9 HTTP tests for POST /multiresponse_design."""
 
-    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    @patch("api_server.routers.design.find_multiresponse_design")
     async def test_multiresponse_returns_200_with_mock(self, mock_run, client):
         mock_run.return_value = {
             "design": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
@@ -777,7 +777,7 @@ class TestMultiResponseEndpoint:
         assert body["n"] == 10
         assert len(body["responses"]) == 2
 
-    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    @patch("api_server.routers.design.find_multiresponse_design")
     async def test_multiresponse_responses_count_matches_request(self, mock_run, client):
         mock_run.return_value = {
             "design": pd.DataFrame({"A": [0.1]}),
@@ -798,7 +798,7 @@ class TestMultiResponseEndpoint:
         body = r.json()
         assert len(body["responses"]) == len(_MR_TWO_RESPONSES)
 
-    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    @patch("api_server.routers.design.find_multiresponse_design")
     async def test_multiresponse_combination_rule_in_response(self, mock_run, client):
         mock_run.return_value = {
             "design": pd.DataFrame({"A": [0.1]}),
@@ -845,14 +845,14 @@ class TestMultiResponseEndpoint:
         })
         assert r.status_code == 422
 
-    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    @patch("api_server.routers.design.find_multiresponse_design")
     async def test_422_ValueError_from_library(self, mock_run, client):
         mock_run.side_effect = ValueError("incompatible formulas")
         r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
         assert r.status_code == 422
         assert "incompatible formulas" in r.json()["detail"]
 
-    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    @patch("api_server.routers.design.find_multiresponse_design")
     async def test_sigma_joint_roundtrips(self, mock_run, client):
         """sigma_joint list-of-lists passes through serialization without error."""
         mock_run.return_value = {
@@ -881,7 +881,7 @@ class TestMultiResponseEndpoint:
         assert passed_multi_cfg.sigma_joint is not None
         assert passed_multi_cfg.sigma_joint.shape == (2, 2)
 
-    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    @patch("api_server.routers.design.find_multiresponse_design")
     async def test_contrast_response_accepted(self, mock_run, client):
         mock_run.return_value = {
             "design": pd.DataFrame({"A": [0.1], "B": [-0.1]}),
@@ -920,7 +920,7 @@ class TestMultiResponseEndpoint:
         r = await client.post("/multiresponse_design", json=body)
         assert r.status_code == 200
 
-    @patch("api_server.routers.design.i_optimal_multiresponse_design")
+    @patch("api_server.routers.design.find_multiresponse_design")
     async def test_health_not_broken_by_mr9(self, mock_run, client):
         """GET /health still returns 200 after MR-9 is registered."""
         r = await client.get("/health")
@@ -1094,38 +1094,38 @@ class TestGLMDesignEndpointMocked:
             r["report"].update(extra)
         return r
 
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_glm_binomial_returns_200(self, mock_run, client):
         mock_run.return_value = self._mock_return()
         r = await client.post("/design", json=self._glm_body())
         assert r.status_code == 200
 
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_glm_binomial_response_has_design_df(self, mock_run, client):
         mock_run.return_value = self._mock_return()
         r = await client.post("/design", json=self._glm_body())
         assert "design_df" in r.json()
         assert len(r.json()["design_df"]) >= 1
 
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_glm_binomial_report_has_family(self, mock_run, client):
         mock_run.return_value = self._mock_return()
         r = await client.post("/design", json=self._glm_body())
         assert r.json()["report"]["family"] == "binomial"
 
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_glm_binomial_report_test_type_wald_chi2(self, mock_run, client):
         mock_run.return_value = self._mock_return()
         r = await client.post("/design", json=self._glm_body())
         assert r.json()["report"]["test_type"] == "wald_chi2"
 
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_glm_binomial_report_df2_is_none(self, mock_run, client):
         mock_run.return_value = self._mock_return()
         r = await client.post("/design", json=self._glm_body())
         assert r.json()["report"]["df2"] is None
 
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_glm_poisson_returns_200(self, mock_run, client):
         mock_run.return_value = self._mock_return({
             "family": "poisson", "link": "log", "baseline": 2.0, "glm_weight": 2.0,
@@ -1133,7 +1133,7 @@ class TestGLMDesignEndpointMocked:
         r = await client.post("/design", json=self._glm_body(_GLM_POISSON_CFG))
         assert r.status_code == 200
 
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_glm_poisson_report_has_baseline(self, mock_run, client):
         mock_run.return_value = self._mock_return({
             "family": "poisson", "link": "log", "baseline": 2.0, "glm_weight": 2.0,
@@ -1161,7 +1161,7 @@ class TestGLMDesignEndpointMocked:
         r = await client.post("/design", json=body)
         assert r.status_code == 422
 
-    @patch("api_server.routers.design.i_optimal_powered_design")
+    @patch("api_server.routers.design.find_optimal_design")
     async def test_ols_contrast_endpoint_unchanged(self, mock_run, client):
         mock_run.return_value = {
             "design_df": pd.DataFrame({"A": [0.1, -0.1]}),

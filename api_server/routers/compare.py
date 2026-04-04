@@ -64,7 +64,7 @@ def _sync_compare(request: CompareCriteriaRequest) -> Dict[str, Any]:
     response_model=CompareCriteriaResponse,
     summary="Compare I, D, and A optimality criteria",
     description=(
-        "Runs ``i_optimal_powered_design`` independently for each entry in "
+        "Runs ``find_optimal_design`` independently for each entry in "
         "``criteria`` (default: all three — I, D, A), then assembles a "
         "side-by-side summary.\n\n"
         "⚠️ This endpoint runs up to **three full design searches** sequentially. "

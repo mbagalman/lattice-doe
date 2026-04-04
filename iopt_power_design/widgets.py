@@ -1,7 +1,7 @@
 # widgets.py
 # License: MIT
 """
-Jupyter ipywidgets UI for iopt-power-design
+Jupyter ipywidgets UI for lattice-doe
 ============================================
 
 Interactive in-notebook UI: dynamic factor-entry table, sliders for
@@ -11,7 +11,7 @@ VS Code notebook.
 
 Install::
 
-    pip install "iopt-power-design[widgets]"
+    pip install "lattice-doe[widgets]"
 
 Quick start::
 
@@ -34,7 +34,7 @@ import pandas as pd
 from scipy.stats import f as scipy_f
 from scipy.stats import ncf as scipy_ncf
 
-from .api import i_optimal_powered_design
+from .api import find_optimal_design
 from .config import DesignOptions, PowerContrastConfig, PowerR2Config
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ try:
 except ImportError:
     _HAS_PLOTLY = False
 
-_INSTALL_HINT = 'pip install "iopt-power-design[widgets]"'
+_INSTALL_HINT = 'pip install "lattice-doe[widgets]"'
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +574,7 @@ class DesignWidget:
 
         # --- Assemble full layout ---
         self._layout = _widgets.VBox([
-            _widgets.HTML("<h3 style='margin:4px 0'>I-Opt Power Design</h3>"),
+            _widgets.HTML("<h3 style='margin:4px 0'>Lattice DOE</h3>"),
             self._factor_section,
             _widgets.HTML("<hr style='margin:6px 0'>"),
             self._formula_widget,
@@ -605,7 +605,7 @@ class DesignWidget:
         _ipy_display(self._layout)
 
     def get_result(self) -> Optional[dict]:
-        """Return the last successful ``i_optimal_powered_design`` result, or ``None``."""
+        """Return the last successful ``find_optimal_design`` result, or ``None``."""
         return self._result
 
     def get_design_df(self) -> Optional[pd.DataFrame]:
@@ -777,7 +777,7 @@ class DesignWidget:
             power_cfg = _build_power_cfg_from_state(state)
             design_opts = _build_design_opts_from_state(state, self._extra_do_kwargs)
 
-            result = i_optimal_powered_design(
+            result = find_optimal_design(
                 formula=formula,
                 factors=factors,
                 power_cfg=power_cfg,

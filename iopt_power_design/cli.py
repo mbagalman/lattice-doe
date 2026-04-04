@@ -1,14 +1,14 @@
 # cli.py
 # License: MIT
 """
-Command-line interface for Power-Assured I-Optimal DOE
+Command-line interface for Lattice DOE
 =====================================================
 
 Example
 -------
-$ iopt-design --config config.yml --out ./design --excel
-$ iopt-design --config config.yml --dry-run
-$ iopt-design --config config.yml -v
+$ lattice --config config.yml --out ./design --excel
+$ lattice --config config.yml --dry-run
+$ lattice --config config.yml -v
 
 Config schema (YAML/JSON)
 -------------------------
@@ -61,7 +61,7 @@ except Exception:  # pragma: no cover - optional dep
 
 import pandas as pd
 
-from .api import i_optimal_powered_design, i_optimal_multiresponse_design
+from .api import find_optimal_design, find_multiresponse_design
 from .config import (
     PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
     DesignOptions, SplitPlotOptions,
@@ -70,7 +70,7 @@ from .config import (
 from .contrasts import contrast_from_scenarios
 from ._request_builder import build_power_cfg, build_design_opts
 
-logger = logging.getLogger("iopt-design")
+logger = logging.getLogger("lattice")
 
 
 # -------------------------
@@ -438,8 +438,8 @@ def _make_design_opts(cfg: Dict[str, Any]) -> DesignOptions:
 # -------------------------
 
 _TEMPLATE_CONTRAST = """\
-# iopt-design config — contrast mode
-# Generate with: iopt-design --template contrast > config.yml
+# lattice config — contrast mode
+# Generate with: lattice --template contrast > config.yml
 
 formula: "~ 1 + A + B + A:B"
 
@@ -508,8 +508,8 @@ output:
 """
 
 _TEMPLATE_R2 = """\
-# iopt-design config — global R² mode
-# Generate with: iopt-design --template r2 > config.yml
+# lattice config — global R² mode
+# Generate with: lattice --template r2 > config.yml
 
 formula: "~ 1 + A + B + A:B"
 
@@ -546,8 +546,8 @@ output:
 
 
 _TEMPLATE_GLM_BINOMIAL = """\
-# iopt-design config — GLM binomial/logistic mode
-# Generate with: iopt-design --template glm-binomial > config.yml
+# lattice config — GLM binomial/logistic mode
+# Generate with: lattice --template glm-binomial > config.yml
 
 formula: "~ 1 + A + B + A:B"
 
@@ -592,8 +592,8 @@ output:
 """
 
 _TEMPLATE_GLM_POISSON = """\
-# iopt-design config — GLM Poisson/log mode
-# Generate with: iopt-design --template glm-poisson > config.yml
+# lattice config — GLM Poisson/log mode
+# Generate with: lattice --template glm-poisson > config.yml
 
 formula: "~ 1 + A + B + A:B"
 
@@ -654,8 +654,8 @@ def _print_template(mode: str) -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="iopt-design",
-        description="Power-assured I-optimal DOE generator",
+        prog="lattice",
+        description="Lattice DOE — power-assured optimal design generator",
     )
     parser.add_argument(
         "--config",
@@ -668,7 +668,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--html-report",
         action="store_true",
         help="Write a self-contained HTML report alongside the CSV outputs "
-             "(requires iopt-power-design[report])",
+             "(requires lattice-doe[report])",
     )
     parser.add_argument(
         "--dry-run",
@@ -694,7 +694,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         help=(
             "Google Spreadsheet URL or ID. Reads config from the 'Config' sheet "
             "and writes design results back to Results/Design/Buckets sheets. "
-            "Requires: pip install 'iopt-power-design[sheets]'"
+            "Requires: pip install 'lattice-doe[sheets]'"
         ),
     )
     parser.add_argument(
@@ -714,7 +714,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         help=(
             "Create a pre-filled Excel workbook template at PATH (.xlsx) and exit. "
             "Use --template-mode to choose 'r2' (default) or 'contrast'. "
-            "Requires: pip install 'iopt-power-design[extras]'"
+            "Requires: pip install 'lattice-doe[extras]'"
         ),
     )
     parser.add_argument(
@@ -730,7 +730,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         help=(
             "Read config from the 'Config' sheet of an existing .xlsx workbook at PATH, "
             "run the design search, and write Results/Design/Buckets sheets back. "
-            "Requires: pip install 'iopt-power-design[extras]'"
+            "Requires: pip install 'lattice-doe[extras]'"
         ),
     )
     parser.add_argument(
@@ -842,7 +842,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         except ImportError:
             print(
                 "Error: Google Sheets support requires gspread.\n"
-                "  pip install 'iopt-power-design[sheets]'",
+                "  pip install 'lattice-doe[sheets]'",
                 file=sys.stderr,
             )
             return 1
@@ -874,7 +874,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         except ImportError:
             print(
                 "Error: Excel support requires openpyxl.\n"
-                "  pip install 'iopt-power-design[extras]'",
+                "  pip install 'lattice-doe[extras]'",
                 file=sys.stderr,
             )
             return 1
@@ -893,7 +893,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         except ImportError:
             print(
                 "Error: Excel support requires openpyxl.\n"
-                "  pip install 'iopt-power-design[extras]'",
+                "  pip install 'lattice-doe[extras]'",
                 file=sys.stderr,
             )
             return 1
@@ -1006,7 +1006,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.info("Config validated. Running powered design generation...")
 
         if _is_multiresponse:
-            _mr_result = i_optimal_multiresponse_design(
+            _mr_result = find_multiresponse_design(
                 formula=formula,
                 factors=factors,
                 multi_cfg=multi_cfg,
@@ -1037,7 +1037,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             result["buckets_df"] = buckets_df
             result["report"] = report
         else:
-            result = i_optimal_powered_design(
+            result = find_optimal_design(
                 formula,
                 factors,
                 power_cfg,
@@ -1091,7 +1091,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 except ImportError:
                     logger.warning(
                         "HTML report skipped: jinja2 is not installed. "
-                        'Install it with: pip install "iopt-power-design[report]"'
+                        'Install it with: pip install "lattice-doe[report]"'
                     )
                 except Exception as _rpt_err:
                     logger.warning(f"HTML report failed: {_rpt_err}")
@@ -1145,7 +1145,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 logger.warning(f"Robustness report failed: {_rob_err}")
 
         # Pretty-print short summary (This stays as print() to stdout)
-        print("\n=== I-Optimal Powered Design ===")
+        print("\n=== Lattice DOE ===")
         for k in ("n", "p", "df_num", "df_denom", "alpha", "target_power", "achieved_power"):
             if k in report:
                 print(f"{k:>15}: {report[k]}")

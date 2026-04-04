@@ -24,7 +24,7 @@ import streamlit as st
 from state import init_state, render_sidebar
 from components.power_params import render_power_params
 
-st.set_page_config(page_title="Power Config — I-Opt Power Design", layout="wide")
+st.set_page_config(page_title="Power Config — Lattice DOE", layout="wide")
 init_state()
 render_sidebar()
 

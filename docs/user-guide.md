@@ -1,4 +1,4 @@
-# User Guide — iopt-power-design
+# User Guide — lattice-doe
 
 > **How this guide relates to other docs**
 >
@@ -173,8 +173,8 @@ pip install -e .
 
 This installs the core package with its four required dependencies and registers two command-line entry points:
 
-- `iopt-design` — the CLI for YAML-driven design generation (requires the `[cli]` extra for YAML parsing; see section 2.3)
-- `iopt-api` — the REST API server entry point (requires the `[server]` extra)
+- `lattice` — the CLI for YAML-driven design generation (requires the `[cli]` extra for YAML parsing; see section 2.3)
+- `lattice-api` — the REST API server entry point (requires the `[server]` extra)
 
 If you are setting up a fresh environment, a virtual environment is strongly recommended to keep the package's dependencies isolated from your system Python:
 
@@ -196,7 +196,7 @@ pip install -e ".[extra1,extra2,...]"
 
 | Extra | What it adds | Install when |
 |---|---|---|
-| `cli` | `pyyaml` — YAML config parsing | You want to use `iopt-design --config config.yml` |
+| `cli` | `pyyaml` — YAML config parsing | You want to use `lattice --config config.yml` |
 | `viz` | `matplotlib`, `seaborn`, `plotly` — power curve figures | You want to generate or display power curve plots |
 | `app` | `streamlit`, `plotly`, `pyyaml` — the web UI | You want to run `streamlit run app/app.py` |
 | `report` | `jinja2`, `pillow`, `kaleido` — HTML report generation | You want to call `generate_report(...)` to produce shareable HTML files |
@@ -204,7 +204,7 @@ pip install -e ".[extra1,extra2,...]"
 | `extras` | `tqdm` (progress bars), `xlsxwriter`, `openpyxl` (Excel I/O) | You want progress bars during long runs, or you use the Excel interface |
 | `sheets` | `gspread`, `google-auth` — Google Sheets client | You want to use `sheets_run(...)` or `create_sheet_template(...)` |
 | `widgets` | `ipywidgets`, `plotly` — in-notebook interactive UI | You want to call `design_widget(...)` inside a Jupyter notebook |
-| `server` | `fastapi`, `uvicorn`, `pydantic`, `httpx` — REST API | You want to run `iopt-api` to start the REST server |
+| `server` | `fastapi`, `uvicorn`, `pydantic`, `httpx` — REST API | You want to run `lattice-api` to start the REST server |
 | `all` | Everything above | You want every feature available |
 
 **Common combinations:**
@@ -249,10 +249,10 @@ This should print the current version string (e.g. `0.1.0`) without errors. If i
 To confirm the CLI is registered:
 
 ```bash
-iopt-design --help
+lattice --help
 ```
 
-You should see the help text listing `--config`, `--template`, `--out`, `--dry-run`, and related flags. If `iopt-design: command not found` is returned, your virtual environment's `bin/` directory may not be on `PATH` — activate the environment and try again.
+You should see the help text listing `--config`, `--template`, `--out`, `--dry-run`, and related flags. If `lattice: command not found` is returned, your virtual environment's `bin/` directory may not be on `PATH` — activate the environment and try again.
 
 ---
 
@@ -267,8 +267,8 @@ iopt_power_design/        # core Python package — importable as `iopt_power_de
 ├── config.py             # dataclasses: PowerContrastConfig, PowerR2Config,
 │                         #   PowerGLMContrastConfig, DesignOptions, SplitPlotOptions,
 │                         #   ResponseSpec, MultiResponseOptions
-├── api.py                # primary entry points: i_optimal_powered_design,
-│                         #   i_optimal_multiresponse_design
+├── api.py                # primary entry points: find_optimal_design,
+│                         #   find_multiresponse_design
 ├── analysis.py           # analytical utilities: power_curve_by_n, power_curve_by_effect,
 │                         #   power_sensitivity, min_detectable_effect, compare_criteria,
 │                         #   robustness_report, multiresponse_sensitivity, ...
@@ -284,7 +284,7 @@ iopt_power_design/        # core Python package — importable as `iopt_power_de
 ├── blocked.py            # blocked design utilities: balanced_block_sizes, build_blocked_design
 ├── _request_builder.py   # internal shared config builder (not part of public API)
 │
-├── cli.py                # iopt-design command-line tool
+├── cli.py                # lattice command-line tool
 ├── sheets.py             # Google Sheets interface: sheets_run, create_sheet_template
 ├── excel_template.py     # Excel interface: excel_run, create_excel_template
 ├── widgets.py            # Jupyter widgets UI: design_widget, DesignWidget
@@ -502,7 +502,7 @@ This L = [[0, 1, 0, 1]] says: the total effect being tested is `β₁ + β₃ ×
 With `power_cfg` and `DesignOptions` in hand, the call is:
 
 ```python
-from iopt_power_design import DesignOptions, i_optimal_powered_design
+from iopt_power_design import DesignOptions, find_optimal_design
 
 opts = DesignOptions(
     auto_candidate=True,  # recommended: adaptive candidate sizing
@@ -510,7 +510,7 @@ opts = DesignOptions(
     random_state=42,      # integer seed for reproducibility
 )
 
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula="~ 1 + Catalyst + Concentration + Catalyst:Concentration",
     factors={"Catalyst": ["A", "B"], "Concentration": (0.0, 2.0)},
     power_cfg=power_cfg,
@@ -579,7 +579,7 @@ power_cfg_joint = PowerContrastConfig(
 With `delta = [0.5, 0.5]`, the power calculation asks: for what n does the design achieve 80% power to jointly detect that *both* the Concentration slope and the Catalyst main effect are at least 0.5? This is a more demanding test than either single-row test alone, which is why the required n increases:
 
 ```python
-result_joint = i_optimal_powered_design(formula, factors, power_cfg_joint, opts)
+result_joint = find_optimal_design(formula, factors, power_cfg_joint, opts)
 print(result_joint["report"]["n"])           # 88
 print(result_joint["report"]["df_num"])      # 2
 print(result_joint["report"]["df_denom"])    # 84
@@ -597,7 +597,7 @@ The following script is self-contained and runs the complete contrast-mode workf
 ```python
 # chapter3_example.py
 from iopt_power_design import (
-    i_optimal_powered_design,
+    find_optimal_design,
     PowerContrastConfig,
     DesignOptions,
 )
@@ -635,7 +635,7 @@ opts = DesignOptions(
 )
 
 # ── 4. Run the design search ───────────────────────────────────────────────
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,
@@ -836,7 +836,7 @@ The following script is self-contained and runs the complete R²-mode workflow f
 ```python
 # chapter4_example.py
 from iopt_power_design import (
-    i_optimal_powered_design,
+    find_optimal_design,
     PowerR2Config,
     DesignOptions,
     compare_criteria,
@@ -873,7 +873,7 @@ opts = DesignOptions(
     criterion="D",   # D-optimal preferred for omnibus F-test goals
 )
 
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,
@@ -906,7 +906,7 @@ print(comparison["summary"][["criterion", "n", "achieved_power"]].to_string())
 power_cfg_conservative = PowerR2Config(
     r2_target=0.15, alpha=0.05, power=0.80, max_n=300, lambda_mode="n_minus_p"
 )
-result_cons = i_optimal_powered_design(formula, factors, power_cfg_conservative, opts)
+result_cons = find_optimal_design(formula, factors, power_cfg_conservative, opts)
 print()
 print(f"Conservative (n_minus_p) n: {result_cons['report']['n']}")
 ```
@@ -1099,7 +1099,7 @@ which gives p = 3 model-matrix columns: `[Intercept, Dose, PatientAge]`.
 # chapter5_binomial.py
 import numpy as np
 from iopt_power_design import (
-    i_optimal_powered_design,
+    find_optimal_design,
     PowerGLMContrastConfig,
     DesignOptions,
 )
@@ -1141,7 +1141,7 @@ opts = DesignOptions(
     random_state=42,
 )
 
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,
@@ -1191,16 +1191,16 @@ The design places all runs near the extremes of the Dose range (−1 and +1), wh
 **Using the CLI template.** The package includes a starter YAML for binomial GLM designs:
 
 ```bash
-iopt-design --template glm-binomial > dose_response.yml
+lattice --template glm-binomial > dose_response.yml
 ```
 
 This writes a commented template covering `baseline`, `family`, `L`, `delta`, and all `design` options. Edit the placeholder values for your formula and factors, then run:
 
 ```bash
-iopt-design --config dose_response.yml --out ./output/dose_response
+lattice --config dose_response.yml --out ./output/dose_response
 ```
 
-A Poisson equivalent is available at `iopt-design --template glm-poisson`.
+A Poisson equivalent is available at `lattice --template glm-poisson`.
 
 ---
 
@@ -1214,7 +1214,7 @@ Two factors are investigated in an interaction model: Temperature (normalised, �
 # chapter5_poisson.py
 import numpy as np
 from iopt_power_design import (
-    i_optimal_powered_design,
+    find_optimal_design,
     PowerGLMContrastConfig,
     DesignOptions,
 )
@@ -1256,7 +1256,7 @@ opts = DesignOptions(
     random_state=42,
 )
 
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,
@@ -1421,12 +1421,12 @@ Each response is described by a `ResponseSpec` dataclass, and the collection of 
 
 ---
 
-#### 6.4 Running `i_optimal_multiresponse_design` and reading the result
+#### 6.4 Running `find_multiresponse_design` and reading the result
 
-The function signature mirrors `i_optimal_powered_design`:
+The function signature mirrors `find_optimal_design`:
 
 ```python
-result = i_optimal_multiresponse_design(
+result = find_multiresponse_design(
     formula,     # global Patsy formula (RHS)
     factors,     # factor definitions dict
     multi_cfg,   # MultiResponseOptions
@@ -1466,7 +1466,7 @@ When using the `"min"` rule, the `"achieved_power"` at the top level equals the 
 
 ```python
 from iopt_power_design import (
-    i_optimal_multiresponse_design,
+    find_multiresponse_design,
     PowerContrastConfig,
     DesignOptions,
     ResponseSpec,
@@ -1515,7 +1515,7 @@ multi_cfg = MultiResponseOptions(
 opts = DesignOptions(auto_candidate=True, starts=5, random_state=42)
 
 # --- Run the joint design search ---
-result = i_optimal_multiresponse_design(formula, factors, multi_cfg, opts)
+result = find_multiresponse_design(formula, factors, multi_cfg, opts)
 ```
 
 **Reading the result:**
@@ -1708,7 +1708,7 @@ Geometrically: A-optimal designs look similar to D-optimal in many standard sett
 
 #### 7.2 How the criteria appear in this package
 
-Every call to `i_optimal_powered_design` (or `compare_criteria`) reports two criterion-level diagnostics in the result:
+Every call to `find_optimal_design` (or `compare_criteria`) reports two criterion-level diagnostics in the result:
 
 | Diagnostic | Description |
 |------------|-------------|
@@ -1912,14 +1912,14 @@ Two functions cover all design generation needs:
 
 ```python
 from iopt_power_design import (
-    i_optimal_powered_design,           # single response
-    i_optimal_multiresponse_design,     # two or more responses simultaneously
+    find_optimal_design,           # single response
+    find_multiresponse_design,     # two or more responses simultaneously
 )
 ```
 
 Both share the same basic call shape: formula → factors → power configuration → design options. Single-response returns `{design_df, buckets_df, report}`; multi-response returns `{design, buckets, responses, n, achieved_power, ...}`. The result dict keys are described in full in Section 8.3.
 
-The optional keyword arguments on `i_optimal_powered_design` that earlier chapters skipped:
+The optional keyword arguments on `find_optimal_design` that earlier chapters skipped:
 
 | Argument | Type | Description |
 |----------|------|-------------|
@@ -1998,7 +1998,7 @@ The Fedorov exchange algorithm is a local optimiser: it starts from a random ini
 ```python
 # script.py — required guard on Windows and macOS
 if __name__ == "__main__":
-    result = i_optimal_powered_design(
+    result = find_optimal_design(
         formula, factors, power_cfg,
         DesignOptions(starts=20, workers=4, random_state=42),
     )
@@ -2067,10 +2067,10 @@ Constraints are applied during candidate set construction, before the Fedorov ex
 
 #### 8.3 The result dict: complete field reference
 
-**Single-response result** (`i_optimal_powered_design`):
+**Single-response result** (`find_optimal_design`):
 
 ```python
-result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+result = find_optimal_design(formula, factors, power_cfg, opts)
 ```
 
 | Key | Type | Description |
@@ -2141,7 +2141,7 @@ def log_progress(report: dict) -> None:
         report.get("elapsed_sec", 0.0),
     )
 
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula, factors, power_cfg,
     DesignOptions(auto_candidate=True, starts=10, random_state=42),
     progress_callback=log_progress,
@@ -2170,7 +2170,7 @@ class TqdmCallback:
         self.bar.close()
 
 cb = TqdmCallback(max_n=power_cfg.max_n)
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula, factors, power_cfg,
     DesignOptions(auto_candidate=True, starts=10, random_state=42),
     progress_callback=cb,
@@ -2213,7 +2213,7 @@ with open("report.json", "w") as f:
 **Auto-saving the HTML report.** Pass `export_report_to` to have the package write the report in one step:
 
 ```python
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula, factors, power_cfg, opts,
     export_report_to="./output/design_report.html",
 )
@@ -2228,7 +2228,7 @@ import warnings
 try:
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+        result = find_optimal_design(formula, factors, power_cfg, opts)
 
     if w:
         for warning in w:
@@ -2265,7 +2265,7 @@ import math
 from pathlib import Path
 
 from iopt_power_design import (
-    i_optimal_powered_design,
+    find_optimal_design,
     PowerContrastConfig,
     DesignOptions,
 )
@@ -2322,7 +2322,7 @@ if __name__ == "__main__":
 
     log.info("Starting design search (starts=%d, workers=%d)…", opts.starts, opts.workers)
 
-    result = i_optimal_powered_design(
+    result = find_optimal_design(
         formula, factors, power_cfg, opts,
         export_report_to=str(OUTPUT_DIR / "report.html"),
         progress_callback=log_iteration,
@@ -2366,10 +2366,10 @@ The CLI requires PyYAML, which is bundled in the `cli` extras group:
 pip install -e ".[cli]"
 ```
 
-After installation, the `iopt-design` entry point is available in your shell:
+After installation, the `lattice` entry point is available in your shell:
 
 ```bash
-iopt-design --help
+lattice --help
 ```
 
 ---
@@ -2379,10 +2379,10 @@ iopt-design --help
 The CLI is driven by a single YAML (or JSON) config file. The fastest way to get a correct config is to print one of the four commented templates and edit it:
 
 ```bash
-iopt-design --template contrast      > contrast_config.yml
-iopt-design --template r2            > r2_config.yml
-iopt-design --template glm-binomial  > glm_binomial_config.yml
-iopt-design --template glm-poisson   > glm_poisson_config.yml
+lattice --template contrast      > contrast_config.yml
+lattice --template r2            > r2_config.yml
+lattice --template glm-binomial  > glm_binomial_config.yml
+lattice --template glm-poisson   > glm_poisson_config.yml
 ```
 
 The four templates correspond to the four power modes:
@@ -2396,10 +2396,10 @@ The four templates correspond to the four power modes:
 
 ---
 
-**Annotated contrast template.** The output of `iopt-design --template contrast` is reproduced below with explanatory annotations. Every field shown here is also valid in the other three templates.
+**Annotated contrast template.** The output of `lattice --template contrast` is reproduced below with explanatory annotations. Every field shown here is also valid in the other three templates.
 
 ```yaml
-# iopt-design config — contrast mode
+# lattice config — contrast mode
 
 formula: "~ 1 + A + B + A:B"   # Patsy RHS formula; same syntax as Python API
 
@@ -2473,7 +2473,7 @@ The `formula` and `factors` keys are required for all modes. The power specifica
 #### 9.3 Running a design
 
 ```bash
-iopt-design --config polymer.yml --out ./output/polymer
+lattice --config polymer.yml --out ./output/polymer
 ```
 
 The `--out` value is a **basename prefix** — not a directory. All output files are written alongside each other with the prefix prepended:
@@ -2490,16 +2490,16 @@ The output directory is created automatically if it does not exist.
 
 ```bash
 # Write an Excel workbook alongside the CSVs
-iopt-design --config polymer.yml --out ./output/polymer --excel
+lattice --config polymer.yml --out ./output/polymer --excel
 
 # Write a self-contained HTML report (requires pip install -e "[report]")
-iopt-design --config polymer.yml --out ./output/polymer --html-report
+lattice --config polymer.yml --out ./output/polymer --html-report
 
 # Print a compact robustness summary after the design (single-response only)
-iopt-design --config polymer.yml --out ./output/polymer --robustness-report
+lattice --config polymer.yml --out ./output/polymer --robustness-report
 
 # Verbose logging (DEBUG level)
-iopt-design --config polymer.yml --out ./output/polymer -v
+lattice --config polymer.yml --out ./output/polymer -v
 ```
 
 ---
@@ -2523,7 +2523,7 @@ All CSV and JSON outputs use UTF-8 encoding. The JSON report can be parsed direc
 Add `--dry-run` to validate the config and output path without running the design search:
 
 ```bash
-iopt-design --config polymer.yml --out ./output/polymer --dry-run
+lattice --config polymer.yml --out ./output/polymer --dry-run
 ```
 
 The dry run:
@@ -2658,7 +2658,7 @@ The constraint is applied once during candidate generation. It does not slow dow
 **Step 1 — Create the config.**
 
 ```bash
-iopt-design --template contrast > polymer_sp.yml
+lattice --template contrast > polymer_sp.yml
 ```
 
 Edit the generated file to match the study. The final `polymer_sp.yml`:
@@ -2702,7 +2702,7 @@ split_plot:
 **Step 2 — Validate before running.**
 
 ```bash
-iopt-design --config polymer_sp.yml --out ./output/polymer_sp --dry-run
+lattice --config polymer_sp.yml --out ./output/polymer_sp --dry-run
 ```
 
 Output:
@@ -2720,7 +2720,7 @@ Output:
 **Step 3 — Run the design.**
 
 ```bash
-iopt-design --config polymer_sp.yml --out ./output/polymer_sp --html-report
+lattice --config polymer_sp.yml --out ./output/polymer_sp --html-report
 ```
 
 This produces:
@@ -2745,13 +2745,13 @@ CONFIG     := polymer_sp.yml
 .PHONY: design validate clean
 
 validate:
-	iopt-design --config $(CONFIG) --out $(OUTPUT_DIR)/polymer_sp --dry-run
+	lattice --config $(CONFIG) --out $(OUTPUT_DIR)/polymer_sp --dry-run
 
 design: $(OUTPUT_DIR)/polymer_sp_design.csv
 
 $(OUTPUT_DIR)/polymer_sp_design.csv: $(CONFIG)
 	@echo "Running design generation..."
-	iopt-design --config $(CONFIG) \
+	lattice --config $(CONFIG) \
 	            --out $(OUTPUT_DIR)/polymer_sp \
 	            --html-report \
 	            --verbose
@@ -2774,11 +2774,11 @@ With this setup:
 ```yaml
 # .github/workflows/design.yml
 - name: Validate design config
-  run: iopt-design --config polymer_sp.yml --out ./output/polymer_sp --dry-run
+  run: lattice --config polymer_sp.yml --out ./output/polymer_sp --dry-run
 
 - name: Generate design
   run: |
-    iopt-design --config polymer_sp.yml \
+    lattice --config polymer_sp.yml \
                 --out ./output/polymer_sp \
                 --html-report
   # Upload the design artefacts
@@ -2908,7 +2908,7 @@ The current p (from Page 1) is shown as a reminder when entering L in matrix mod
 
 *Advanced design structures.* Two toggles appear below design options:
 
-- **Multi-response mode** — enables the responses list. When active, Page 3 calls `i_optimal_multiresponse_design` instead of `i_optimal_powered_design`. Each response gets its own power mode, σ, and contrast specification.
+- **Multi-response mode** — enables the responses list. When active, Page 3 calls `find_multiresponse_design` instead of `find_optimal_design`. Each response gets its own power mode, σ, and contrast specification.
 - **Split-plot design** — exposes `htc_factors`, `n_whole_plots`, `eta`, `subplots_per_wp`, and `df_method`. When active, the split-plot exchange algorithm is used (Chapter 15).
 
 A **Number of blocks** input beneath the advanced toggles activates blocked design mode (Chapter 16). Split-plot and blocking cannot be active simultaneously; the page warns if both are enabled.
@@ -3118,7 +3118,7 @@ This confirms that the design is appropriately powered at the specified δ = 1.0
 
 ---
 
-> **Tip — bridging UI and reproducible pipelines.** The YAML export on Page 4 produces a config that runs identically with `iopt-design --config study.yml --out ./output/study`. This makes the Streamlit UI a useful design-exploration tool even for users who ultimately prefer reproducible CLI pipelines: explore in the UI, lock in the assumptions, export the YAML, then run from the CLI for the production record.
+> **Tip — bridging UI and reproducible pipelines.** The YAML export on Page 4 produces a config that runs identically with `lattice --config study.yml --out ./output/study`. This makes the Streamlit UI a useful design-exploration tool even for users who ultimately prefer reproducible CLI pipelines: explore in the UI, lock in the assumptions, export the YAML, then run from the CLI for the production record.
 
 ---
 
@@ -3301,7 +3301,7 @@ The created workbook contains:
 
 ```bash
 # Create a contrast-mode starter workbook
-iopt-design --excel-template study_template.xlsx --template-mode contrast
+lattice --excel-template study_template.xlsx --template-mode contrast
 ```
 
 ---
@@ -3324,7 +3324,7 @@ After the call, the workbook at `study_template.xlsx` now contains three new (or
 | **Design** | Full design DataFrame (n rows × factor columns) |
 | **Buckets** | Factor-level bucket counts |
 
-The function returns the same result dict as `i_optimal_powered_design` (or `i_optimal_multiresponse_design` for multi-response configs), with an additional `"excel_path"` key containing the absolute path of the updated workbook.
+The function returns the same result dict as `find_optimal_design` (or `find_multiresponse_design` for multi-response configs), with an additional `"excel_path"` key containing the absolute path of the updated workbook.
 
 ```python
 rep = result["report"]
@@ -3335,7 +3335,7 @@ print(f"Updated workbook: {result['excel_path']}")
 **Via the CLI:**
 
 ```bash
-iopt-design --excel-run study_template.xlsx
+lattice --excel-run study_template.xlsx
 ```
 
 This is the fully no-Python workflow: create the template with `--excel-template`, fill it in Excel, run with `--excel-run`. No Python script required.
@@ -3464,7 +3464,7 @@ print(f"Workbook updated: {result['excel_path']}")
 Or equivalently from the CLI (fully no-Python):
 
 ```bash
-iopt-design --excel-run reactor_study.xlsx
+lattice --excel-run reactor_study.xlsx
 ```
 
 After the run, `reactor_study.xlsx` contains three new sheets:
@@ -3485,7 +3485,7 @@ For reference, the equivalent Python API call for the same study:
 
 ```python
 from iopt_power_design import (
-    i_optimal_powered_design,
+    find_optimal_design,
     PowerContrastConfig,
     DesignOptions,
 )
@@ -3507,11 +3507,11 @@ power_cfg = PowerContrastConfig(
 )
 opts = DesignOptions(auto_candidate=True, starts=5, random_state=42)
 
-result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+result = find_optimal_design(formula, factors, power_cfg, opts)
 print(f"n={result['report']['n']}, power={result['report']['achieved_power']:.4f}")
 ```
 
-The Excel and Python API paths produce the same design (given the same `random_state` and `starts`), because `excel_run` delegates to `i_optimal_powered_design` internally. The Excel interface is simply a structured input/output layer around the same search engine.
+The Excel and Python API paths produce the same design (given the same `random_state` and `starts`), because `excel_run` delegates to `find_optimal_design` internally. The Excel interface is simply a structured input/output layer around the same search engine.
 
 ---
 
@@ -3693,7 +3693,7 @@ result = sheets_run(
 | `buckets_sheet` | `"Buckets"` | Name of the sheet to write the bucket counts to. |
 | `clear_results` | `True` | Clear existing content in output sheets before writing. |
 
-The function returns the same result dict as `i_optimal_powered_design`, with one extra key: `"spreadsheet_url"` — the URL of the spreadsheet where results were written.
+The function returns the same result dict as `find_optimal_design`, with one extra key: `"spreadsheet_url"` — the URL of the spreadsheet where results were written.
 
 ```python
 rep = result["report"]
@@ -3706,7 +3706,7 @@ After the call, the Results, Design, and Buckets sheets in the spreadsheet are p
 **Via the CLI:**
 
 ```bash
-iopt-design --sheets "https://docs.google.com/spreadsheets/d/YOUR_ID" \
+lattice --sheets "https://docs.google.com/spreadsheets/d/YOUR_ID" \
             --sheets-credentials path/to/service_account.json
 ```
 
@@ -3826,7 +3826,7 @@ No one on the team needs a local Python installation to view or share the result
 If the protocol is revised and the Config sheet is updated, re-running the design requires only one command. In a shared team playbook or Makefile:
 
 ```bash
-iopt-design \
+lattice \
   --sheets "https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID" \
   --sheets-credentials "${GOOGLE_APPLICATION_CREDENTIALS}"
 ```
@@ -3881,7 +3881,7 @@ than production**:
 
 The widget UI supports **R² mode** and **contrast mode** only. For GLM designs,
 multi-response designs, split-plot designs with advanced options, or any
-scenario where you need programmatic post-processing, use `i_optimal_powered_design`
+scenario where you need programmatic post-processing, use `find_optimal_design`
 directly.
 
 The practical teaching workflow is:
@@ -3900,7 +3900,7 @@ The widget dependencies (`ipywidgets` ≥ 8.0 and `plotly` ≥ 5.0) are optional
 Install them with the `[widgets]` extras group:
 
 ```bash
-pip install "iopt-power-design[widgets]"
+pip install "lattice-doe[widgets]"
 ```
 
 If you are working in JupyterLab, you do not need to install any additional
@@ -3988,7 +3988,7 @@ When you click the blue **Generate design** button, the widget:
 
 1. Validates all inputs. Errors are shown in red beneath the button.
 2. Reads every widget value into a state dict.
-3. Calls `i_optimal_powered_design` with the assembled `formula`, `factors`,
+3. Calls `find_optimal_design` with the assembled `formula`, `factors`,
    `PowerR2Config` or `PowerContrastConfig`, and `DesignOptions`.
 4. On success, displays a metrics summary table, the full design matrix, the
    run buckets table (if any), and an inline Plotly power-vs-n curve.
@@ -4104,16 +4104,16 @@ print(f"n={r['n']}  power={r['achieved_power']:.4f}  λ={r['noncentrality_lambda
 
 **Cell 3 — export an HTML report**
 
-The full result dict is identical to what `i_optimal_powered_design` returns,
+The full result dict is identical to what `find_optimal_design` returns,
 so you can use `export_report_to` after the fact via the API if needed — or
 simply re-run with `export_report_to` set:
 
 ```python
-from iopt_power_design.api import i_optimal_powered_design
+from iopt_power_design.api import find_optimal_design
 from iopt_power_design.config import PowerR2Config, DesignOptions
 
 # Re-run programmatically with the parameters identified via the widget
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula="~ 1 + Price + Quality + Convenience",
     factors={
         "Price":       (0, 50),
@@ -4189,7 +4189,7 @@ try:
 except WidgetsError as e:
     print(e)
 # ipywidgets is required for the Jupyter UI. Install with:
-# pip install "iopt-power-design[widgets]"
+# pip install "lattice-doe[widgets]"
 ```
 
 You can also import `WidgetsError` from the package root:
@@ -4202,7 +4202,7 @@ from iopt_power_design import WidgetsError
 
 ### Chapter 14 — REST API: programmatic access and microservice integration
 
-The REST API server wraps the full iopt-power-design library behind a set of
+The REST API server wraps the full lattice-doe library behind a set of
 HTTP endpoints. It is the right interface when you need to call the package from
 a non-Python environment, share a single design service across a team, or
 integrate design generation into a data pipeline or scheduling system.
@@ -4230,17 +4230,17 @@ sweeps, MDE, criteria comparison, and design augmentation.
 The server dependencies (FastAPI, Uvicorn, httpx, Pydantic v2) are optional:
 
 ```bash
-pip install "iopt-power-design[server]"
+pip install "lattice-doe[server]"
 ```
 
 ---
 
 #### 14.3 Starting the server
 
-**Option A — `iopt-api` CLI entry point (recommended)**
+**Option A — `lattice-api` CLI entry point (recommended)**
 
 ```bash
-iopt-api
+lattice-api
 ```
 
 This starts Uvicorn on `0.0.0.0:8000` with a fresh app instance. Equivalent to:
@@ -4405,13 +4405,13 @@ Python `httpx` client for completeness.
 **Start the server** (in a separate terminal):
 
 ```bash
-iopt-api
+lattice-api
 ```
 
 Wait for the log line:
 
 ```
-INFO:     iopt-api v<version> started.
+INFO:     lattice-api v<version> started.
 INFO:     Uvicorn running on http://0.0.0.0:8000
 ```
 
@@ -4763,7 +4763,7 @@ design_opts = DesignOptions(
 
 **What the API does in split-plot mode**
 
-`i_optimal_powered_design` bisects over `n_whole_plots`, starting at
+`find_optimal_design` bisects over `n_whole_plots`, starting at
 `sp_opts.n_whole_plots` as the lower bound. At each WP count it builds a new
 split-plot design, evaluates GLS power, and continues until the minimum WP
 count achieving the target power is found. The returned design matrix contains
@@ -4913,12 +4913,12 @@ The BakeTime main-effect contrast is therefore `L = [[0, 0, 0, 1, 0]]`.
 **Step 2 — Run the power-assured design**
 
 ```python
-from iopt_power_design import i_optimal_powered_design
+from iopt_power_design import find_optimal_design
 from iopt_power_design.config import (
     PowerContrastConfig, DesignOptions, SplitPlotOptions
 )
 
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula="~ 1 + OvenTemp + FlourType + BakeTime + OvenTemp:BakeTime",
     factors={
         "OvenTemp":  (160, 200),
@@ -4994,7 +4994,7 @@ is small (few whole plots):
 ```python
 # Compare power under different df_method assumptions at the same n
 for method in ["auto", "conservative", "sp_only"]:
-    r2 = i_optimal_powered_design(
+    r2 = find_optimal_design(
         formula="~ 1 + OvenTemp + FlourType + BakeTime + OvenTemp:BakeTime",
         factors={
             "OvenTemp":  (160, 200),
@@ -5062,7 +5062,7 @@ output:
 ```
 
 ```bash
-iopt-design --config baking_sp.yml --out ./output/baking_sp --html-report
+lattice --config baking_sp.yml --out ./output/baking_sp --html-report
 ```
 
 ---
@@ -5075,7 +5075,7 @@ common to try several values before running an experiment:
 ```python
 print("eta sensitivity for BakeTime effect:")
 for eta in [0.5, 1.0, 2.0, 5.0]:
-    r3 = i_optimal_powered_design(
+    r3 = find_optimal_design(
         formula="~ 1 + OvenTemp + FlourType + BakeTime + OvenTemp:BakeTime",
         factors={
             "OvenTemp":  (160, 200),
@@ -5266,7 +5266,7 @@ blocked_formula("~ 1 + A + B", block_factor_name="Day")
 # "~ 1 + A + B + C(Day)"
 ```
 
-**`build_blocked_design`** — low-level function called by `i_optimal_powered_design`
+**`build_blocked_design`** — low-level function called by `find_optimal_design`
 when blocking is active. It runs independent I-optimal searches for each block
 and assembles the full design. Use this only if you need direct control over
 the within-block optimisation (e.g., if blocks have unequal candidate sets).
@@ -5287,10 +5287,10 @@ half-standard-deviation effect of B (δ = 0.5, σ = 1.0) at 80% power.
 First, compute the sample size without blocking, as a reference:
 
 ```python
-from iopt_power_design import i_optimal_powered_design
+from iopt_power_design import find_optimal_design
 from iopt_power_design.config import PowerContrastConfig, DesignOptions
 
-result_unblocked = i_optimal_powered_design(
+result_unblocked = find_optimal_design(
     formula="~ 1 + A + B",
     factors={"A": (-1.0, 1.0), "B": (-1.0, 1.0)},
     power_cfg=PowerContrastConfig(
@@ -5311,7 +5311,7 @@ print(f"Unblocked: n={r['n']}  power={r['achieved_power']:.4f}  "
 **Step 2 — Blocked design (2 days)**
 
 ```python
-result_blocked = i_optimal_powered_design(
+result_blocked = find_optimal_design(
     formula="~ 1 + A + B",
     factors={"A": (-1.0, 1.0), "B": (-1.0, 1.0)},
     power_cfg=PowerContrastConfig(
@@ -5378,7 +5378,7 @@ If the team can run only 15 experiments on Day 1 and 23 on Day 2, pass
 `block_sizes` explicitly:
 
 ```python
-result_unbalanced = i_optimal_powered_design(
+result_unbalanced = find_optimal_design(
     formula="~ 1 + A + B",
     factors={"A": (-1.0, 1.0), "B": (-1.0, 1.0)},
     power_cfg=PowerContrastConfig(
@@ -5453,7 +5453,7 @@ output:
 ```
 
 ```bash
-iopt-design --config two_day_study.yml --out ./output/two_day_study
+lattice --config two_day_study.yml --out ./output/two_day_study
 ```
 
 ---
@@ -5653,7 +5653,7 @@ assuming residual standard deviation σ = 2.
 **Setting up the unconstrained design first.**
 
 ```python
-from iopt_power_design.api import i_optimal_powered_design
+from iopt_power_design.api import find_optimal_design
 from iopt_power_design.config import DesignOptions, PowerContrastConfig
 
 formula = "A + B + A:B"
@@ -5669,7 +5669,7 @@ power_cfg = PowerContrastConfig(
 )
 
 opts_unc = DesignOptions(starts=5, random_state=42)
-res_unc = i_optimal_powered_design(formula, factors, power_cfg, opts_unc)
+res_unc = find_optimal_design(formula, factors, power_cfg, opts_unc)
 r = res_unc["report"]
 print(f"n={r['n']}  power={r['achieved_power']:.4f}  "
       f"lambda={r['noncentrality_lambda']:.4f}  "
@@ -5694,7 +5694,7 @@ opts_con = DesignOptions(
     random_state=42,
     constraint_expr="not (A > 0.5 and B > 0.5)",
 )
-res_con = i_optimal_powered_design(formula, factors, power_cfg, opts_con)
+res_con = find_optimal_design(formula, factors, power_cfg, opts_con)
 r2 = res_con["report"]
 print(f"n={r2['n']}  power={r2['achieved_power']:.4f}  "
       f"lambda={r2['noncentrality_lambda']:.4f}  "
@@ -5753,7 +5753,7 @@ opts_func = DesignOptions(
     random_state=42,
     constraint_func=safe_region,
 )
-res_func = i_optimal_powered_design(formula, factors, power_cfg, opts_func)
+res_func = find_optimal_design(formula, factors, power_cfg, opts_func)
 # → same n and power as constraint_expr version
 ```
 
@@ -5841,7 +5841,7 @@ target the informative region without redoing runs already completed.
 **When augmentation is *not* the right tool:**
 If the initial design is severely poorly placed — for example, all runs at a single factor
 setting — or if the factor structure or model has changed substantially, rebuilding with
-`i_optimal_powered_design` is preferable.
+`find_optimal_design` is preferable.
 Greedy augmentation is constrained by the existing rows and cannot recover from designs
 that have fundamental multicollinearity problems.
 
@@ -6081,7 +6081,7 @@ analysed and reported) and the gap is manageable.
 
 ### Chapter 19 — Power curves: visualising the design–power relationship
 
-`i_optimal_powered_design` answers one question: *what is the minimum n that meets
+`find_optimal_design` answers one question: *what is the minimum n that meets
 my power target?* Power curves answer the follow-up questions: *how does power
 change as n grows? as the effect gets smaller or larger? if my assumptions about
 σ turn out to be wrong?*
@@ -6184,8 +6184,8 @@ print(result["data"].to_string())
 > **Note: `target_n` vs. the solver's n.** `power_curve_by_n` evaluates n at the
 > geometric grid points you specify — here {5, 6, 8, 11, …, 55}. The first grid
 > point that crosses 80% is n = 42, so `target_n = 42`. The bisection solver in
-> `i_optimal_powered_design` searches more finely and finds n = 39.
-> Use `i_optimal_powered_design` when you need the exact minimum n; use
+> `find_optimal_design` searches more finely and finds n = 39.
+> Use `find_optimal_design` when you need the exact minimum n; use
 > `power_curve_by_n` with a denser grid (larger `n_points`) or a tighter range
 > when you want the curve detail.
 
@@ -6301,7 +6301,7 @@ print(f"MDE = {result['min_detectable_effect']:.3f}x the stated delta")
 At n = 39, the first grid point that crosses 80% power is at effect_size = 1.056 —
 meaning a true effect of 1.056 × δ = 1.056 is just detectable at 80% power with
 10 evenly spaced grid points. The exact crossing (from the full solver) is at
-δ = 1.0 (that is what `i_optimal_powered_design` was designed for), so the grid
+δ = 1.0 (that is what `find_optimal_design` was designed for), so the grid
 approximation is conservative by about 6%.
 Increasing `effect_points` narrows this gap.
 
@@ -6334,7 +6334,7 @@ glm_cfg = PowerGLMContrastConfig(
     power=0.80,
 )
 
-# Assume design_df is already built with i_optimal_powered_design
+# Assume design_df is already built with find_optimal_design
 df_baseline = power_curve_by_baseline(
     formula=formula,
     factors=factors,
@@ -6486,7 +6486,7 @@ This section brings all five curve types together for the running example
 from iopt_power_design import (
     power_curve_by_n, power_curve_by_effect,
     power_surface_2d, PowerContrastConfig, DesignOptions,
-    i_optimal_powered_design,
+    find_optimal_design,
 )
 from iopt_power_design.power_curves import power_curve_by_n as pcbn_full
 
@@ -6831,7 +6831,7 @@ experiment, they want to answer three questions:
 
 ```python
 from iopt_power_design import (
-    i_optimal_powered_design, power_sensitivity, robustness_report,
+    find_optimal_design, power_sensitivity, robustness_report,
     PowerContrastConfig, DesignOptions,
 )
 
@@ -6843,7 +6843,7 @@ power_cfg = PowerContrastConfig(
 )
 opts = DesignOptions(starts=5, random_state=42)
 
-result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+result = find_optimal_design(formula, factors, power_cfg, opts)
 design_df = result["design_df"]
 r = result["report"]
 print(f"n={r['n']}  power={r['achieved_power']:.4f}")
@@ -6938,7 +6938,7 @@ is made with clear information about the risks.
 
 ### Chapter 21 — Minimum detectable effect
 
-`i_optimal_powered_design` answers a *forward* question: given a stated effect δ,
+`find_optimal_design` answers a *forward* question: given a stated effect δ,
 what n achieves 80% power? The **minimum detectable effect (MDE)** answers the
 *inverse* question: given a fixed design with n runs, what is the smallest effect
 that achieves the target power?
@@ -7132,7 +7132,7 @@ With MDE = 1.376 at n = 24, the team has two options:
 - **Augment** using `augment_design` (Chapter 18): add 15 runs to reach n = 39,
   paying the greedy penalty of ~3 extra runs (see Chapter 18), arriving at n ≈ 42
   with MDE ≈ 1.1 × δ.
-- **Rebuild** from scratch at n = 39 with `i_optimal_powered_design`: achieves
+- **Rebuild** from scratch at n = 39 with `find_optimal_design`: achieves
   MDE ≈ 1.075 × δ — marginally better than augmentation, and 3 fewer runs.
 
 If the 24 runs have already been collected and analysed, augmentation preserves
@@ -7165,7 +7165,7 @@ noncentrality parameter λ, and degrees of freedom (numerator and denominator).
 **Design table.** The first `design_rows_shown` rows of the design DataFrame
 (default: up to 30 rows). A note is shown when the full design has more rows.
 
-**Buckets table.** The `buckets_df` summary from `i_optimal_powered_design`,
+**Buckets table.** The `buckets_df` summary from `find_optimal_design`,
 showing run-count groupings.
 
 **Diagnostics.** Any metrics from the `report` dict that were recorded during
@@ -7182,13 +7182,13 @@ internet connection required.
 **Installing the dependency.** HTML report generation requires `jinja2`:
 
 ```bash
-pip install "iopt-power-design[report]"
+pip install "lattice-doe[report]"
 ```
 
 PDF output additionally requires `weasyprint`:
 
 ```bash
-pip install "iopt-power-design[report-pdf]"
+pip install "lattice-doe[report-pdf]"
 ```
 
 **Signature:**
@@ -7198,7 +7198,7 @@ from iopt_power_design import generate_report
 from pathlib import Path
 
 report_path = generate_report(
-    result,          # dict returned by i_optimal_powered_design
+    result,          # dict returned by find_optimal_design
     formula,         # Patsy formula string
     factors,         # factor specification dict
     power_cfg,       # PowerContrastConfig or PowerR2Config
@@ -7222,11 +7222,11 @@ report_path = generate_report(
 **Returns** the resolved `pathlib.Path` of the written file.
 
 **`export_report_to` shortcut.**
-Pass `export_report_to` directly to `i_optimal_powered_design` to generate the
+Pass `export_report_to` directly to `find_optimal_design` to generate the
 report as part of the design call:
 
 ```python
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula, factors, power_cfg, design_opts,
     export_report_to="my_design_report.html",
 )
@@ -7287,7 +7287,7 @@ dependencies (Cairo, Pango) that vary by operating system.
 
 ```python
 from iopt_power_design import (
-    i_optimal_powered_design, PowerContrastConfig, DesignOptions,
+    find_optimal_design, PowerContrastConfig, DesignOptions,
 )
 
 formula  = "A + B + A:B"
@@ -7298,7 +7298,7 @@ power_cfg = PowerContrastConfig(
 )
 opts = DesignOptions(starts=5, random_state=42)
 
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula, factors, power_cfg, opts,
     export_report_to="design_report.html",
 )
@@ -7336,7 +7336,7 @@ and sigma assumptions, making the report self-documenting.
 **Step 3 — Generate a PDF for submission.**
 
 ```python
-# Requires: pip install "iopt-power-design[report-pdf]"
+# Requires: pip install "lattice-doe[report-pdf]"
 pdf_path = generate_report(
     result, formula, factors, power_cfg,
     output_path="design_report.pdf",
@@ -7441,13 +7441,13 @@ Changing any one of these — even just adding a parallel worker — will produc
 different design.
 
 **Rule 3: store `result["report"]` alongside your output.**
-Every call to `i_optimal_powered_design` enriches `result["report"]` with the
+Every call to `find_optimal_design` enriches `result["report"]` with the
 exact parameters used during the run:
 
 ```python
 import json
 
-result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+result = find_optimal_design(formula, factors, power_cfg, opts)
 r = result["report"]
 
 # Key fields for reproducibility documentation
@@ -7511,7 +7511,7 @@ file:
 ```
 # requirements.txt
 numpy==1.26.4
-iopt-power-design>=1.0
+lattice-doe>=1.0
 ```
 
 or in `pyproject.toml`:
@@ -7520,7 +7520,7 @@ or in `pyproject.toml`:
 [project]
 dependencies = [
     "numpy==1.26.4",
-    "iopt-power-design>=1.0",
+    "lattice-doe>=1.0",
 ]
 ```
 
@@ -7554,7 +7554,7 @@ trails), the following fields from `result["report"]` should be captured:
 ```python
 import json, datetime
 
-result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+result = find_optimal_design(formula, factors, power_cfg, opts)
 
 archive = {
     "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -7597,14 +7597,14 @@ the deployment options and the resource trade-offs involved.
 | **Streamlit app** (local) | Interactive exploration on your own machine |
 | **Jupyter Widgets** | In-notebook interactive UI |
 
-All four modes run the same underlying `i_optimal_powered_design` engine.
+All four modes run the same underlying `find_optimal_design` engine.
 Choose based on your workflow: scripts for automation, Streamlit for interactive
 use with non-Python colleagues.
 
 **Starting the Streamlit app locally:**
 
 ```bash
-pip install "iopt-power-design[app]"
+pip install "lattice-doe[app]"
 streamlit run app/app.py
 # → open http://localhost:8501 in your browser
 ```
@@ -7637,10 +7637,10 @@ For integration into larger platforms (LIMS, electronic lab notebooks, custom
 front-ends), a FastAPI server is included:
 
 ```bash
-pip install "iopt-power-design[server]"
+pip install "lattice-doe[server]"
 
 # Start the API server
-iopt-api
+lattice-api
 # or equivalently:
 uvicorn api_server.main:create_app --factory --host 0.0.0.0 --port 8000
 ```
@@ -7751,10 +7751,10 @@ When using `workers > 1` in a Python script on macOS or Windows, put the call
 inside a `__main__` guard to prevent fork-bomb behaviour:
 
 ```python
-from iopt_power_design import i_optimal_powered_design, DesignOptions
+from iopt_power_design import find_optimal_design, DesignOptions
 
 if __name__ == "__main__":
-    result = i_optimal_powered_design(
+    result = find_optimal_design(
         formula, factors, power_cfg,
         DesignOptions(starts=20, workers=4, random_state=42),
     )
@@ -7900,14 +7900,14 @@ On macOS or Windows you may see a `RuntimeError`, a freeze, or spawned processes
 
 **Why it happens**
 
-Python's `multiprocessing` module uses the *fork* start method on Linux and the *spawn* method on macOS (since Python 3.8) and Windows. The *spawn* method relaunches a clean Python interpreter and re-imports your script from scratch. If your call to `i_optimal_powered_design` lives at module level — outside any `if __name__ == "__main__":` guard — the spawned workers re-execute that call, producing a recursive storm of new processes.
+Python's `multiprocessing` module uses the *fork* start method on Linux and the *spawn* method on macOS (since Python 3.8) and Windows. The *spawn* method relaunches a clean Python interpreter and re-imports your script from scratch. If your call to `find_optimal_design` lives at module level — outside any `if __name__ == "__main__":` guard — the spawned workers re-execute that call, producing a recursive storm of new processes.
 
 **Fix**
 
 Wrap any call that uses `workers > 1` in the standard guard:
 
 ```python
-from iopt_power_design import i_optimal_powered_design, DesignOptions, PowerContrastConfig
+from iopt_power_design import find_optimal_design, DesignOptions, PowerContrastConfig
 import numpy as np
 
 formula = "~ 1 + A + B + A:B"
@@ -7915,7 +7915,7 @@ factors = {"A": (-1, 1), "B": (-1, 1)}
 cfg = PowerContrastConfig(L=np.array([[0, 1, 0, 0]]), delta=1.0, sigma=2.0)
 
 if __name__ == "__main__":
-    result = i_optimal_powered_design(
+    result = find_optimal_design(
         formula, factors, cfg,
         design_opts=DesignOptions(workers=4, random_state=42),
     )
@@ -8050,14 +8050,14 @@ result = run_from_sheet(
 The Excel integration requires `openpyxl`, which is included in the `[extras]` install target:
 
 ```
-pip install "iopt-power-design[extras]"
+pip install "lattice-doe[extras]"
 ```
 
 If `openpyxl` is not installed you will see:
 
 ```
 ImportError: openpyxl is required for Excel integration.
-Install it with: pip install "iopt-power-design[extras]"
+Install it with: pip install "lattice-doe[extras]"
 ```
 
 Other common Excel issues:
@@ -8075,14 +8075,14 @@ Other common Excel issues:
 HTML report generation requires `jinja2`, included in the `[report]` extra:
 
 ```
-pip install "iopt-power-design[report]"
+pip install "lattice-doe[report]"
 ```
 
 Without it:
 
 ```
 ImportError: HTML report generation requires jinja2.
-Install it with: pip install "iopt-power-design[report]"
+Install it with: pip install "lattice-doe[report]"
 ```
 
 **PDF reports**
@@ -8090,14 +8090,14 @@ Install it with: pip install "iopt-power-design[report]"
 PDF generation additionally requires `weasyprint` and its system-level dependencies:
 
 ```
-pip install "iopt-power-design[report-pdf]"
+pip install "lattice-doe[report-pdf]"
 ```
 
 Without it:
 
 ```
 ImportError: PDF export requires weasyprint.
-Install it with: pip install "iopt-power-design[report-pdf]"
+Install it with: pip install "lattice-doe[report-pdf]"
 ```
 
 WeasyPrint renders HTML to PDF via the Cairo/Pango/GLib stack. On Linux these are usually available through the system package manager:
@@ -8116,7 +8116,7 @@ On Windows, WeasyPrint requires the GTK runtime. The [WeasyPrint documentation](
 
 - If you pass a directory path to `generate_report`, the output file is named `iopt_report.html` (or `.pdf`) inside that directory. The directory must already exist and be writable.
 - If you pass a full path with a `.pdf` extension but do not have WeasyPrint installed, the error appears at write time, not at design time. Generate the HTML first to verify the report content, then convert to PDF once the dependency is in place.
-- The `export_report_to` shortcut on `i_optimal_powered_design` follows the same path rules. Relative paths are resolved from the working directory at call time.
+- The `export_report_to` shortcut on `find_optimal_design` follows the same path rules. Relative paths are resolved from the working directory at call time.
 
 ---
 
@@ -8130,7 +8130,7 @@ All classes are dataclasses. Instantiate them with keyword arguments. Required p
 
 ### A.1 `PowerContrastConfig`
 
-Used with `i_optimal_powered_design` and the analysis functions for **contrast-based linear hypothesis tests**. See Chapters 3 and 6.
+Used with `find_optimal_design` and the analysis functions for **contrast-based linear hypothesis tests**. See Chapters 3 and 6.
 
 | Parameter | Type | Default | Description | Valid range |
 |---|---|---|---|---|
@@ -8341,14 +8341,14 @@ One entry per response in a multi-response design. Passed as a list inside `Mult
 |---|---|---|---|---|
 | `name` | `str` | — **required** | Label for this response. Used in output dict keys and reports. | Non-empty string |
 | `power_cfg` | `PowerContrastConfig` or `PowerR2Config` or `PowerGLMContrastConfig` | — **required** | Power requirements for this response. Each response may use a different mode, sigma, L, delta, etc. | — |
-| `formula` | `str` or `None` | `None` | Per-response Patsy formula. `None` uses the global formula passed to `i_optimal_multiresponse_design`. Setting per-response formulas activates the compound criterion path. | — |
+| `formula` | `str` or `None` | `None` | Per-response Patsy formula. `None` uses the global formula passed to `find_multiresponse_design`. Setting per-response formulas activates the compound criterion path. | — |
 | `weight` | `float` | `1.0` | Relative importance for `power_combination="weighted_mean"`. Weights are normalised internally. | `> 0` |
 
 ---
 
 ### A.7 `MultiResponseOptions`
 
-Top-level container for multi-response design configuration. Passed as the `multi_opts` argument to `i_optimal_multiresponse_design`. See Chapter 16.
+Top-level container for multi-response design configuration. Passed as the `multi_opts` argument to `find_multiresponse_design`. See Chapter 16.
 
 | Parameter | Type | Default | Description | Valid range |
 |---|---|---|---|---|
@@ -8750,23 +8750,23 @@ Every interface in this package calls the same underlying engine and supports th
 
 #### Python API
 
-The Python API is the most capable interface and the one all other interfaces are built on. Call `i_optimal_powered_design` (single response), `i_optimal_multiresponse_design` (multi-response), or `augment_design` (augmentation) directly in Python code. Every parameter in every configuration class is accessible. Analysis functions (`power_curve_by_n`, `power_sensitivity`, `min_detectable_effect`, `robustness_report`, `compare_criteria`) are available as standalone callables. HTML and PDF reports can be generated by passing `export_report_to` to the design function or by calling `generate_report` directly.
+The Python API is the most capable interface and the one all other interfaces are built on. Call `find_optimal_design` (single response), `find_multiresponse_design` (multi-response), or `augment_design` (augmentation) directly in Python code. Every parameter in every configuration class is accessible. Analysis functions (`power_curve_by_n`, `power_sensitivity`, `min_detectable_effect`, `robustness_report`, `compare_criteria`) are available as standalone callables. HTML and PDF reports can be generated by passing `export_report_to` to the design function or by calling `generate_report` directly.
 
 Best for: scripting, automation, post-processing results in pandas/matplotlib, integration with proprietary Python pipelines.
 
 Chapter references: §8 (Python API), §15 (reproducibility), §16 (multi-response), §17 (augmentation), §18–23 (analysis functions).
 
-#### CLI (`iopt-design`)
+#### CLI (`lattice`)
 
 The CLI reads a YAML configuration file and writes the design (CSV/Excel) and an optional HTML report to a specified output directory. It supports all design types — contrast, R², and GLM power modes; multi-response; split-plot; blocking; feasibility constraints — by setting the appropriate YAML keys. It does not expose the post-design analysis functions (power curves, sensitivity, MDE, criteria comparison, augmentation) because those require interactive parameter tuning that does not fit a file-in / file-out model.
 
-The CLI is the right choice for **reproducible pipelines**: commit the YAML config to version control, run `iopt-design --config config.yml`, and the output is fully reproducible from the config alone.
+The CLI is the right choice for **reproducible pipelines**: commit the YAML config to version control, run `lattice --config config.yml`, and the output is fully reproducible from the config alone.
 
 Best for: CI/CD, batch production of designs, reproducible reporting pipelines.
 
 Chapter references: §8.3 (CLI overview), §24.3 (deployment).
 
-Install extra: `pip install "iopt-power-design[cli]"` for YAML parsing.
+Install extra: `pip install "lattice-doe[cli]"` for YAML parsing.
 
 #### Streamlit web UI
 
@@ -8778,7 +8778,7 @@ Best for: interactive exploration, non-programmer collaborators, stakeholder dem
 
 Chapter references: §10 (Streamlit app).
 
-Install extra: `pip install "iopt-power-design[app]"`.
+Install extra: `pip install "lattice-doe[app]"`.
 
 #### Excel interface
 
@@ -8790,7 +8790,7 @@ Best for: teams with an Excel-first workflow, stakeholders who want to specify f
 
 Chapter references: §11 (Excel interface).
 
-Install extra: `pip install "iopt-power-design[extras]"` for `openpyxl`.
+Install extra: `pip install "lattice-doe[extras]"` for `openpyxl`.
 
 #### Google Sheets interface
 
@@ -8802,7 +8802,7 @@ Best for: distributed teams, organisations that use Google Workspace, collaborat
 
 Chapter references: §12 (Sheets interface).
 
-Install extra: `pip install "iopt-power-design[extras]"` for `gspread` and `google-auth`.
+Install extra: `pip install "lattice-doe[extras]"` for `gspread` and `google-auth`.
 
 #### Jupyter Widgets
 
@@ -8822,8 +8822,8 @@ Available endpoints:
 
 | Endpoint | Method | Function |
 |---|---|---|
-| `/design` | POST | `i_optimal_powered_design` (single response) |
-| `/multiresponse_design` | POST | `i_optimal_multiresponse_design` |
+| `/design` | POST | `find_optimal_design` (single response) |
+| `/multiresponse_design` | POST | `find_multiresponse_design` |
 | `/power_curve/by_n` | POST | `power_curve_by_n` |
 | `/power_curve/by_effect` | POST | `power_curve_by_effect` |
 | `/sensitivity` | POST | `power_sensitivity` |
@@ -8838,7 +8838,7 @@ Best for: integration with non-Python platforms, shared design services, microse
 
 Chapter references: §24 (REST API and deployment).
 
-Install extra: `pip install "iopt-power-design[server]"`.
+Install extra: `pip install "lattice-doe[server]"`.
 
 ---
 

@@ -19,7 +19,7 @@ import streamlit as st
 
 from state import init_state, render_sidebar
 
-st.set_page_config(page_title="Analysis — I-Opt Power Design", layout="wide")
+st.set_page_config(page_title="Analysis — Lattice DOE", layout="wide")
 init_state()
 render_sidebar()
 
@@ -312,12 +312,12 @@ with col_yaml:
         st.download_button(
             label="\u2b07\ufe0f Download YAML config",
             data=yaml_str,
-            file_name="iopt_config.yaml",
+            file_name="lattice_config.yaml",
             mime="text/yaml",
             help=(
                 "Download the current factor, formula, and power settings as a "
                 "CLI-compatible YAML file. Use with: "
-                "`iopt-design --config iopt_config.yaml`"
+                "`lattice --config lattice_config.yaml`"
             ),
         )
         with st.expander("Preview YAML"):
@@ -335,7 +335,7 @@ with col_json:
         st.download_button(
             label="\u2b07\ufe0f Download report JSON",
             data=json_bytes,
-            file_name="iopt_report.json",
+            file_name="lattice_report.json",
             mime="application/json",
             help="Download the full run report as a JSON file.",
         )

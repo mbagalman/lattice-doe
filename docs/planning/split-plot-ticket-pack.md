@@ -107,7 +107,7 @@ class DesignOptions:
     split_plot: Optional[SplitPlotOptions] = None  # new field
 
 # Top-level API — same signature, split-plot activated when split_plot is set in design_opts
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula="~ 1 + A + B + C + A:C",
     factors={"A": ("continuous", -1, 1),   # HTC
              "B": ("continuous", -1, 1),   # HTC
@@ -602,12 +602,12 @@ tolerance) to the existing OLS `contrast_power` and `global_r2_power`.
 
 ### SP-7 — Top-level API integration
 
-**Goal:** Wire split-plot design generation and power calculation into `i_optimal_powered_design`.
+**Goal:** Wire split-plot design generation and power calculation into `find_optimal_design`.
 
 **Files changed:**
 - `iopt_power_design/api.py`
 
-**Logic to add in `i_optimal_powered_design`:**
+**Logic to add in `find_optimal_design`:**
 
 ```python
 if design_opts.split_plot is not None:
@@ -663,7 +663,7 @@ report["split_plot"] = {
 ```
 
 **Acceptance criteria:**
-- `i_optimal_powered_design` with `split_plot=None` is behaviorally unchanged (all existing tests pass).
+- `find_optimal_design` with `split_plot=None` is behaviorally unchanged (all existing tests pass).
 - With `split_plot` set, returns a design where all sub-plots in each WP share HTC factor values.
 - Report contains `split_plot` sub-dict.
 - `ValueError` raised if any `htc_factor` is not in `factors`.
@@ -737,7 +737,7 @@ def power_curve_by_wp(
 **CLI additions:**
 
 ```
-iopt-design --config config.yaml \
+lattice --config config.yaml \
   --htc-factors A,B \
   --n-whole-plots 6 \
   --eta 2.0 \
@@ -771,7 +771,7 @@ split_plot:
 - Same 5 rows added to `[SETTINGS]` block with sensible defaults
 
 **Acceptance criteria:**
-- `iopt-design --htc-factors A --n-whole-plots 4 --eta 1.0 --config myconfig.yaml` runs without error.
+- `lattice --htc-factors A --n-whole-plots 4 --eta 1.0 --config myconfig.yaml` runs without error.
 - YAML config with `split_plot:` block round-trips correctly.
 - Streamlit UI shows the SP section only when toggled on.
 - Sheets/Excel connectors read and write all 5 SP fields.

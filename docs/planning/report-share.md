@@ -78,7 +78,7 @@ def generate_report(
 ### New template: `iopt_power_design/templates/report_template.html`
 
 Jinja2 template. Sections (all conditional on data availability):
-1. Header (title, generated timestamp, iopt-power-design version)
+1. Header (title, generated timestamp, lattice-doe version)
 2. Config summary (formula, factors, power mode, key params)
 3. Power metrics (n, achieved power, target power, λ, df, criterion, elapsed)
 4. Design table (up to `design_rows_shown` rows)
@@ -316,7 +316,7 @@ In `report.py`, implement `_build_power_curve_figure(result, formula, factors, p
 
 1. Attempt to import `plotly` → if available, call `power_curve_by_n(...)` with a tight n range (from `p+1` to `min(result["n"] * 2, max_n)`, 30 points), build a Plotly figure with reference lines (target power, chosen n), write to PNG bytes using `fig.to_image(format="png", width=800, height=350)`, base64-encode.
 2. If `plotly` is absent, attempt `matplotlib` similarly.
-3. If neither is available, return `None` (section shows a grey note: "Install `iopt-power-design[viz]` or `[app]` to include the power curve.").
+3. If neither is available, return `None` (section shows a grey note: "Install `lattice-doe[viz]` or `[app]` to include the power curve.").
 
 Return the base64 PNG string on success.
 
@@ -341,7 +341,7 @@ In the template, render as `<img src="data:image/png;base64,{{ power_curve_b64 }
 **Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** A1, A2, B1–B5
-**Progress note:** Complete. `_build_context()` private helper assembles the full Jinja2 context by calling all B helpers (B1–B5). `generate_report()` resolves the output path (directory → `iopt_report.html`; missing/unknown suffix → `.html`), creates parent dirs, renders the template, and writes UTF-8 HTML. All edge cases handled.
+**Progress note:** Complete. `_build_context()` private helper assembles the full Jinja2 context by calling all B helpers (B1–B5). `generate_report()` resolves the output path (directory → `lattice_report.html`; missing/unknown suffix → `.html`), creates parent dirs, renders the template, and writes UTF-8 HTML. All edge cases handled.
 
 **What to do:**
 Implement the HTML export path in `generate_report()`:
@@ -382,7 +382,7 @@ if output_path.suffix == ".pdf":
     except ImportError:
         raise ImportError(
             "PDF export requires weasyprint. "
-            "Install it with: pip install \"iopt-power-design[report-pdf]\""
+            "Install it with: pip install \"lattice-doe[report-pdf]\""
         ) from None
     html_str = env.get_template("report_template.html").render(ctx)
     WeasyprintHTML(string=html_str).write_pdf(str(output_path))
@@ -411,13 +411,13 @@ When `weasyprint` is present, also add `@media print` CSS adjustments in the tem
 **Claimed by:** Claude
 **Est.:** 1–2 hours
 **Depends on:** C1
-**Progress note:** Complete. `export_report_to: Optional[str] = None` added to `i_optimal_powered_design()` signature in `api.py`. After the diagnostics export block, calls `generate_report()` with `include_power_curve=False` (keeps API call fast). Stores written path in `result["report"]["report_path"]`; stores error string in `report_path_error` on failure — design result always returned.
+**Progress note:** Complete. `export_report_to: Optional[str] = None` added to `find_optimal_design()` signature in `api.py`. After the diagnostics export block, calls `generate_report()` with `include_power_curve=False` (keeps API call fast). Stores written path in `result["report"]["report_path"]`; stores error string in `report_path_error` on failure — design result always returned.
 
 **What to do:**
-Add `export_report_to=` parameter to `i_optimal_powered_design()` in `iopt_power_design/api.py`:
+Add `export_report_to=` parameter to `find_optimal_design()` in `iopt_power_design/api.py`:
 
 ```python
-def i_optimal_powered_design(
+def find_optimal_design(
     formula: str,
     factors: dict,
     power_cfg,
@@ -451,7 +451,7 @@ Behaviour:
 In `iopt_power_design/cli.py`, add a `--html-report` flag:
 
 ```
-iopt-design --config config.yml --out ./output/design --html-report
+lattice --config config.yml --out ./output/design --html-report
 ```
 
 Behaviour:
@@ -467,7 +467,7 @@ output:
 ```
 
 **Acceptance criteria:**
-- [ ] `iopt-design --config config.yml --out ./out/design --html-report` writes `./out/design_report.html`.
+- [ ] `lattice --config config.yml --out ./out/design --html-report` writes `./out/design_report.html`.
 - [ ] `output.html_report: true` in YAML config has the same effect.
 - [ ] The report path is printed in the CLI summary output.
 
@@ -485,10 +485,10 @@ output:
 In `app/pages/3_Run_Results.py`, add an HTML report download button in the export section (alongside the existing Design CSV, Excel, and JSON download buttons).
 
 Implementation:
-1. Check if `jinja2` is importable (`importlib.util.find_spec("jinja2")`). If not, show a grey info box: "Install `iopt-power-design[report]` to enable HTML report download."
+1. Check if `jinja2` is importable (`importlib.util.find_spec("jinja2")`). If not, show a grey info box: "Install `lattice-doe[report]` to enable HTML report download."
 2. If available, add a "Generate HTML report" button. On click:
    a. Call `generate_report(result, formula, factors, power_cfg, output_path=io.BytesIO() or tmp file)`.
-   b. Read the bytes and pass to `st.download_button("Download HTML report", data=html_bytes, file_name="iopt_report.html", mime="text/html", use_container_width=True)`.
+   b. Read the bytes and pass to `st.download_button("Download HTML report", data=html_bytes, file_name="lattice_report.html", mime="text/html", use_container_width=True)`.
 3. Since `generate_report` writes to a file path, use a `tempfile.NamedTemporaryFile` approach: write to a temp `.html` file, read it back as bytes, offer the download.
 
 **Note:** Do not attempt PDF download in the Streamlit app — weasyprint's system dependencies make this unreliable in hosted environments.
@@ -525,7 +525,7 @@ Create `tests/test_report.py` with the following test classes:
 - `test_truncation_note`: pass a result with 100 design rows and `design_rows_shown=10` — assert truncation note appears.
 
 **`TestGenerateReportAPIIntegration`**:
-- `test_export_report_to_path`: call `i_optimal_powered_design(..., export_report_to=tmp_path)` — assert `result["report"]["report_path"]` is set and the file exists.
+- `test_export_report_to_path`: call `find_optimal_design(..., export_report_to=tmp_path)` — assert `result["report"]["report_path"]` is set and the file exists.
 - `test_export_report_failure_does_not_crash`: monkey-patch `generate_report` to raise `RuntimeError`; assert the design result is still returned.
 
 **`TestPDFExportImportError`**:
@@ -552,7 +552,7 @@ Create `tests/test_report.py` with the following test classes:
 1. Add `pip install -e ".[report]"` and `pip install -e ".[report-pdf]"` to the Installation section with descriptions.
 2. Add a new `## Shareable Reports` section (after the Diagnostics section) covering:
    - `generate_report()` Python API example.
-   - `export_report_to=` in `i_optimal_powered_design`.
+   - `export_report_to=` in `find_optimal_design`.
    - CLI `--html-report` flag.
    - Note on PDF support and its `weasyprint` requirement.
 

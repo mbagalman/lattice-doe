@@ -8,7 +8,7 @@ Covers:
 - blocked_formula utility
 - DesignOptions blocked validation
 - build_blocked_design
-- i_optimal_powered_design with blocked designs (contrast and R² modes)
+- find_optimal_design with blocked designs (contrast and R² modes)
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from iopt_power_design import (
     balanced_block_sizes,
     blocked_formula,
     build_blocked_design,
-    i_optimal_powered_design,
+    find_optimal_design,
 )
 
 
@@ -315,7 +315,7 @@ class TestBuildBlockedDesign:
 
 
 # ---------------------------------------------------------------------------
-# i_optimal_powered_design with blocked designs
+# find_optimal_design with blocked designs
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -327,7 +327,7 @@ def two_factor_setup():
 
 
 class TestIOptimalPoweredDesignBlocked:
-    """Integration tests for blocked design via i_optimal_powered_design."""
+    """Integration tests for blocked design via find_optimal_design."""
 
     def test_contrast_mode_returns_block_column(self, two_factor_setup):
         factors, formula = two_factor_setup
@@ -341,7 +341,7 @@ class TestIOptimalPoweredDesignBlocked:
         design_opts = DesignOptions(
             n_blocks=3, random_state=7, starts=2, candidate_points=200,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -360,7 +360,7 @@ class TestIOptimalPoweredDesignBlocked:
         design_opts = DesignOptions(
             n_blocks=3, random_state=7, starts=2, candidate_points=200,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -380,7 +380,7 @@ class TestIOptimalPoweredDesignBlocked:
         design_opts = DesignOptions(
             n_blocks=3, random_state=7, starts=2, candidate_points=200,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -401,7 +401,7 @@ class TestIOptimalPoweredDesignBlocked:
         design_opts = DesignOptions(
             n_blocks=3, random_state=7, starts=2, candidate_points=200,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -421,7 +421,7 @@ class TestIOptimalPoweredDesignBlocked:
         design_opts = DesignOptions(
             n_blocks=3, random_state=11, starts=2, candidate_points=200,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -438,7 +438,7 @@ class TestIOptimalPoweredDesignBlocked:
         design_opts = DesignOptions(
             n_blocks=3, random_state=11, starts=2, candidate_points=200,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -456,7 +456,7 @@ class TestIOptimalPoweredDesignBlocked:
         design_opts = DesignOptions(
             n_blocks=3, random_state=11, starts=2, candidate_points=200,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -476,7 +476,7 @@ class TestIOptimalPoweredDesignBlocked:
             max_n=50, max_iter=20,
         )
         design_opts = DesignOptions(random_state=42, starts=2, candidate_points=200)
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -499,7 +499,7 @@ class TestIOptimalPoweredDesignBlocked:
             n_blocks=3, random_state=7, starts=2, candidate_points=200,
         )
         with pytest.raises(ValueError, match="p_treat"):
-            i_optimal_powered_design(
+            find_optimal_design(
                 formula=formula,
                 factors=factors,
                 power_cfg=power_cfg,
@@ -518,7 +518,7 @@ class TestIOptimalPoweredDesignBlocked:
             n_blocks=3, block_factor_name="Day",
             random_state=7, starts=2, candidate_points=200,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -539,7 +539,7 @@ class TestIOptimalPoweredDesignBlocked:
         design_opts = DesignOptions(
             n_blocks=3, random_state=7, starts=2, candidate_points=200,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -576,7 +576,7 @@ class TestCR17BlockFactorNameCollision:
             random_state=1, starts=1, candidate_points=100,
         )
         with pytest.raises(ValueError, match="block_factor_name.*collides"):
-            i_optimal_powered_design(
+            find_optimal_design(
                 formula=formula,
                 factors=factors,
                 power_cfg=power_cfg,
@@ -597,7 +597,7 @@ class TestCR17BlockFactorNameCollision:
             random_state=1, starts=1, candidate_points=100,
         )
         with pytest.raises(ValueError, match="block_factor_name.*collides"):
-            i_optimal_powered_design(
+            find_optimal_design(
                 formula=formula,
                 factors=factors,
                 power_cfg=power_cfg,
@@ -614,7 +614,7 @@ class TestCR17BlockFactorNameCollision:
             n_blocks=2, random_state=1, starts=1, candidate_points=100,
         )
         # Should not raise
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula, factors=factors, power_cfg=power_cfg,
             design_opts=design_opts,
         )
@@ -715,7 +715,7 @@ class TestCR18BlockedWithCategoricalTreatment:
         design_opts = DesignOptions(
             n_blocks=3, random_state=42, starts=1, candidate_points=150,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -738,7 +738,7 @@ class TestCR18BlockedWithCategoricalTreatment:
         design_opts = DesignOptions(
             n_blocks=4, random_state=7, starts=1, candidate_points=120,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,
@@ -765,7 +765,7 @@ class TestCR18BlockedWithCategoricalTreatment:
         design_opts = DesignOptions(
             n_blocks=2, random_state=5, starts=1, candidate_points=100,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,

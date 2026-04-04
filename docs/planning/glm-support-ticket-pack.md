@@ -363,11 +363,11 @@ elif isinstance(response.power_cfg, PowerGLMContrastConfig):
 
 ### Goal
 
-Make `i_optimal_powered_design` accept a `PowerGLMContrastConfig`, run the **existing**
+Make `find_optimal_design` accept a `PowerGLMContrastConfig`, run the **existing**
 Fedorov exchange unchanged (Phase 1 — null-based optimal design), and evaluate power via
 `glm_contrast_power`. The `report` dict gains GLM-specific keys.
 
-### Changes to `i_optimal_powered_design`
+### Changes to `find_optimal_design`
 
 1. **Input validation:** extend `_validate_api_inputs` to accept `PowerGLMContrastConfig`
    in addition to existing types.
@@ -1019,7 +1019,7 @@ glm_design_strategy: Literal["null_based", "alt_based"] = "null_based"
 - `"null_based"`: Phase 1 (no weights, identical to OLS design structure).
 - `"alt_based"`: Phase 2 (weighted Fedorov at alternative β, better for large effects).
 
-### Changes to `i_optimal_powered_design`
+### Changes to `find_optimal_design`
 
 When `isinstance(power_cfg, PowerGLMContrastConfig)` and
 `design_opts.glm_design_strategy == "alt_based"`:
@@ -1103,6 +1103,6 @@ GL-3 → GL-10 → GL-11
 ```
 
 GL-1 through GL-5 form the minimum shippable slice — a user can call
-`i_optimal_powered_design(formula, factors, PowerGLMContrastConfig(...))` from Python with
+`find_optimal_design(formula, factors, PowerGLMContrastConfig(...))` from Python with
 correct power calculations and n-search. Tickets GL-6 through GL-9 bring connectors and
 UIs up to feature parity.

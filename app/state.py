@@ -71,7 +71,7 @@ def init_state() -> None:
         "mr_sigma_joint": "",         # optional k×k covariance matrix text (blank = None)
 
         # --- Results (populated after a successful run) ---
-        "result": None,       # full dict from i_optimal_powered_design
+        "result": None,       # full dict from find_optimal_design
         "run_error": None,    # error string if the last run failed
     }
     for key, value in defaults.items():
@@ -82,7 +82,7 @@ def init_state() -> None:
 def render_sidebar() -> None:
     """Render the shared config summary sidebar. Call from every page."""
     with st.sidebar:
-        st.markdown("## I-Opt Power Design")
+        st.markdown("## Lattice DOE")
         st.markdown("---")
 
         factors = st.session_state["factors"]

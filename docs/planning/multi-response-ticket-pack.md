@@ -91,9 +91,9 @@ Power = 1 − F(F_crit; df1, df2, λ_H)               (approximate F test)
 ### Decision 1 — New top-level function vs extending the existing one
 
 **Option A:** Add `responses: Optional[List[ResponseSpec]] = None` to the existing
-`i_optimal_powered_design()`. When `responses` is not None, switch into multi-response mode.
+`find_optimal_design()`. When `responses` is not None, switch into multi-response mode.
 
-**Option B:** New function `i_optimal_multiresponse_design()` alongside the existing function.
+**Option B:** New function `find_multiresponse_design()` alongside the existing function.
 
 **Decision: Option B.** The signature of the existing function is already complex; mixing
 single- and multi-response modes via a nullable argument would make the call site confusing.
@@ -151,7 +151,7 @@ enhancement.
 
 ### Decision 6 — Report structure
 
-The result dict returned by `i_optimal_multiresponse_design` mirrors the single-response
+The result dict returned by `find_multiresponse_design` mirrors the single-response
 result plus a new `"responses"` key:
 
 ```python
@@ -194,7 +194,7 @@ class ResponseSpec:
         different mode (contrast or R²), have its own sigma, L, delta, etc.
     formula : str or None, default None
         Patsy formula for this response.  If None, the global formula
-        passed to i_optimal_multiresponse_design() is used.  Setting a
+        passed to find_multiresponse_design() is used.  Setting a
         different formula per-response activates the compound criterion path.
     weight : float, default 1.0
         Relative importance weight used when power_combination="weighted_mean".
@@ -220,7 +220,7 @@ class MultiResponseOptions:
     ----------
     responses : list of ResponseSpec
         One entry per response variable.  Must contain at least two entries
-        (use i_optimal_powered_design for single-response problems).
+        (use find_optimal_design for single-response problems).
     power_combination : {"min", "product", "weighted_mean"}, default "min"
         Rule for aggregating per-response powers into a single scalar used
         by the binary n-search.
@@ -243,7 +243,7 @@ class MultiResponseOptions:
         if len(self.responses) < 2:
             raise ValueError(
                 "MultiResponseOptions requires at least 2 ResponseSpec entries. "
-                "Use i_optimal_powered_design() for single-response problems."
+                "Use find_optimal_design() for single-response problems."
             )
         names = [r.name for r in self.responses]
         if len(names) != len(set(names)):
@@ -264,7 +264,7 @@ class MultiResponseOptions:
 
 # --- api.py / __init__.py ---
 
-def i_optimal_multiresponse_design(
+def find_multiresponse_design(
     formula: str,
     factors: Dict[str, Any],
     multi_cfg: MultiResponseOptions,
@@ -278,7 +278,7 @@ def i_optimal_multiresponse_design(
         Global Patsy formula (right-hand side, e.g. "~ 1 + A + B + A:B").
         Individual responses may override this via ResponseSpec.formula.
     factors : dict
-        Factor definitions (same format as i_optimal_powered_design).
+        Factor definitions (same format as find_optimal_design).
     multi_cfg : MultiResponseOptions
         Per-response power requirements and combination rule.
     design_opts : DesignOptions or None
@@ -528,18 +528,18 @@ The `_mr_eval(n)` inner function (used by the outer bisection in `api.py`):
 
 ### MR-4 — Shared-formula multi-response API function
 
-**Goal:** Implement `i_optimal_multiresponse_design()` for the shared-formula path (all
+**Goal:** Implement `find_multiresponse_design()` for the shared-formula path (all
 responses use the same formula and therefore the same X). This is the primary deliverable
 and the prerequisite for all downstream tickets.
 
 **Files changed:**
-- `iopt_power_design/api.py` (new function `i_optimal_multiresponse_design`)
+- `iopt_power_design/api.py` (new function `find_multiresponse_design`)
 - `iopt_power_design/__init__.py` (export new function)
 
 **What to implement:**
 
 ```python
-def i_optimal_multiresponse_design(
+def find_multiresponse_design(
     formula: str,
     factors: Dict[str, Any],
     multi_cfg: MultiResponseOptions,
@@ -577,7 +577,7 @@ split-plot `_sp_eval` pattern, calling `eval_response_power` with `split_plot_op
 
 **Acceptance criteria:**
 - With two identical `ResponseSpec` objects (same L, delta, sigma), returns the same n
-  as `i_optimal_powered_design()` called with one of those configs.
+  as `find_optimal_design()` called with one of those configs.
 - `result["responses"]` has length equal to `len(multi_cfg.responses)`.
 - Each entry in `result["responses"]` has keys `"name"`, `"power"`, `"lam"`.
 - `result["achieved_power"]` equals `combine_powers(per_response_powers, ...)`.
@@ -616,7 +616,7 @@ split-plot `_sp_eval` pattern, calling `eval_response_power` with `split_plot_op
 optimality criterion over the shared run set.
 
 **Files changed:**
-- `iopt_power_design/api.py` (extend `i_optimal_multiresponse_design` with compound path)
+- `iopt_power_design/api.py` (extend `find_multiresponse_design` with compound path)
 - `iopt_power_design/iopt_search.py` (new `build_compound_design` function)
 
 **When activated:** Any `ResponseSpec.formula` is not None and differs from the global
@@ -825,7 +825,7 @@ responses:
 power_combination: min
 ```
 
-CLI flag `--multi-response` switches the run to `i_optimal_multiresponse_design()`.
+CLI flag `--multi-response` switches the run to `find_multiresponse_design()`.
 Existing single-response YAML keys (`sigma`, `contrast`, `r2_target`) are still valid
 for single-response runs (no regression).
 
@@ -836,7 +836,7 @@ Add a "Responses" expander in `2_Power_Config.py` with:
 - Per-response sub-form: name, formula override, power mode (contrast/R²), sigma, L/delta
   or r2_target, weight.
 - Power combination radio (min / product / weighted_mean).
-- When 2+ responses configured, the "Run" button calls `i_optimal_multiresponse_design`.
+- When 2+ responses configured, the "Run" button calls `find_multiresponse_design`.
 
 **Result display (`3_Run_Results.py`):** Add a per-response power table under the main result
 showing `name | power | λ | df1 | df2` for each response.
@@ -856,7 +856,7 @@ format as existing `[CONTRAST]` / `[FACTORS]` sections).
 
 ### MR-9 — REST API extension
 
-**Goal:** Expose `i_optimal_multiresponse_design` as a new HTTP endpoint.
+**Goal:** Expose `find_multiresponse_design` as a new HTTP endpoint.
 
 **Files changed:**
 - `api_server/models/common.py` (new Pydantic models)
@@ -938,8 +938,8 @@ MR-9, plus property-based parametrized tests for correctness guarantees.
 
 **Property-based tests (parametrized, fast):**
 
-- With identical responses, `i_optimal_multiresponse_design(n=...)` power equals
-  `i_optimal_powered_design(n=...)` power.
+- With identical responses, `find_multiresponse_design(n=...)` power equals
+  `find_optimal_design(n=...)` power.
 - `combine_powers` satisfies: `min ≤ weighted_mean ≤ max(powers)` for any input.
 - Adding a third weaker response under `"min"` never decreases the required n vs two-response.
 - `power_curve_by_n_multiresponse` DataFrame has no NaN values.
@@ -1026,7 +1026,7 @@ as a separate sub-task in session 6 if time permits.
   `global_r2_power`, `contrast_power_sp`, `global_r2_power_sp`
 - **Existing config:** `iopt_power_design/config.py` — `PowerContrastConfig`,
   `PowerR2Config`, `DesignOptions`, `SplitPlotOptions`
-- **Existing API:** `iopt_power_design/api.py` — `i_optimal_powered_design`,
+- **Existing API:** `iopt_power_design/api.py` — `find_optimal_design`,
   `_sp_eval`, binary bisection loop structure
 - **Existing REST models:** `api_server/models/common.py`, `api_server/models/power.py` —
   `PowerCfgModel` discriminated union pattern

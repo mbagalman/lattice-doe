@@ -307,6 +307,66 @@ For the guide to match the intended teaching arc, it should probably include at 
 5. one advanced design-structure example (split-plot or blocking),
 6. one interface-based example per major non-Python interface.
 
+#### UG-7 - High - The REST API schema section describes the wrong payload shape for multi-response
+
+Section 14.5 says every REST request body follows the same `formula` / `factors` / `power_cfg` / `design_opts` pattern.
+
+That is true for `POST /design`, but it is not true for `POST /multiresponse_design`, which takes `multi_cfg`, not `power_cfg`.
+
+This is a high-risk documentation bug because it gives users the wrong JSON shape for one of the most structurally different endpoints.
+
+Relevant references:
+
+- `docs/user-guide.md:4307-4313`
+- `api_server/models/design.py:17-37`
+- `api_server/models/design.py:96-119`
+
+#### UG-8 - Medium - `compare_criteria` is documented as returning fields it does not actually return
+
+Early in the guide, the description of `compare_criteria` says the function returns a side-by-side summary containing `n`, achieved power, I-criterion value, and D-efficiency.
+
+The implemented summary DataFrame does not include a top-level I-criterion column. It contains:
+
+- `criterion`
+- `n`
+- `achieved_power`
+- `elapsed_sec`
+- `condition_number`
+- `d_efficiency`
+
+This matters because users may look for an `i_criterion` column that is not present.
+
+Relevant references:
+
+- `docs/user-guide.md:73`
+- `iopt_power_design/analysis.py:797-809`
+- `iopt_power_design/analysis.py:866-873`
+
+#### UG-9 - Medium - The public API guidance contradicts the guide's own normal usage pattern
+
+Section 2.5 says users should never need to import from submodules directly for ordinary use, with one exception for `power_curve_by_n`.
+
+But the guide itself later recommends `from iopt_power_design.contrasts import contrast_from_scenarios` as a normal workflow for building contrasts from scenarios. That helper is not re-exported from `iopt_power_design.__init__`.
+
+So the guidance is too absolute and will confuse readers about whether submodule imports are expected.
+
+Relevant references:
+
+- `docs/user-guide.md:331`
+- `docs/user-guide.md:474`
+- `iopt_power_design/__init__.py:56-124`
+
+#### UG-10 - Low - The CLI chapter's "full flag reference" is still incomplete
+
+The CLI chapter labels Section 9.6 as a full flag reference, but the implementation also supports `--df-method` for split-plot denominator-df behavior and the table omits it.
+
+This is a lower-severity issue than the API schema mismatch, but it still makes the chapter less trustworthy as a complete reference.
+
+Relevant references:
+
+- `docs/user-guide.md:2539-2584`
+- `iopt_power_design/cli.py:821-829`
+
 ### Recommendation for the user guide
 
 The best next step is not to add more chapter headings. It is to convert a subset of the existing outline into real instructional content.
@@ -331,3 +391,7 @@ Suggested implementation order:
 | UG-3 | Rewrite Streamlit chapter to match current UI support, especially Page 4 analysis scope | Soon | **Done** | Page 4 description narrowed: removed "by baseline" and multi-response analysis; added note that those require the Python API |
 | UG-4 | Correct the Excel chapter to describe the sentinel-based Config sheet structure | Soon | **Done** | Section 11.2 now describes single Config sheet with `[SETTINGS]`, `[CONTRAST]`, `[FACTORS]`, `[RESPONSES]` sentinels and separate output sheets |
 | UG-5 | Rebuild Appendix C interface comparison table from implemented feature support | Soon | **Done** | Corrected: Widgets/GLM ✓→—; Streamlit/Blocking —→✓ |
+| UG-7 | Fix Section 14.5 so multi-response REST requests are documented with `multi_cfg`, not the single-response `power_cfg` shape | Now | Pending | `POST /design` and `POST /multiresponse_design` do not share the same request-body schema |
+| UG-8 | Correct the documented `compare_criteria` summary fields to match the real DataFrame columns | Soon | Pending | Remove the claim that the summary includes a top-level I-criterion value unless that field is actually added |
+| UG-9 | Relax or clarify the claim that ordinary users never need submodule imports | Soon | Pending | `contrast_from_scenarios` is documented for ordinary use but is not exported from the package root |
+| UG-10 | Add `--df-method` to the CLI chapter or relabel the section as non-exhaustive | Later | Pending | Current "full flag reference" omits a supported split-plot override |

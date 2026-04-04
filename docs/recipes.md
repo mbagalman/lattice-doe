@@ -55,7 +55,7 @@ Use this when budget unlocks a few extra runs and you need incremental improveme
 
 ## 3) Check robustness to assumptions (sensitivity)
 
-Assumes you already have a `result` from `i_optimal_powered_design(...)` (see Recipe 1 or the Quick Start Guide).
+Assumes you already have a `result` from `find_optimal_design(...)` (see Recipe 1 or the Quick Start Guide).
 
 Contrast mode (vary sigma):
 
@@ -78,11 +78,11 @@ print(sens["nominal_power"])      # power at the original sigma
 R² mode (vary assumed R²):
 
 ```python
-from iopt_power_design import PowerR2Config, i_optimal_powered_design, power_sensitivity
+from iopt_power_design import PowerR2Config, find_optimal_design, power_sensitivity
 from iopt_power_design import DesignOptions
 
 r2_cfg = PowerR2Config(r2_target=0.15, power=0.80, alpha=0.05)
-result_r2 = i_optimal_powered_design(
+result_r2 = find_optimal_design(
     formula, factors, r2_cfg,
     DesignOptions(auto_candidate=True, random_state=42),
 )
@@ -101,7 +101,7 @@ print(sens_r2["data"].head())     # columns: r2_target, power, noncentrality_lam
 
 ## 4) Compute minimum detectable effect (MDE) for a fixed design
 
-Assumes you already have a `result` from `i_optimal_powered_design(...)`.
+Assumes you already have a `result` from `find_optimal_design(...)`.
 
 ```python
 from iopt_power_design import min_detectable_effect
@@ -176,7 +176,7 @@ The output is a single `.html` file with all CSS inline and figures embedded as 
 To write the report automatically when the design is found:
 
 ```python
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula, factors, power_cfg, opts,
     export_report_to="./reports/",   # writes iopt_report.html into this folder
 )
@@ -219,9 +219,9 @@ The two-panel figure shows power vs. n (top) and I-criterion + D-efficiency (bot
 ### Sensitivity analysis — interactive sweep
 
 ```python
-from iopt_power_design import power_sensitivity, i_optimal_powered_design
+from iopt_power_design import power_sensitivity, find_optimal_design
 
-result = i_optimal_powered_design(formula, factors, power_cfg, opts)
+result = find_optimal_design(formula, factors, power_cfg, opts)
 
 sens = power_sensitivity(
     formula=formula,
@@ -259,7 +259,7 @@ Use this when some factors are expensive or slow to reset between runs (whole-pl
 
 ```python
 from iopt_power_design import (
-    i_optimal_powered_design,
+    find_optimal_design,
     SplitPlotOptions,
     DesignOptions,
     PowerContrastConfig,
@@ -282,7 +282,7 @@ L, delta = contrast_from_scenarios(
 )
 power_cfg = PowerContrastConfig(L=L, delta=delta, power=0.80, sigma=1.0, max_n=200)
 
-result = i_optimal_powered_design(
+result = find_optimal_design(
     formula=formula,
     factors=factors,
     power_cfg=power_cfg,

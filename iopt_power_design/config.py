@@ -925,7 +925,7 @@ class ResponseSpec:
         different mode (contrast or R²), have its own sigma, L, delta, etc.
     formula : str or None, default None
         Patsy formula for this response.  If None, the global formula
-        passed to i_optimal_multiresponse_design() is used.  Setting a
+        passed to find_multiresponse_design() is used.  Setting a
         different formula per-response activates the compound criterion path.
     weight : float, default 1.0
         Relative importance weight used when power_combination="weighted_mean".
@@ -957,7 +957,7 @@ class MultiResponseOptions:
     ----------
     responses : list of ResponseSpec
         One entry per response variable.  Must contain at least two entries
-        (use i_optimal_powered_design for single-response problems).
+        (use find_optimal_design for single-response problems).
     power_combination : {"min", "product", "weighted_mean"}, default "min"
         Rule for aggregating per-response powers into a single scalar used
         by the binary n-search.
@@ -985,7 +985,7 @@ class MultiResponseOptions:
         if len(self.responses) < 2:
             raise ValueError(
                 "MultiResponseOptions requires at least 2 ResponseSpec entries. "
-                "Use i_optimal_powered_design() for single-response problems."
+                "Use find_optimal_design() for single-response problems."
             )
         names = [r.name for r in self.responses]
         if len(names) != len(set(names)):

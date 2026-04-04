@@ -4,7 +4,7 @@
 Test classes
 ------------
 TestGenerateReportHTML          -- HTML output correctness (requires jinja2 + pillow)
-TestGenerateReportAPIIntegration -- i_optimal_powered_design export_report_to= param
+TestGenerateReportAPIIntegration -- find_optimal_design export_report_to= param
 TestPDFExportImportError        -- PDF path raises ImportError when weasyprint absent
 """
 from __future__ import annotations
@@ -243,10 +243,10 @@ class TestGenerateReportHTML:
 # ---------------------------------------------------------------------------
 
 class TestGenerateReportAPIIntegration:
-    """Test export_report_to= parameter on i_optimal_powered_design()."""
+    """Test export_report_to= parameter on find_optimal_design()."""
 
     def test_export_report_to_path(self, tmp_path):
-        from iopt_power_design import DesignOptions, i_optimal_powered_design
+        from iopt_power_design import DesignOptions, find_optimal_design
         from iopt_power_design.contrasts import contrast_from_scenarios
 
         formula = "~ 1 + A + B"
@@ -260,7 +260,7 @@ class TestGenerateReportAPIIntegration:
         cfg = PowerContrastConfig(L=L, delta=delta, power=0.80, max_n=60)
         opts = DesignOptions(candidate_points=100, starts=2, max_iter=30, random_state=0)
 
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula, factors, cfg, opts,
             export_report_to=str(tmp_path),
         )
@@ -272,7 +272,7 @@ class TestGenerateReportAPIIntegration:
         assert report_file.suffix == ".html"
 
     def test_export_report_failure_does_not_crash(self, tmp_path):
-        from iopt_power_design import DesignOptions, i_optimal_powered_design
+        from iopt_power_design import DesignOptions, find_optimal_design
         from iopt_power_design.contrasts import contrast_from_scenarios
 
         formula = "~ 1 + A + B"
@@ -287,7 +287,7 @@ class TestGenerateReportAPIIntegration:
         opts = DesignOptions(candidate_points=100, starts=2, max_iter=30, random_state=0)
 
         with patch("iopt_power_design.report.generate_report", side_effect=RuntimeError("boom")):
-            result = i_optimal_powered_design(
+            result = find_optimal_design(
                 formula, factors, cfg, opts,
                 export_report_to=str(tmp_path / "report.html"),
             )

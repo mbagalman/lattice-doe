@@ -12,7 +12,7 @@ from __future__ import annotations
 __version__ = "0.1.0"
 
 # Re-export primary API and configuration types
-from .api import i_optimal_powered_design, i_optimal_multiresponse_design  # noqa: F401
+from .api import find_optimal_design, find_multiresponse_design  # noqa: F401
 from .config import (  # noqa: F401
     PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
     glm_fisher_weight,
@@ -56,8 +56,8 @@ from .split_plot import (  # noqa: F401
 __all__ = [
     "__version__",
     # Top-level API
-    "i_optimal_powered_design",
-    "i_optimal_multiresponse_design",
+    "find_optimal_design",
+    "find_multiresponse_design",
     "power_curve_by_n",
     "power_curve_by_effect",
     "generate_power_curves",

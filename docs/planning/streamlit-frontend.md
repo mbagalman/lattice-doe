@@ -93,7 +93,7 @@ Dependencies: none. Start here first; all other tickets depend on A1–A3.
 2. Add stub `app.py` that runs `st.set_page_config(layout="wide")` and a "welcome" message.
 3. Add empty `__init__.py` files where needed.
 4. Update `pyproject.toml`: add a new `[project.optional-dependencies]` group `app` with `streamlit>=1.30` and `plotly>=5.0`; add `app` to the `all` meta-group.
-5. Add `app` to the `[project.scripts]` entry: `iopt-app = "app.app:main"` (or document `streamlit run app/app.py`).
+5. Add `app` to the `[project.scripts]` entry: `lattice-app = "app.app:main"` (or document `streamlit run app/app.py`).
 6. Verify: `pip install -e ".[app]"` succeeds and `streamlit run app/app.py` opens a blank page.
 
 **Acceptance criteria:**
@@ -144,7 +144,7 @@ Keys to define (with defaults):
 "constraint_expr": ""
 
 # Results (populated after run)
-"result": None        # the full dict from i_optimal_powered_design
+"result": None        # the full dict from find_optimal_design
 "run_error": None     # string error message if run failed
 ```
 
@@ -465,7 +465,7 @@ At the top of `app/pages/3_Run_Results.py`:
 3. On click:
    a. Parse `L_text`/`delta_text` or call `contrast_from_scenarios` to build `PowerContrastConfig`; or build `PowerR2Config`.
    b. Build `DesignOptions` from session state.
-   c. Call `i_optimal_powered_design(...)` inside `st.spinner("Searching for optimal design...")`.
+   c. Call `find_optimal_design(...)` inside `st.spinner("Searching for optimal design...")`.
    d. Store result in `st.session_state["result"]` on success; store error string in `st.session_state["run_error"]` on failure.
 4. Display any warnings from `result["report"]["warnings"]` as `st.warning(...)`.
 5. Display `run_error` as `st.error(...)` with guidance.
@@ -575,7 +575,7 @@ If `xlsxwriter` is installed (use `importlib.util.find_spec`):
 1. Build an `.xlsx` workbook in memory using `pandas.ExcelWriter` with the `xlsxwriter` engine, writing design, buckets, and report sheets.
 2. Offer a `st.download_button("Download Excel workbook", ...)`.
 
-If not installed, show a grey info box: "Install `iopt-power-design[extras]` to enable Excel export."
+If not installed, show a grey info box: "Install `lattice-doe[extras]` to enable Excel export."
 
 **Acceptance criteria:**
 - [ ] Excel download produces a valid `.xlsx` with three sheets.
@@ -668,12 +668,12 @@ Section "Compare optimality criteria":
 **What to do:**
 In the sidebar (or on Page 3 after a run), a "Download YAML config" button.
 
-Build a YAML string from the current session state that is a valid input for the CLI (`iopt-design --config`). Use `pyyaml` to serialize. Include all power config, factor, and design option fields.
+Build a YAML string from the current session state that is a valid input for the CLI (`lattice --config`). Use `pyyaml` to serialize. Include all power config, factor, and design option fields.
 
 This allows users to reproduce any UI-generated run from the CLI or Python API.
 
 **Acceptance criteria:**
-- [x] Downloaded YAML passes `iopt-design --config <file> --dry-run` without errors.
+- [x] Downloaded YAML passes `lattice --config <file> --dry-run` without errors.
 - [x] YAML is available before a run (reflects current config, not results).
 
 ---

@@ -1,1 +1,1 @@
-# Components package — reusable Streamlit widgets for the I-Opt app.
+# Components package — reusable Streamlit widgets for the Lattice DOE app.

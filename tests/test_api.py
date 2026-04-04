@@ -17,8 +17,8 @@ from iopt_power_design import (
     SplitPlotOptions,
     ResponseSpec,
     MultiResponseOptions,
-    i_optimal_powered_design,
-    i_optimal_multiresponse_design,
+    find_optimal_design,
+    find_multiresponse_design,
     power_curve_by_effect,
     power_curve_by_n,
     power_curve_by_wp,
@@ -64,50 +64,50 @@ def _r2_cfg(power: float = 0.80, max_n: int = 80) -> PowerR2Config:
 
 
 # ---------------------------------------------------------------------------
-# i_optimal_powered_design — contrast mode
+# find_optimal_design — contrast mode
 # ---------------------------------------------------------------------------
 
 class TestIOptimalPoweredDesignContrast:
     def test_returns_expected_keys(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
         )
         assert set(result.keys()) >= {"design_df", "buckets_df", "report"}
 
     def test_design_df_is_dataframe(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
         )
         assert isinstance(result["design_df"], pd.DataFrame)
 
     def test_design_df_has_factor_columns(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
         )
         assert set(FACTORS.keys()).issubset(result["design_df"].columns)
 
     def test_design_size_matches_report_n(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
         )
         assert len(result["design_df"]) == result["report"]["n"]
 
     def test_buckets_df_counts_sum_to_n(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
         )
         n = result["report"]["n"]
         assert result["buckets_df"]["count"].sum() == n
 
     def test_achieved_power_in_unit_interval(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
         )
         pwr = result["report"]["achieved_power"]
         assert 0.0 <= pwr <= 1.0
 
     def test_report_contains_expected_keys(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
         )
         rpt = result["report"]
@@ -124,11 +124,11 @@ class TestIOptimalPoweredDesignContrast:
         )
         cfg = PowerContrastConfig(L=L, delta=delta, max_n=2)  # p=3
         with pytest.raises(ValueError):
-            i_optimal_powered_design(FORMULA, FACTORS, cfg, design_opts=FAST_OPTS)
+            find_optimal_design(FORMULA, FACTORS, cfg, design_opts=FAST_OPTS)
 
     def test_no_internal_keys_in_result(self):
         """Private cache keys (_selected_idx, _X_cand) must be stripped."""
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
         )
         assert "_selected_idx" not in result
@@ -136,25 +136,25 @@ class TestIOptimalPoweredDesignContrast:
 
 
 # ---------------------------------------------------------------------------
-# i_optimal_powered_design — R² mode
+# find_optimal_design — R² mode
 # ---------------------------------------------------------------------------
 
 class TestIOptimalPoweredDesignR2:
     def test_returns_expected_keys(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS
         )
         assert set(result.keys()) >= {"design_df", "buckets_df", "report"}
 
     def test_achieved_power_in_unit_interval(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS
         )
         pwr = result["report"]["achieved_power"]
         assert 0.0 <= pwr <= 1.0
 
     def test_design_size_matches_report_n(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS
         )
         assert len(result["design_df"]) == result["report"]["n"]
@@ -273,44 +273,44 @@ class TestDOptimalCriterion:
     error and that output shapes / report values are well-formed."""
 
     def test_contrast_mode_returns_expected_keys(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D
         )
         assert set(result.keys()) >= {"design_df", "buckets_df", "report"}
 
     def test_contrast_mode_report_criterion_is_D(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D
         )
         assert result["report"]["criterion"] == "D"
 
     def test_contrast_mode_design_size_matches_report_n(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D
         )
         assert len(result["design_df"]) == result["report"]["n"]
 
     def test_contrast_mode_achieved_power_in_unit_interval(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D
         )
         pwr = result["report"]["achieved_power"]
         assert 0.0 <= pwr <= 1.0
 
     def test_r2_mode_returns_expected_keys(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_D
         )
         assert set(result.keys()) >= {"design_df", "buckets_df", "report"}
 
     def test_r2_mode_report_criterion_is_D(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_D
         )
         assert result["report"]["criterion"] == "D"
 
     def test_r2_mode_design_size_matches_report_n(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_D
         )
         assert len(result["design_df"]) == result["report"]["n"]
@@ -333,25 +333,25 @@ class TestAOptimalCriterion:
     """Verify criterion='A' flows through the full API without error."""
 
     def test_contrast_mode_returns_expected_keys(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_A
         )
         assert set(result.keys()) >= {"design_df", "buckets_df", "report"}
 
     def test_contrast_mode_report_criterion_is_A(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_A
         )
         assert result["report"]["criterion"] == "A"
 
     def test_contrast_mode_design_size_matches_report_n(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_A
         )
         assert len(result["design_df"]) == result["report"]["n"]
 
     def test_r2_mode_achieved_power_in_unit_interval(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_A
         )
         pwr = result["report"]["achieved_power"]
@@ -367,7 +367,7 @@ class TestPowerSensitivityR2:
 
     @pytest.fixture
     def fixed_design(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS
         )
         return result["design_df"]
@@ -455,7 +455,7 @@ class TestMinDetectableEffect:
 
     @pytest.fixture
     def fixed_design(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
         )
         return result["design_df"]
@@ -528,19 +528,19 @@ class TestMinDetectableEffect:
 # ---------------------------------------------------------------------------
 
 class TestRunMetadata:
-    """Verify that i_optimal_powered_design enriches report with run metadata."""
+    """Verify that find_optimal_design enriches report with run metadata."""
 
     @pytest.fixture(scope="class")
     def result_contrast(self):
         """One small contrast-mode run shared across all tests in this class."""
-        return i_optimal_powered_design(
+        return find_optimal_design(
             FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
         )
 
     @pytest.fixture(scope="class")
     def result_r2(self):
         """One small R²-mode run shared across all tests in this class."""
-        return i_optimal_powered_design(
+        return find_optimal_design(
             FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS
         )
 
@@ -743,7 +743,7 @@ class TestReportJsonSerialization:
     def test_report_is_json_serializable_contrast(self):
         """report dict from contrast mode must not contain non-JSON types."""
         import json
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=FORMULA, factors=FACTORS,
             power_cfg=_contrast_cfg(), design_opts=FAST_OPTS,
         )
@@ -753,7 +753,7 @@ class TestReportJsonSerialization:
     def test_report_is_json_serializable_r2(self):
         """report dict from R² mode must not contain non-JSON types."""
         import json
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=FORMULA, factors=FACTORS,
             power_cfg=_r2_cfg(), design_opts=FAST_OPTS,
         )
@@ -762,7 +762,7 @@ class TestReportJsonSerialization:
     def test_diagnostic_exports_stored_as_strings(self, tmp_path):
         """When export_diagnostics_to is set, paths in report are strings, not Path objects."""
         import json
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             formula=FORMULA, factors=FACTORS,
             power_cfg=_contrast_cfg(), design_opts=FAST_OPTS,
             export_diagnostics_to=str(tmp_path),
@@ -794,14 +794,14 @@ def _contrast_design():
         sesoi=1.0,
     )
     cfg = PowerContrastConfig(L=L, delta=delta, sigma=1.0, power=0.8, max_n=80)
-    result = i_optimal_powered_design(FORMULA, FACTORS, cfg, design_opts=_ROB_OPTS)
+    result = find_optimal_design(FORMULA, FACTORS, cfg, design_opts=_ROB_OPTS)
     return result["design_df"], cfg
 
 
 def _r2_design():
     """Build a small R²-mode design for robustness tests."""
     cfg = PowerR2Config(r2_target=0.30, power=0.8, max_n=80)
-    result = i_optimal_powered_design(FORMULA, FACTORS, cfg, design_opts=_ROB_OPTS)
+    result = find_optimal_design(FORMULA, FACTORS, cfg, design_opts=_ROB_OPTS)
     return result["design_df"], cfg
 
 
@@ -1081,7 +1081,7 @@ class TestSplitPlotIntegration:
             random_state=99,
             split_plot=sp_opts,
         )
-        result = i_optimal_powered_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
+        result = find_optimal_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
         assert isinstance(result, dict)
         assert "design_df" in result and "report" in result
         assert len(result["design_df"]) >= 6  # at least 2 WPs × 3 SPs
@@ -1101,7 +1101,7 @@ class TestSplitPlotIntegration:
             split_plot=sp_opts,
         )
         with pytest.raises(ValueError, match="htc_factors"):
-            i_optimal_powered_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(), design_opts=opts)
+            find_optimal_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(), design_opts=opts)
 
     def test_split_plot_and_blocked_raises(self):
         """Setting both n_blocks ≥ 2 and split_plot together raises ValueError."""
@@ -1119,7 +1119,7 @@ class TestSplitPlotIntegration:
                 split_plot=sp_opts,
             )
         with pytest.raises(ValueError, match="n_blocks"):
-            i_optimal_powered_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(), design_opts=opts)
+            find_optimal_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(), design_opts=opts)
 
     def test_eta_zero_matches_ols_power(self):
         """Power at eta=0 should equal OLS power (GLS degenerates to OLS)."""
@@ -1136,7 +1136,7 @@ class TestSplitPlotIntegration:
             random_state=11,
             split_plot=sp_opts_eta0,
         )
-        result_sp = i_optimal_powered_design(
+        result_sp = find_optimal_design(
             _SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=40), design_opts=opts_sp
         )
         # eta=0 → V=I → GLS power == OLS power
@@ -1160,7 +1160,7 @@ class TestSplitPlotIntegration:
             random_state=22,
             split_plot=sp_opts,
         )
-        result = i_optimal_powered_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
+        result = find_optimal_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
         df = result["design_df"]
         assert "__wp_id__" in df.columns, "design_df must contain __wp_id__ column"
         for wp_id, group in df.groupby("__wp_id__"):
@@ -1178,7 +1178,7 @@ class TestSplitPlotIntegration:
             random_state=33,
             split_plot=sp_opts,
         )
-        result = i_optimal_powered_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
+        result = find_optimal_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
         assert "split_plot" in result["report"]
         sp_dict = result["report"]["split_plot"]
         for key in ("n_whole_plots", "subplots_per_wp", "n_total", "eta", "htc_factors", "etc_factors", "df_method"):
@@ -1254,7 +1254,7 @@ class TestCR35MultiResponseSplitPlotGLMGuard:
             responses=[self._glm_rs("Y1"), self._glm_rs("Y2")],
         )
         with pytest.raises(NotImplementedError, match="GLM power configs"):
-            i_optimal_multiresponse_design(
+            find_multiresponse_design(
                 self._FORMULA, self._FACTORS, multi, self._sp_opts()
             )
 
@@ -1264,7 +1264,7 @@ class TestCR35MultiResponseSplitPlotGLMGuard:
             responses=[self._ols_rs("Y1"), self._glm_rs("Y2")],
         )
         with pytest.raises(NotImplementedError, match="Y2"):
-            i_optimal_multiresponse_design(
+            find_multiresponse_design(
                 self._FORMULA, self._FACTORS, multi, self._sp_opts()
             )
 
@@ -1273,7 +1273,7 @@ class TestCR35MultiResponseSplitPlotGLMGuard:
         multi = MultiResponseOptions(
             responses=[self._ols_rs("Y1"), self._ols_rs("Y2")],
         )
-        result = i_optimal_multiresponse_design(
+        result = find_multiresponse_design(
             self._FORMULA, self._FACTORS, multi, self._sp_opts()
         )
         assert isinstance(result, dict)
@@ -1313,7 +1313,7 @@ def _r2_rs(name, r2=0.5, power=0.8, max_n=60):
 def _run_mr(responses, rule="min", **opts_kw):
     multi = MultiResponseOptions(responses=responses, power_combination=rule)
     opts = _mr_opts(**opts_kw)
-    return i_optimal_multiresponse_design(_MR_FORMULA, _MR_FACTORS, multi, opts)
+    return find_multiresponse_design(_MR_FORMULA, _MR_FACTORS, multi, opts)
 
 
 class TestMultiResponseAPI:
@@ -1367,7 +1367,7 @@ class TestMultiResponseAPI:
             L=_MR_L, delta=_MR_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=30
         )
         opts = _mr_opts()
-        single = i_optimal_powered_design(_MR_FORMULA, _MR_FACTORS, single_cfg, opts)
+        single = find_optimal_design(_MR_FORMULA, _MR_FACTORS, single_cfg, opts)
         multi_result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
         # Allow ±1 tolerance for design randomness
         assert abs(multi_result["n"] - single["report"]["n"]) <= 1
@@ -1378,7 +1378,7 @@ class TestMultiResponseAPI:
         single_cfg = PowerContrastConfig(
             L=_MR_L, delta=_MR_DELTA, sigma=0.7, power=0.8, max_n=60, max_iter=30
         )
-        single = i_optimal_powered_design(_MR_FORMULA, _MR_FACTORS, single_cfg, opts)
+        single = find_optimal_design(_MR_FORMULA, _MR_FACTORS, single_cfg, opts)
         result = _run_mr([_contrast_rs("Y1", sigma=1.0), _contrast_rs("Y2", sigma=0.7)])
         assert result["n"] >= single["report"]["n"] - 1
 
@@ -1400,7 +1400,7 @@ class TestMultiResponseAPI:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=L2, delta=np.array([1.5, 1.5]),
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=30))
         multi = MultiResponseOptions([r1, r2])
-        result = i_optimal_multiresponse_design(_MR_FORMULA, _MR_FACTORS, multi, _mr_opts())
+        result = find_multiresponse_design(_MR_FORMULA, _MR_FACTORS, multi, _mr_opts())
         assert result["compound_criterion"] is True
 
     def test_workers_parallel_returns_same_structure(self):
@@ -1410,7 +1410,7 @@ class TestMultiResponseAPI:
 
     def test_exported_from_top_level(self):
         import iopt_power_design
-        assert hasattr(iopt_power_design, "i_optimal_multiresponse_design")
+        assert hasattr(iopt_power_design, "find_multiresponse_design")
 
 
 # ---------------------------------------------------------------------------
@@ -1491,7 +1491,7 @@ class TestSR1CombinationRuleTarget:
 def _cp_run(r1, r2, rule="min", **opts_kw):
     multi = MultiResponseOptions(responses=[r1, r2], power_combination=rule)
     opts = _cp_opts(**opts_kw)
-    return i_optimal_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
+    return find_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
 
 
 class TestCompoundCriterion:
@@ -1585,7 +1585,7 @@ class TestCompoundCriterion:
         multi = MultiResponseOptions([r1, r2])
         opts = _cp_opts(criterion="A")
         with pytest.raises(NotImplementedError, match="A-compound"):
-            i_optimal_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
+            find_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
 
     def test_unknown_factor_in_formula_raises(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=np.array([[0, 1, 0]]),
@@ -1596,7 +1596,7 @@ class TestCompoundCriterion:
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=5))
         multi = MultiResponseOptions([r1, r2])
         with pytest.raises(ValueError, match="could not be evaluated"):
-            i_optimal_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, _cp_opts())
+            find_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, _cp_opts())
 
     def test_d_criterion_compound_runs(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
@@ -1606,7 +1606,7 @@ class TestCompoundCriterion:
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         multi = MultiResponseOptions([r1, r2])
         opts = _cp_opts(criterion="D")
-        result = i_optimal_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
+        result = find_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
         assert result["compound_criterion"] is True
         assert result["n"] > 0
 
@@ -1668,7 +1668,7 @@ def _ht2_run(sigma_joint, rule="min", **opts_kw):
     multi = MultiResponseOptions([r1, r2], power_combination=rule,
                                  sigma_joint=sigma_joint)
     opts = _ht2_mr_opts(**opts_kw)
-    return i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, opts)
+    return find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, opts)
 
 
 class TestHotellingT2API:
@@ -1701,7 +1701,7 @@ class TestHotellingT2API:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=25))
         multi = MultiResponseOptions([r1, r2])
-        result = i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi,
+        result = find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi,
                                                 _ht2_mr_opts())
         assert "joint_power" not in result
 
@@ -1711,7 +1711,7 @@ class TestHotellingT2API:
         r2 = ResponseSpec("Y2", PowerR2Config(r2_target=0.5, power=0.8, max_n=60, max_iter=5))
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
         with pytest.raises(NotImplementedError, match="R²-mode"):
-            i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
+            find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
 
     def test_sigma_joint_with_compound_path_raises(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=np.array([[0, 1]]), delta=np.array([1.5]),
@@ -1721,7 +1721,7 @@ class TestHotellingT2API:
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=5))
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
         with pytest.raises(NotImplementedError, match="compound"):
-            i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
+            find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
 
     def test_sigma_joint_with_glm_response_raises(self):
         """CR-36: sigma_joint must be rejected when any response is GLM."""
@@ -1735,7 +1735,7 @@ class TestHotellingT2API:
         r2 = ResponseSpec("Y2", glm_cfg)
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
         with pytest.raises(NotImplementedError, match="GLM"):
-            i_optimal_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
+            find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
 
     def test_sigma_joint_with_ols_contrast_still_works(self):
         """CR-36 regression: OLS contrast responses with sigma_joint are unaffected."""
@@ -2179,13 +2179,13 @@ class TestMR10Integration:
         r1 = _mr10_crs("Y1", sigma=1.0, max_n=40)
         r2 = _mr10_crs("Y2", sigma=1.5, max_n=40)
         multi = MultiResponseOptions([r1, r2], power_combination="min")
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        n1 = i_optimal_powered_design(
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        n1 = find_optimal_design(
             _MR10_FORMULA, _MR10_FACTORS,
             PowerContrastConfig(L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25),
             opts,
         )["report"]["n"]
-        n2 = i_optimal_powered_design(
+        n2 = find_optimal_design(
             _MR10_FORMULA, _MR10_FACTORS,
             PowerContrastConfig(L=_MR10_L, delta=_MR10_DELTA, sigma=1.5, power=0.8, max_n=40, max_iter=25),
             opts,
@@ -2198,7 +2198,7 @@ class TestMR10Integration:
         r1 = _mr10_crs("Y1", sigma=1.0, max_n=40)
         r2 = _mr10_crs("Y2", sigma=1.2, max_n=40)
         multi = MultiResponseOptions([r1, r2], power_combination="min")
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         per = [rd["power"] for rd in mr["responses"]]
         assert mr["achieved_power"] == pytest.approx(min(per), abs=1e-9)
 
@@ -2208,7 +2208,7 @@ class TestMR10Integration:
         r1 = _mr10_r2rs("Y1", r2=0.28, max_n=40)
         r2 = _mr10_r2rs("Y2", r2=0.33, max_n=40)
         multi = MultiResponseOptions([r1, r2], power_combination="product")
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         p1 = next(rd["power"] for rd in mr["responses"] if rd["name"] == "Y1")
         p2 = next(rd["power"] for rd in mr["responses"] if rd["name"] == "Y2")
         assert mr["achieved_power"] == pytest.approx(p1 * p2, abs=1e-9)
@@ -2219,7 +2219,7 @@ class TestMR10Integration:
         r1 = _mr10_r2rs("Y1", r2=0.28, max_n=40)
         r2 = _mr10_r2rs("Y2", r2=0.35, max_n=40)
         multi = MultiResponseOptions([r1, r2], power_combination="product")
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         per = [rd["power"] for rd in mr["responses"]]
         assert mr["achieved_power"] <= min(per) + 1e-9
 
@@ -2235,7 +2235,7 @@ class TestMR10Integration:
                 L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=1.0),
         ]
         multi = MultiResponseOptions(responses, power_combination="weighted_mean")
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         assert len(mr["responses"]) == 3
         assert mr["combination_rule"] == "weighted_mean"
         assert isinstance(mr["design"], pd.DataFrame)
@@ -2253,7 +2253,7 @@ class TestMR10Integration:
                 L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=1.0),
         ]
         multi = MultiResponseOptions(responses, power_combination="weighted_mean")
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         per_powers = [rd["power"] for rd in mr["responses"]]
         weights = [r.weight for r in multi.responses]
         expected = combine_powers(per_powers, weights, "weighted_mean")
@@ -2275,7 +2275,7 @@ class TestMR10Integration:
             formula="~ 1 + A + B + A:B",
         )
         multi = MultiResponseOptions([r1, r2], power_combination="min")
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         assert mr["compound_criterion"] is True
 
     def test_s4_compound_design_estimable_for_both_formulas(self):
@@ -2295,7 +2295,7 @@ class TestMR10Integration:
             formula="~ 1 + A + B + A:B",
         )
         multi = MultiResponseOptions([r1, r2], power_combination="min")
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         design_df = mr["design"]
         X_lin, _ = build_model_matrix("~ 1 + A", design_df)
         X_inter, _ = build_model_matrix("~ 1 + A + B + A:B", design_df)
@@ -2311,7 +2311,7 @@ class TestMR10Integration:
         r2 = ResponseSpec("Y2", PowerContrastConfig(
             L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         assert 0.0 <= mr["joint_power"] <= 1.0
 
     def test_s5_hotelling_joint_power_geq_min_per_response(self):
@@ -2323,7 +2323,7 @@ class TestMR10Integration:
         r2 = ResponseSpec("Y2", PowerContrastConfig(
             L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         per = [rd["power"] for rd in mr["responses"]]
         assert mr["joint_power"] >= min(per) - 1e-9
 
@@ -2337,7 +2337,7 @@ class TestMR10Integration:
         r2 = ResponseSpec("Y2", PowerContrastConfig(
             L=L, delta=np.array([2.0]), sigma=1.5, power=0.8, max_n=30, max_iter=20))
         multi = MultiResponseOptions([r1, r2], power_combination="min")
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         assert isinstance(mr["design"], pd.DataFrame)
         assert len(mr["responses"]) == 2
         assert mr["n"] >= 1
@@ -2352,7 +2352,7 @@ class TestMR10Integration:
         r2 = ResponseSpec("Y2", PowerContrastConfig(
             L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20))
         multi = MultiResponseOptions([r1, r2], power_combination="min")
-        mr = i_optimal_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
+        mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         assert "__wp_id__" in mr["design"].columns
 
     def test_s7_combined_power_nondecreasing(self):
@@ -2391,12 +2391,12 @@ class TestMR10PropertyBased:
         """Two identical responses under min => same n as single (+/-1)."""
         opts = _mr10_opts()
         cfg = PowerContrastConfig(L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25)
-        n_single = i_optimal_powered_design(_MR10_FORMULA, _MR10_FACTORS, cfg, opts)["report"]["n"]
+        n_single = find_optimal_design(_MR10_FORMULA, _MR10_FACTORS, cfg, opts)["report"]["n"]
         r1 = ResponseSpec("Y1", PowerContrastConfig(
             L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25))
         r2 = ResponseSpec("Y2", PowerContrastConfig(
             L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25))
-        mr = i_optimal_multiresponse_design(
+        mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2], power_combination="min"), opts)
         assert abs(mr["n"] - n_single) <= 1
 
@@ -2407,11 +2407,11 @@ class TestMR10PropertyBased:
             L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25))
         r2 = ResponseSpec("Y2", PowerContrastConfig(
             L=_MR10_L, delta=_MR10_DELTA, sigma=1.2, power=0.8, max_n=40, max_iter=25))
-        mr2 = i_optimal_multiresponse_design(
+        mr2 = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2], power_combination="min"), opts)
         r3 = ResponseSpec("Y3", PowerContrastConfig(
             L=_MR10_L, delta=_MR10_DELTA, sigma=2.0, power=0.8, max_n=40, max_iter=25))
-        mr3 = i_optimal_multiresponse_design(
+        mr3 = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2, r3], power_combination="min"), opts)
         assert mr3["n"] >= mr2["n"] - 1
 
@@ -2431,7 +2431,7 @@ class TestMR10PropertyBased:
         """Product <= min(per-response powers)."""
         r1 = _mr10_r2rs("Y1", r2=0.30, max_n=40)
         r2 = _mr10_r2rs("Y2", r2=0.30, max_n=40)
-        mr = i_optimal_multiresponse_design(
+        mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS,
             MultiResponseOptions([r1, r2], power_combination="product"), _mr10_opts())
         per = [rd["power"] for rd in mr["responses"]]
@@ -2445,27 +2445,27 @@ class TestMR10PropertyBased:
                 L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=30, max_iter=20))
             for n in names
         ]
-        mr = i_optimal_multiresponse_design(
+        mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions(responses), _mr10_opts())
         assert [rd["name"] for rd in mr["responses"]] == names
 
     def test_shared_formula_compound_criterion_false(self):
         """Shared global formula => compound_criterion=False."""
-        mr = i_optimal_multiresponse_design(
+        mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS,
             MultiResponseOptions([_mr10_crs("Y1"), _mr10_crs("Y2")]), _mr10_opts())
         assert mr["compound_criterion"] is False
 
     def test_warnings_key_is_list(self):
         """warnings key is always a list."""
-        mr = i_optimal_multiresponse_design(
+        mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS,
             MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]), _mr10_opts())
         assert isinstance(mr["warnings"], list)
 
     def test_elapsed_sec_positive(self):
         """elapsed_sec is positive."""
-        mr = i_optimal_multiresponse_design(
+        mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS,
             MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]), _mr10_opts())
         assert mr["elapsed_sec"] > 0
@@ -2526,31 +2526,31 @@ def _poisson_cfg(
 
 @pytest.mark.slow
 class TestGLMDesignAPI:
-    """GL-3: GLM configs accepted by i_optimal_powered_design."""
+    """GL-3: GLM configs accepted by find_optimal_design."""
 
     # --- Happy path ---
 
     def test_binomial_runs_without_error(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
         )
         assert "design_df" in result
         assert "report" in result
 
     def test_binomial_report_has_family_key(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
         )
         assert result["report"]["family"] == "binomial"
 
     def test_binomial_report_has_test_type_wald_chi2(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
         )
         assert result["report"]["test_type"] == "wald_chi2"
 
     def test_binomial_design_df_has_factor_columns(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
         )
         df = result["design_df"]
@@ -2558,20 +2558,20 @@ class TestGLMDesignAPI:
         assert "B" in df.columns
 
     def test_binomial_achieved_power_between_0_and_1(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
         )
         p = result["report"]["achieved_power"]
         assert 0.0 <= p <= 1.0
 
     def test_poisson_runs_without_error(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts()
         )
         assert "report" in result
 
     def test_poisson_report_has_baseline_key(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts()
         )
         assert result["report"]["baseline"] == pytest.approx(2.0)
@@ -2579,27 +2579,27 @@ class TestGLMDesignAPI:
     # --- Report structure ---
 
     def test_glm_report_df2_is_none(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
         )
         assert result["report"]["df2"] is None
 
     def test_glm_report_glm_weight_close_to_p0_times_1_minus_p0(self):
         p0 = 0.4
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(baseline=p0), _glm_opts()
         )
         expected_w = p0 * (1 - p0)
         assert result["report"]["glm_weight"] == pytest.approx(expected_w, rel=1e-6)
 
     def test_glm_report_has_link_key(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
         )
         assert result["report"]["link"] == "logit"
 
     def test_poisson_report_link_is_log(self):
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts()
         )
         assert result["report"]["link"] == "log"
@@ -2611,7 +2611,7 @@ class TestGLMDesignAPI:
             L=_GLM_L, delta=np.array([0.5]), sigma=1.0,
             alpha=0.05, power=0.70, max_n=60, max_iter=12,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
         )
         assert result["report"]["test_type"] == "f"
@@ -2621,7 +2621,7 @@ class TestGLMDesignAPI:
             r2_target=0.5, sigma=1.0, alpha=0.05,
             power=0.70, max_n=60, max_iter=12,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
         )
         assert result["report"]["test_type"] == "f"
@@ -2630,14 +2630,14 @@ class TestGLMDesignAPI:
 
     def test_glm_with_d_criterion(self):
         opts = DesignOptions(criterion="D", starts=1, random_state=0, max_iter=8)
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), opts
         )
         assert result["report"]["criterion"] == "D"
 
     def test_glm_with_a_criterion(self):
         opts = DesignOptions(criterion="A", starts=1, random_state=0, max_iter=8)
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), opts
         )
         assert result["report"]["criterion"] == "A"
@@ -2651,7 +2651,7 @@ class TestGLMDesignAPI:
             L=L, delta=np.array([0.5]), baseline=0.4, family="binomial",
             alpha=0.05, power=0.70, max_n=80, max_iter=12,
         )
-        result = i_optimal_powered_design("~ 1 + A + C", factors, cfg, _glm_opts())
+        result = find_optimal_design("~ 1 + A + C", factors, cfg, _glm_opts())
         assert "design_df" in result
 
     # --- Error handling ---
@@ -2663,7 +2663,7 @@ class TestGLMDesignAPI:
             starts=1, random_state=0,
         )
         with pytest.raises(ValueError, match="GLM"):
-            i_optimal_powered_design(_GLM_FORMULA, _GLM_FACTORS, cfg, opts)
+            find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, cfg, opts)
 
     def test_glm_config_wrong_family_raises(self):
         with pytest.raises((ValueError, TypeError)):
@@ -2680,7 +2680,7 @@ class TestGLMDesignAPI:
             L=_GLM_L, delta=np.array([0.5]), sigma=1.0,
             alpha=0.05, power=0.70, max_n=60, max_iter=12,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
         )
         assert set(["design_df", "buckets_df", "report"]).issubset(result.keys())
@@ -2691,7 +2691,7 @@ class TestGLMDesignAPI:
             r2_target=0.5, sigma=1.0, alpha=0.05,
             power=0.70, max_n=60, max_iter=12,
         )
-        result = i_optimal_powered_design(
+        result = find_optimal_design(
             _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
         )
         assert set(["design_df", "buckets_df", "report"]).issubset(result.keys())
@@ -2727,7 +2727,7 @@ def _pc_poisson_cfg(**kwargs) -> PowerGLMContrastConfig:
 
 def _make_design_df(cfg: PowerGLMContrastConfig, n: int = 25) -> "pd.DataFrame":
     """Build a small I-optimal design df for baseline-sweep tests."""
-    result = i_optimal_powered_design(
+    result = find_optimal_design(
         _PC_FORMULA, _PC_FACTORS,
         PowerGLMContrastConfig(
             L=cfg.L, delta=cfg.delta, baseline=cfg.baseline,
@@ -2957,7 +2957,7 @@ def _gl5_design(cfg: PowerGLMContrastConfig) -> "pd.DataFrame":
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        res = i_optimal_powered_design(_GL5_FORMULA, _GL5_FACTORS, cfg, _GL5_OPTS)
+        res = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, cfg, _GL5_OPTS)
     return res["design_df"]
 
 
@@ -3004,8 +3004,8 @@ class TestGLMMDE:
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            small_res = i_optimal_powered_design(_GL5_FORMULA, _GL5_FACTORS, small_cfg, _GL5_OPTS)
-            large_res = i_optimal_powered_design(_GL5_FORMULA, _GL5_FACTORS, large_cfg, _GL5_OPTS)
+            small_res = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, small_cfg, _GL5_OPTS)
+            large_res = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, large_cfg, _GL5_OPTS)
         mde_small = min_detectable_effect(
             small_res["design_df"], _GL5_FORMULA, _GL5_FACTORS,
             _gl5_bin_cfg(), target_power=0.70,
@@ -3025,7 +3025,7 @@ class TestGLMMDE:
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            design_df = i_optimal_powered_design(_GL5_FORMULA, _GL5_FACTORS, cfg, _GL5_OPTS)["design_df"]
+            design_df = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, cfg, _GL5_OPTS)["design_df"]
         result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, cfg)
         assert result["mode"] == "glm"
         assert result["family"] == "poisson"
@@ -3130,7 +3130,7 @@ class TestGLMMDE:
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            design_df = i_optimal_powered_design(_GL5_FORMULA, _GL5_FACTORS, ols_cfg, _GL5_OPTS)["design_df"]
+            design_df = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, ols_cfg, _GL5_OPTS)["design_df"]
         result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, ols_cfg)
         assert result["mode"] == "contrast"
         assert "mde" in result

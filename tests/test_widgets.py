@@ -10,7 +10,7 @@ Layer 2 — DesignWidget construction and interaction: skipped when
            ipywidgets is not installed; all UI actions are exercised by
            calling private methods directly (no live kernel needed).
 
-Layer 3 — Run callback: i_optimal_powered_design is mocked so tests
+Layer 3 — Run callback: find_optimal_design is mocked so tests
            pass without running a real design search.
 
 Layer 4 — Import guard: patches _HAS_WIDGETS=False to verify WidgetsError
@@ -44,7 +44,7 @@ _HAS_WIDGETS = importlib.util.find_spec("ipywidgets") is not None
 # ---------------------------------------------------------------------------
 
 def _minimal_result():
-    """Minimal result dict matching i_optimal_powered_design() output."""
+    """Minimal result dict matching find_optimal_design() output."""
     design_df = pd.DataFrame({"A": [0.1, 0.5, -0.5], "B": [-1.0, 1.0, 0.0]})
     buckets_df = pd.DataFrame({"A": [0.1], "count": [3]})
     report = {
@@ -484,19 +484,19 @@ class TestDesignWidgetReset:
 
 
 # ---------------------------------------------------------------------------
-# Layer 3 — Run callback (mock i_optimal_powered_design)
+# Layer 3 — Run callback (mock find_optimal_design)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(not _HAS_WIDGETS, reason="ipywidgets not installed")
 class TestDesignWidgetRunCallback:
-    @patch("iopt_power_design.widgets.i_optimal_powered_design")
+    @patch("iopt_power_design.widgets.find_optimal_design")
     def test_run_populates_result(self, mock_run):
         mock_run.return_value = _minimal_result()
         w = DesignWidget(factors={"A": (-1, 1), "B": (-1, 1)}, power_mode="r2")
         w._on_run_clicked(None)
         assert w.get_result() is not None
 
-    @patch("iopt_power_design.widgets.i_optimal_powered_design")
+    @patch("iopt_power_design.widgets.find_optimal_design")
     def test_run_populates_design_df(self, mock_run):
         mock_run.return_value = _minimal_result()
         w = DesignWidget(factors={"A": (-1, 1), "B": (-1, 1)}, power_mode="r2")
@@ -504,7 +504,7 @@ class TestDesignWidgetRunCallback:
         assert w.get_design_df() is not None
         assert isinstance(w.get_design_df(), pd.DataFrame)
 
-    @patch("iopt_power_design.widgets.i_optimal_powered_design")
+    @patch("iopt_power_design.widgets.find_optimal_design")
     def test_run_populates_report(self, mock_run):
         mock_run.return_value = _minimal_result()
         w = DesignWidget(factors={"A": (-1, 1), "B": (-1, 1)}, power_mode="r2")
@@ -512,14 +512,14 @@ class TestDesignWidgetRunCallback:
         assert w.get_report() is not None
         assert "n" in w.get_report()
 
-    @patch("iopt_power_design.widgets.i_optimal_powered_design")
+    @patch("iopt_power_design.widgets.find_optimal_design")
     def test_run_error_leaves_result_none(self, mock_run):
         mock_run.side_effect = ValueError("bad formula")
         w = DesignWidget(factors={"A": (-1, 1)}, power_mode="r2")
         w._on_run_clicked(None)
         assert w.get_result() is None
 
-    @patch("iopt_power_design.widgets.i_optimal_powered_design")
+    @patch("iopt_power_design.widgets.find_optimal_design")
     def test_run_error_shown_in_status(self, mock_run):
         mock_run.side_effect = RuntimeError("oops")
         w = DesignWidget(factors={"A": (-1, 1)}, power_mode="r2")
@@ -534,21 +534,21 @@ class TestDesignWidgetRunCallback:
         assert w.get_result() is None
         assert "factor" in w._status_html.value.lower()
 
-    @patch("iopt_power_design.widgets.i_optimal_powered_design")
+    @patch("iopt_power_design.widgets.find_optimal_design")
     def test_run_re_enables_button_after_success(self, mock_run):
         mock_run.return_value = _minimal_result()
         w = DesignWidget(factors={"A": (-1, 1)}, power_mode="r2")
         w._on_run_clicked(None)
         assert w._run_btn.disabled is False
 
-    @patch("iopt_power_design.widgets.i_optimal_powered_design")
+    @patch("iopt_power_design.widgets.find_optimal_design")
     def test_run_re_enables_button_after_error(self, mock_run):
         mock_run.side_effect = RuntimeError("fail")
         w = DesignWidget(factors={"A": (-1, 1)}, power_mode="r2")
         w._on_run_clicked(None)
         assert w._run_btn.disabled is False
 
-    @patch("iopt_power_design.widgets.i_optimal_powered_design")
+    @patch("iopt_power_design.widgets.find_optimal_design")
     def test_extra_do_kwargs_forwarded_to_api(self, mock_run):
         """Non-exposed DesignOptions fields (n_blocks) are passed to the API."""
         mock_run.return_value = _minimal_result()
@@ -565,7 +565,7 @@ class TestDesignWidgetRunCallback:
 
 @pytest.mark.skipif(not _HAS_WIDGETS, reason="ipywidgets not installed")
 class TestPowerCurveRendering:
-    @patch("iopt_power_design.widgets.i_optimal_powered_design")
+    @patch("iopt_power_design.widgets.find_optimal_design")
     @patch("iopt_power_design.widgets._HAS_PLOTLY", True)
     def test_render_does_not_raise_with_plotly(self, mock_run):
         mock_run.return_value = _minimal_result()
@@ -574,7 +574,7 @@ class TestPowerCurveRendering:
         w._on_run_clicked(None)
         assert w.get_result() is not None
 
-    @patch("iopt_power_design.widgets.i_optimal_powered_design")
+    @patch("iopt_power_design.widgets.find_optimal_design")
     @patch("iopt_power_design.widgets._HAS_PLOTLY", False)
     def test_render_does_not_raise_without_plotly(self, mock_run):
         mock_run.return_value = _minimal_result()

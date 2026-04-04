@@ -150,7 +150,7 @@ def generate_power_curves(
     """Generate power curves for sensitivity analysis."""
     # Deferred import avoids a load-time circular dependency between
     # analysis.py → api.py → (nothing that imports analysis.py).
-    from .api import i_optimal_powered_design
+    from .api import find_optimal_design
 
     if design_opts is None:
         design_opts = DesignOptions()
@@ -165,7 +165,7 @@ def generate_power_curves(
 
     if curve_type in ("by_effect", "both"):
         if n_for_effect is None:
-            design_result = i_optimal_powered_design(
+            design_result = find_optimal_design(
                 formula, factors, power_cfg, design_opts=design_opts
             )
             n_for_effect = int(design_result["report"]["n"])
@@ -766,7 +766,7 @@ def compare_criteria(
 ) -> Dict[str, Any]:
     """Run the powered-design search under multiple optimality criteria and compare.
 
-    Executes ``i_optimal_powered_design`` independently for each entry in
+    Executes ``find_optimal_design`` independently for each entry in
     *criteria* (default: all three — ``"I"``, ``"D"``, ``"A"``), then assembles
     a side-by-side summary to support criterion choice.  All runs share the same
     formula, factors, and power configuration; only the ``criterion`` field of
@@ -777,7 +777,7 @@ def compare_criteria(
     formula : str
         Patsy formula string (e.g. ``"~ 1 + A + B + A:B"``).
     factors : dict
-        Factor specifications (same format as ``i_optimal_powered_design``).
+        Factor specifications (same format as ``find_optimal_design``).
     power_cfg : PowerContrastConfig or PowerR2Config
         Shared power configuration applied to all criterion runs.
     design_opts : DesignOptions, optional
@@ -810,7 +810,7 @@ def compare_criteria(
 
     ``results`` : dict
         Maps each criterion string to the full dict returned by
-        ``i_optimal_powered_design`` (``design_df``, ``buckets_df``, ``report``).
+        ``find_optimal_design`` (``design_df``, ``buckets_df``, ``report``).
 
     ``figure`` : matplotlib Figure or None
         Bar chart if *plot* is True and matplotlib is importable; else None.
@@ -831,7 +831,7 @@ def compare_criteria(
     >>> comparison["results"]["I"]["design_df"]   # full I-optimal design DataFrame
     """
     # Deferred import avoids a load-time circular dependency.
-    from .api import i_optimal_powered_design
+    from .api import find_optimal_design
 
     if design_opts is None:
         design_opts = DesignOptions()
@@ -854,7 +854,7 @@ def compare_criteria(
     for criterion in criteria:
         # Swap criterion without mutating the caller's DesignOptions
         run_opts = dataclasses.replace(design_opts, criterion=criterion)
-        res = i_optimal_powered_design(
+        res = find_optimal_design(
             formula=formula,
             factors=factors,
             power_cfg=power_cfg,

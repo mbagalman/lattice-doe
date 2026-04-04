@@ -6,7 +6,7 @@ I-Optimal Powered Design — orchestration entry point
 
 This module exposes a single public function:
 
-    i_optimal_powered_design(formula, factors, power_cfg, design_opts, ...)
+    find_optimal_design(formula, factors, power_cfg, design_opts, ...)
 
 It orchestrates:
   1) Candidate set sizing (fixed or adaptive) and construction
@@ -125,7 +125,7 @@ def _is_split_plot(design_opts: Optional[DesignOptions]) -> bool:
     return design_opts is not None and design_opts.split_plot is not None
 
 
-def i_optimal_powered_design(
+def find_optimal_design(
     formula: str,
     factors: Dict[str, Any],
     power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
@@ -154,7 +154,7 @@ def i_optimal_powered_design(
     export_report_to : str, optional
         If provided, writes a self-contained HTML report to this path (or
         directory).  Requires ``jinja2``; install with
-        ``pip install "iopt-power-design[report]"``.  A failure here does
+        ``pip install "lattice-doe[report]"``.  A failure here does
         **not** prevent the design result from being returned.
     progress_callback : callable, optional
         Function to call after each iteration, passing the current 'report' dict.
@@ -961,7 +961,7 @@ def i_optimal_powered_design(
     return best
 
 
-def i_optimal_multiresponse_design(
+def find_multiresponse_design(
     formula: str,
     factors: Dict[str, Any],
     multi_cfg: MultiResponseOptions,
@@ -976,7 +976,7 @@ def i_optimal_multiresponse_design(
         Individual responses may override this via ``ResponseSpec.formula``
         (compound path, MR-5).
     factors : dict
-        Factor definitions (same format as ``i_optimal_powered_design``).
+        Factor definitions (same format as ``find_optimal_design``).
     multi_cfg : MultiResponseOptions
         Per-response power requirements and combination rule.
     design_opts : DesignOptions or None
@@ -1581,4 +1581,4 @@ def i_optimal_multiresponse_design(
     return _out
 
 
-__all__ = ["i_optimal_powered_design", "i_optimal_multiresponse_design"]
+__all__ = ["find_optimal_design", "find_multiresponse_design"]
