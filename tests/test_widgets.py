@@ -1,6 +1,6 @@
 # tests/test_widgets.py
 # License: MIT
-"""Unit tests for iopt_power_design.widgets.
+"""Unit tests for lattice_doe.widgets.
 
 Layer 1 — pure Python helpers (_parse_matrix, _parse_vector,
            _build_power_cfg_from_state, _build_design_opts_from_state):
@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from iopt_power_design.widgets import (
+from lattice_doe.widgets import (
     WidgetsError,
     _parse_matrix,
     _parse_vector,
@@ -35,7 +35,7 @@ from iopt_power_design.widgets import (
     design_widget,
     DesignWidget,
 )
-from iopt_power_design.config import DesignOptions, PowerContrastConfig, PowerR2Config
+from lattice_doe.config import DesignOptions, PowerContrastConfig, PowerR2Config
 
 _HAS_WIDGETS = importlib.util.find_spec("ipywidgets") is not None
 
@@ -123,13 +123,13 @@ class TestImportGuard:
 
     def test_design_widget_raises_when_ipywidgets_absent(self):
         """design_widget() raises WidgetsError when _HAS_WIDGETS is False."""
-        with patch("iopt_power_design.widgets._HAS_WIDGETS", False):
+        with patch("lattice_doe.widgets._HAS_WIDGETS", False):
             with pytest.raises(WidgetsError, match="ipywidgets"):
                 design_widget()
 
     def test_DesignWidget_raises_when_ipywidgets_absent(self):
         """DesignWidget() raises WidgetsError when _HAS_WIDGETS is False."""
-        with patch("iopt_power_design.widgets._HAS_WIDGETS", False):
+        with patch("lattice_doe.widgets._HAS_WIDGETS", False):
             with pytest.raises(WidgetsError, match="ipywidgets"):
                 DesignWidget()
 
@@ -489,14 +489,14 @@ class TestDesignWidgetReset:
 
 @pytest.mark.skipif(not _HAS_WIDGETS, reason="ipywidgets not installed")
 class TestDesignWidgetRunCallback:
-    @patch("iopt_power_design.widgets.find_optimal_design")
+    @patch("lattice_doe.widgets.find_optimal_design")
     def test_run_populates_result(self, mock_run):
         mock_run.return_value = _minimal_result()
         w = DesignWidget(factors={"A": (-1, 1), "B": (-1, 1)}, power_mode="r2")
         w._on_run_clicked(None)
         assert w.get_result() is not None
 
-    @patch("iopt_power_design.widgets.find_optimal_design")
+    @patch("lattice_doe.widgets.find_optimal_design")
     def test_run_populates_design_df(self, mock_run):
         mock_run.return_value = _minimal_result()
         w = DesignWidget(factors={"A": (-1, 1), "B": (-1, 1)}, power_mode="r2")
@@ -504,7 +504,7 @@ class TestDesignWidgetRunCallback:
         assert w.get_design_df() is not None
         assert isinstance(w.get_design_df(), pd.DataFrame)
 
-    @patch("iopt_power_design.widgets.find_optimal_design")
+    @patch("lattice_doe.widgets.find_optimal_design")
     def test_run_populates_report(self, mock_run):
         mock_run.return_value = _minimal_result()
         w = DesignWidget(factors={"A": (-1, 1), "B": (-1, 1)}, power_mode="r2")
@@ -512,14 +512,14 @@ class TestDesignWidgetRunCallback:
         assert w.get_report() is not None
         assert "n" in w.get_report()
 
-    @patch("iopt_power_design.widgets.find_optimal_design")
+    @patch("lattice_doe.widgets.find_optimal_design")
     def test_run_error_leaves_result_none(self, mock_run):
         mock_run.side_effect = ValueError("bad formula")
         w = DesignWidget(factors={"A": (-1, 1)}, power_mode="r2")
         w._on_run_clicked(None)
         assert w.get_result() is None
 
-    @patch("iopt_power_design.widgets.find_optimal_design")
+    @patch("lattice_doe.widgets.find_optimal_design")
     def test_run_error_shown_in_status(self, mock_run):
         mock_run.side_effect = RuntimeError("oops")
         w = DesignWidget(factors={"A": (-1, 1)}, power_mode="r2")
@@ -534,21 +534,21 @@ class TestDesignWidgetRunCallback:
         assert w.get_result() is None
         assert "factor" in w._status_html.value.lower()
 
-    @patch("iopt_power_design.widgets.find_optimal_design")
+    @patch("lattice_doe.widgets.find_optimal_design")
     def test_run_re_enables_button_after_success(self, mock_run):
         mock_run.return_value = _minimal_result()
         w = DesignWidget(factors={"A": (-1, 1)}, power_mode="r2")
         w._on_run_clicked(None)
         assert w._run_btn.disabled is False
 
-    @patch("iopt_power_design.widgets.find_optimal_design")
+    @patch("lattice_doe.widgets.find_optimal_design")
     def test_run_re_enables_button_after_error(self, mock_run):
         mock_run.side_effect = RuntimeError("fail")
         w = DesignWidget(factors={"A": (-1, 1)}, power_mode="r2")
         w._on_run_clicked(None)
         assert w._run_btn.disabled is False
 
-    @patch("iopt_power_design.widgets.find_optimal_design")
+    @patch("lattice_doe.widgets.find_optimal_design")
     def test_extra_do_kwargs_forwarded_to_api(self, mock_run):
         """Non-exposed DesignOptions fields (n_blocks) are passed to the API."""
         mock_run.return_value = _minimal_result()
@@ -565,8 +565,8 @@ class TestDesignWidgetRunCallback:
 
 @pytest.mark.skipif(not _HAS_WIDGETS, reason="ipywidgets not installed")
 class TestPowerCurveRendering:
-    @patch("iopt_power_design.widgets.find_optimal_design")
-    @patch("iopt_power_design.widgets._HAS_PLOTLY", True)
+    @patch("lattice_doe.widgets.find_optimal_design")
+    @patch("lattice_doe.widgets._HAS_PLOTLY", True)
     def test_render_does_not_raise_with_plotly(self, mock_run):
         mock_run.return_value = _minimal_result()
         w = DesignWidget(factors={"A": (-1, 1)}, power_mode="r2")
@@ -574,8 +574,8 @@ class TestPowerCurveRendering:
         w._on_run_clicked(None)
         assert w.get_result() is not None
 
-    @patch("iopt_power_design.widgets.find_optimal_design")
-    @patch("iopt_power_design.widgets._HAS_PLOTLY", False)
+    @patch("lattice_doe.widgets.find_optimal_design")
+    @patch("lattice_doe.widgets._HAS_PLOTLY", False)
     def test_render_does_not_raise_without_plotly(self, mock_run):
         mock_run.return_value = _minimal_result()
         w = DesignWidget(factors={"A": (-1, 1)}, power_mode="r2")
@@ -589,13 +589,13 @@ class TestPowerCurveRendering:
 
 class TestPublicAPIExports:
     def test_WidgetsError_importable_from_package(self):
-        from iopt_power_design import WidgetsError as WE
+        from lattice_doe import WidgetsError as WE
         assert issubclass(WE, RuntimeError)
 
     def test_DesignWidget_importable_from_package(self):
-        from iopt_power_design import DesignWidget as DW
+        from lattice_doe import DesignWidget as DW
         assert DW is DesignWidget
 
     def test_design_widget_importable_from_package(self):
-        from iopt_power_design import design_widget as dw
+        from lattice_doe import design_widget as dw
         assert callable(dw)

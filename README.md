@@ -90,7 +90,7 @@ pip install -e ".[all]"
 Specify which linear combination of coefficients you want to detect and by how much.
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,
     PowerContrastConfig,
     DesignOptions,
@@ -142,7 +142,7 @@ print(buckets_df)
 Use `contrast_from_scenarios` to construct `L` and `delta` automatically by comparing two factor settings:
 
 ```python
-from iopt_power_design.contrasts import contrast_from_scenarios
+from lattice_doe.contrasts import contrast_from_scenarios
 
 scenario_a = {"A": "low",  "B": 5.0}
 scenario_b = {"A": "high", "B": 5.0}
@@ -163,7 +163,7 @@ power_cfg = PowerContrastConfig(L=L, delta=delta, alpha=0.05, power=0.80, sigma=
 Test whether the full model explains a meaningful proportion of variance.
 
 ```python
-from iopt_power_design import PowerR2Config
+from lattice_doe import PowerR2Config
 
 power_cfg = PowerR2Config(
     r2_target=0.15,   # detect R² ≥ 0.15
@@ -329,8 +329,8 @@ The design search uses a **null-based locally optimal** information matrix: `M =
 > **Approximation scope.** The Fisher weight `w` is a single scalar evaluated at the null baseline and applied uniformly to every design point. This is accurate when the true operating point is close to the baseline. For designs with wide covariate ranges and substantial slope effects, the true per-point weights `wᵢ = p(xᵢ)(1−p(xᵢ))` will vary across the design, and the constant-weight approximation may over- or understate power. Validate results via simulation when slopes are large relative to the baseline.
 
 ```python
-from iopt_power_design import PowerGLMContrastConfig
-from iopt_power_design.contrasts import contrast_from_scenarios
+from lattice_doe import PowerGLMContrastConfig
+from lattice_doe.contrasts import contrast_from_scenarios
 
 L, delta = contrast_from_scenarios(formula, factors, scenario_a, scenario_b, sesoi=0.4)
 
@@ -481,7 +481,7 @@ Key metrics from the design search:
 Explore how power varies with sample size or effect size without committing to a final design.
 
 ```python
-from iopt_power_design import power_curve_by_n, power_curve_by_effect
+from lattice_doe import power_curve_by_n, power_curve_by_effect
 
 # Power vs. n (sweeps a range of n values)
 df_n = power_curve_by_n(
@@ -510,7 +510,7 @@ Both functions respect `auto_candidate` in `DesignOptions`.
 Sweep two parameters simultaneously to produce a contour map — useful for understanding the joint sensitivity of your design to (n, effect), (effect, sigma), etc.
 
 ```python
-from iopt_power_design.power_curves import power_surface_2d
+from lattice_doe.power_curves import power_surface_2d
 
 result = power_surface_2d(
     formula=formula,
@@ -550,7 +550,7 @@ pip install -e ".[viz]"   # includes plotly>=5.0
 ```
 
 ```python
-from iopt_power_design.power_curves import power_curve_by_n
+from lattice_doe.power_curves import power_curve_by_n
 
 result = power_curve_by_n(
     formula=formula,
@@ -571,11 +571,11 @@ import streamlit as st
 st.plotly_chart(result["figure"])
 ```
 
-The same `plot_backend` parameter is available on `power_curve_by_effect`, `power_surface_2d`, and `power_sensitivity`.  To access the figure from those functions call the implementation modules directly (the `iopt_power_design` top-level wrappers discard the figure for backward compatibility):
+The same `plot_backend` parameter is available on `power_curve_by_effect`, `power_surface_2d`, and `power_sensitivity`.  To access the figure from those functions call the implementation modules directly (the `lattice_doe` top-level wrappers discard the figure for backward compatibility):
 
 ```python
-from iopt_power_design.power_curves import power_curve_by_effect, power_surface_2d
-from iopt_power_design import power_sensitivity
+from lattice_doe.power_curves import power_curve_by_effect, power_surface_2d
+from lattice_doe import power_sensitivity
 ```
 
 ### Sensitivity analysis
@@ -583,7 +583,7 @@ from iopt_power_design import power_sensitivity
 Reveal how much power changes if a key assumption is wrong — without rebuilding any designs.
 
 ```python
-from iopt_power_design import power_sensitivity
+from lattice_doe import power_sensitivity
 
 # Contrast mode: sweep sigma
 sensitivity = power_sensitivity(
@@ -618,7 +618,7 @@ print(sensitivity_r2["r2_nominal"])  # the nominal r2_target from power_cfg
 Find the smallest effect your design can detect at a given power — no new design needed.
 
 ```python
-from iopt_power_design import min_detectable_effect
+from lattice_doe import min_detectable_effect
 
 # Contrast mode: MDE expressed as a scale factor on delta
 mde = min_detectable_effect(
@@ -647,7 +647,7 @@ print(mde_r2["mde"])           # minimum r2_target detectable at 80 % power
 Not sure which optimality criterion is right for your study?  `compare_criteria` runs the full powered-design search under each of `"I"`, `"D"`, and `"A"` (or any subset) and returns a side-by-side summary in a single call.
 
 ```python
-from iopt_power_design import compare_criteria, DesignOptions
+from lattice_doe import compare_criteria, DesignOptions
 
 comparison = compare_criteria(
     formula=formula,
@@ -682,7 +682,7 @@ The function never mutates *design_opts* — it uses `dataclasses.replace` to cr
 Add runs to a design that already exists, fixing the original rows in place:
 
 ```python
-from iopt_power_design import augment_design, DesignOptions
+from lattice_doe import augment_design, DesignOptions
 
 # Suppose existing_design is a DataFrame with 20 runs
 augmented, new_runs = augment_design(
@@ -721,14 +721,14 @@ Ignoring this structure and using standard OLS inflates the apparent precision o
 ### Python API
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,
     SplitPlotOptions,
     DesignOptions,
     PowerContrastConfig,
     power_curve_by_wp,
 )
-from iopt_power_design.contrasts import contrast_from_scenarios
+from lattice_doe.contrasts import contrast_from_scenarios
 
 formula = "~ 1 + A + B + C"
 factors = {
@@ -825,7 +825,7 @@ design:
 Assess how power degrades as the variance ratio η grows:
 
 ```python
-from iopt_power_design import power_sensitivity
+from lattice_doe import power_sensitivity
 
 result = find_optimal_design(formula, factors, power_cfg,
     DesignOptions(split_plot=SplitPlotOptions(htc_factors=["A","B"], n_whole_plots=6, eta=1.5),
@@ -892,7 +892,7 @@ pip install -e ".[report-pdf]"      # also enables PDF export via weasyprint
 ### Python API
 
 ```python
-from iopt_power_design import generate_report
+from lattice_doe import generate_report
 
 generate_report(
     result=result,          # dict returned by find_optimal_design()
@@ -961,7 +961,7 @@ pip install "lattice-doe[sheets]"
 ### Create a starter spreadsheet (once)
 
 ```python
-from iopt_power_design import create_sheet_template
+from lattice_doe import create_sheet_template
 
 # Creates a new spreadsheet with Config/Results/Design/Buckets sheets pre-filled
 url = create_sheet_template(
@@ -975,7 +975,7 @@ print(url)  # open this URL, fill in your factors and formula, then run below
 ### Run from the spreadsheet
 
 ```python
-from iopt_power_design import sheets_run
+from lattice_doe import sheets_run
 
 result = sheets_run(url, credentials="service_account.json")
 print(f"Optimal n = {result['report']['n']}")

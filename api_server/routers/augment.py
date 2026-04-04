@@ -8,7 +8,7 @@ from functools import partial
 
 from fastapi import APIRouter
 
-from iopt_power_design import augment_design
+from lattice_doe import augment_design
 from api_server.models.augment import AugmentRequest, AugmentResponse
 from api_server.serialization import (
     df_to_records,

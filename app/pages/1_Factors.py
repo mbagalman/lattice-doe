@@ -24,9 +24,9 @@ st.set_page_config(page_title="Factors — Lattice DOE", layout="wide")
 init_state()
 render_sidebar()
 
-# iopt_power_design is installed via `pip install -e ".[app]"` so importable directly.
+# lattice_doe is installed via `pip install -e ".[app]"` so importable directly.
 try:
-    from iopt_power_design.design import build_model_matrix
+    from lattice_doe.design import build_model_matrix
 
     _HAS_IOPT = True
 except ImportError:
@@ -96,7 +96,7 @@ elif not formula.strip():
     st.warning("Enter a formula above.")
 elif not _HAS_IOPT:
     st.warning(
-        "Could not import `iopt_power_design` — run `pip install -e '.[app]'` "
+        "Could not import `lattice_doe` — run `pip install -e '.[app]'` "
         "from the project root to enable formula validation."
     )
 else:

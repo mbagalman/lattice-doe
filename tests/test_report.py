@@ -1,5 +1,5 @@
 # tests/test_report.py
-"""Unit and integration tests for iopt_power_design.report (Enhancement #14).
+"""Unit and integration tests for lattice_doe.report (Enhancement #14).
 
 Test classes
 ------------
@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from iopt_power_design import PowerContrastConfig, PowerR2Config
+from lattice_doe import PowerContrastConfig, PowerR2Config
 
 # ---------------------------------------------------------------------------
 # Skip marker — all HTML tests require jinja2 and pillow
@@ -27,7 +27,7 @@ from iopt_power_design import PowerContrastConfig, PowerR2Config
 jinja2 = pytest.importorskip("jinja2", reason="jinja2 not installed")
 pytest.importorskip("PIL", reason="pillow not installed")
 
-from iopt_power_design.report import generate_report  # noqa: E402  (after importorskip)
+from lattice_doe.report import generate_report  # noqa: E402  (after importorskip)
 
 
 # ---------------------------------------------------------------------------
@@ -246,8 +246,8 @@ class TestGenerateReportAPIIntegration:
     """Test export_report_to= parameter on find_optimal_design()."""
 
     def test_export_report_to_path(self, tmp_path):
-        from iopt_power_design import DesignOptions, find_optimal_design
-        from iopt_power_design.contrasts import contrast_from_scenarios
+        from lattice_doe import DesignOptions, find_optimal_design
+        from lattice_doe.contrasts import contrast_from_scenarios
 
         formula = "~ 1 + A + B"
         factors = {"A": ["low", "high"], "B": (0.0, 10.0)}
@@ -272,8 +272,8 @@ class TestGenerateReportAPIIntegration:
         assert report_file.suffix == ".html"
 
     def test_export_report_failure_does_not_crash(self, tmp_path):
-        from iopt_power_design import DesignOptions, find_optimal_design
-        from iopt_power_design.contrasts import contrast_from_scenarios
+        from lattice_doe import DesignOptions, find_optimal_design
+        from lattice_doe.contrasts import contrast_from_scenarios
 
         formula = "~ 1 + A + B"
         factors = {"A": ["low", "high"], "B": (0.0, 10.0)}
@@ -286,7 +286,7 @@ class TestGenerateReportAPIIntegration:
         cfg = PowerContrastConfig(L=L, delta=delta, power=0.80, max_n=60)
         opts = DesignOptions(candidate_points=100, starts=2, max_iter=30, random_state=0)
 
-        with patch("iopt_power_design.report.generate_report", side_effect=RuntimeError("boom")):
+        with patch("lattice_doe.report.generate_report", side_effect=RuntimeError("boom")):
             result = find_optimal_design(
                 formula, factors, cfg, opts,
                 export_report_to=str(tmp_path / "report.html"),

@@ -10,8 +10,8 @@ Tests cover:
 import numpy as np
 import pytest
 
-from iopt_power_design import DesignOptions, i_optimal_allocation
-from iopt_power_design.allocation import (
+from lattice_doe import DesignOptions, i_optimal_allocation
+from lattice_doe.allocation import (
     _round_allocation,
     _wynn_multiplicative_I,
 )

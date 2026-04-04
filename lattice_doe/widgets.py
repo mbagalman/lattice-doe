@@ -15,7 +15,7 @@ Install::
 
 Quick start::
 
-    from iopt_power_design.widgets import design_widget
+    from lattice_doe.widgets import design_widget
     w = design_widget(
         formula="~ 1 + A + B + A:B",
         factors={"A": (-1.0, 1.0), "B": (-1.0, 1.0)},
@@ -950,7 +950,7 @@ def design_widget(
 
     Examples
     --------
-    >>> from iopt_power_design.widgets import design_widget
+    >>> from lattice_doe.widgets import design_widget
     >>> w = design_widget(
     ...     formula="~ 1 + A + B + A:B",
     ...     factors={"A": (-1.0, 1.0), "B": (-1.0, 1.0)},

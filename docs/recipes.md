@@ -5,7 +5,7 @@ Task-oriented examples for common workflows.
 ## 1) Compare I vs D vs A before committing
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     compare_criteria,
     PowerContrastConfig,
     DesignOptions,
@@ -36,7 +36,7 @@ Use this when you want a fast side-by-side tradeoff across criteria.
 ## 2) Add runs to an existing design without rebuilding from scratch
 
 ```python
-from iopt_power_design import augment_design, DesignOptions
+from lattice_doe import augment_design, DesignOptions
 
 # existing_design is your current design DataFrame
 augmented_df, new_runs_df = augment_design(
@@ -60,7 +60,7 @@ Assumes you already have a `result` from `find_optimal_design(...)` (see Recipe 
 Contrast mode (vary sigma):
 
 ```python
-from iopt_power_design import power_sensitivity
+from lattice_doe import power_sensitivity
 
 sens = power_sensitivity(
     formula=formula,
@@ -78,8 +78,8 @@ print(sens["nominal_power"])      # power at the original sigma
 R² mode (vary assumed R²):
 
 ```python
-from iopt_power_design import PowerR2Config, find_optimal_design, power_sensitivity
-from iopt_power_design import DesignOptions
+from lattice_doe import PowerR2Config, find_optimal_design, power_sensitivity
+from lattice_doe import DesignOptions
 
 r2_cfg = PowerR2Config(r2_target=0.15, power=0.80, alpha=0.05)
 result_r2 = find_optimal_design(
@@ -104,7 +104,7 @@ print(sens_r2["data"].head())     # columns: r2_target, power, noncentrality_lam
 Assumes you already have a `result` from `find_optimal_design(...)`.
 
 ```python
-from iopt_power_design import min_detectable_effect
+from lattice_doe import min_detectable_effect
 
 mde = min_detectable_effect(
     design_df=result["design_df"],
@@ -124,7 +124,7 @@ Use this when your design is fixed and you want to quantify what it can detect.
 ## 5) Use declarative feasibility constraints (YAML-friendly)
 
 ```python
-from iopt_power_design import DesignOptions
+from lattice_doe import DesignOptions
 
 opts = DesignOptions(
     auto_candidate=True,
@@ -138,7 +138,7 @@ You can keep the same expression in YAML configs (`constraint_expr`) for reprodu
 ## 6) Reproducible runs across machines
 
 ```python
-from iopt_power_design import DesignOptions
+from lattice_doe import DesignOptions
 
 opts = DesignOptions(
     auto_candidate=True,
@@ -160,7 +160,7 @@ pip install -e ".[report]"
 ```
 
 ```python
-from iopt_power_design import generate_report
+from lattice_doe import generate_report
 
 generate_report(
     result=result,
@@ -195,8 +195,8 @@ Requires `pip install -e ".[viz]"` (includes `plotly>=5.0`).
 ### Power vs. sample size — two-panel interactive figure
 
 ```python
-from iopt_power_design.power_curves import power_curve_by_n
-from iopt_power_design import PowerContrastConfig, DesignOptions
+from lattice_doe.power_curves import power_curve_by_n
+from lattice_doe import PowerContrastConfig, DesignOptions
 
 power_cfg = PowerContrastConfig(L=[[0,0,1,0]], delta=[0.5], sigma=1.0, power=0.80)
 opts = DesignOptions(auto_candidate=True, starts=5, random_state=42)
@@ -219,7 +219,7 @@ The two-panel figure shows power vs. n (top) and I-criterion + D-efficiency (bot
 ### Sensitivity analysis — interactive sweep
 
 ```python
-from iopt_power_design import power_sensitivity, find_optimal_design
+from lattice_doe import power_sensitivity, find_optimal_design
 
 result = find_optimal_design(formula, factors, power_cfg, opts)
 
@@ -240,10 +240,10 @@ fig.show()
 
 ### Note on top-level wrappers
 
-`iopt_power_design.power_curve_by_n` and `iopt_power_design.power_curve_by_effect` are backward-compat wrappers that return a DataFrame only and discard the figure.  To access the Plotly figure, call the implementation modules directly:
+`lattice_doe.power_curve_by_n` and `lattice_doe.power_curve_by_effect` are backward-compat wrappers that return a DataFrame only and discard the figure.  To access the Plotly figure, call the implementation modules directly:
 
 ```python
-from iopt_power_design.power_curves import power_curve_by_n, power_curve_by_effect, power_surface_2d
+from lattice_doe.power_curves import power_curve_by_n, power_curve_by_effect, power_surface_2d
 ```
 
 For Streamlit, pass the figure directly to `st.plotly_chart`:
@@ -258,14 +258,14 @@ st.plotly_chart(result["figure"], use_container_width=True)
 Use this when some factors are expensive or slow to reset between runs (whole-plot factors) and others vary freely within each whole-plot group (sub-plot factors).
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,
     SplitPlotOptions,
     DesignOptions,
     PowerContrastConfig,
     power_curve_by_wp,
 )
-from iopt_power_design.contrasts import contrast_from_scenarios
+from lattice_doe.contrasts import contrast_from_scenarios
 
 formula = "~ 1 + Temperature + Catalyst + Time"
 factors = {

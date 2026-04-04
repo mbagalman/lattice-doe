@@ -140,7 +140,7 @@ PowerCfgModel = Annotated[
 class SplitPlotOptionsModel(BaseModel):
     """Options for split-plot (hard-to-change factor) designs.
 
-    Mirrors ``iopt_power_design.config.SplitPlotOptions``.  Set this field
+    Mirrors ``lattice_doe.config.SplitPlotOptions``.  Set this field
     on ``DesignOptionsModel.split_plot`` to run a split-plot search.
     """
 

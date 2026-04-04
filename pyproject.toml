@@ -122,7 +122,7 @@ Issues = "https://github.com/mbagalman/lattice-doe/issues"
 
 [project.scripts]
 # Registers a CLI entry point; users can run `lattice` after installation.
-lattice = "iopt_power_design.cli:main"
+lattice = "lattice_doe.cli:main"
 # REST API server entry point; users can run `lattice-api` after installation.
 lattice-api = "api_server.main:run"
 
@@ -132,14 +132,14 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["iopt_power_design*", "api_server*"]
+include = ["lattice_doe*", "api_server*"]
 
 [tool.setuptools.package-data]
-"iopt_power_design" = ["templates/*.html"]
+"lattice_doe" = ["templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=iopt_power_design --cov-report=term --cov-report=html"
+addopts = "--cov=lattice_doe --cov-report=term --cov-report=html"
 markers = [
     "slow: marks tests as slow (deselect with -m 'not slow')",
     "anyio: marks tests to run under anyio backends",

@@ -23,7 +23,7 @@ The main architectural pressure is not in the core math modules. It is in the gr
 
 The package mostly follows a healthy pattern:
 
-- statistical and search logic in `iopt_power_design`
+- statistical and search logic in `lattice_doe`
 - interface adapters in `app` and `api_server`
 - connector-specific integrations in dedicated modules
 
@@ -31,7 +31,7 @@ The earlier `design.py` split appears to have helped. Candidate generation, mode
 
 Relevant code:
 
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/design.py:1`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/design.py:1`
 - `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/docs/planning/design-refactor.md:1`
 
 ### 2. The interface layers depend on the core rather than the reverse
@@ -74,11 +74,11 @@ Relevant code:
 
 - `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/app/pages/3_Run_Results.py:79`
 - `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/app/pages/4_Analysis.py:74`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/widgets.py:100`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/cli.py:250`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/widgets.py:100`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/cli.py:250`
 - `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/api_server/serialization.py:77`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/sheets.py:341`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/excel_template.py:293`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/sheets.py:341`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/excel_template.py:293`
 
 Recommended direction:
 
@@ -94,8 +94,8 @@ That is workable, but expensive to maintain. Every new option or response mode t
 
 Relevant code:
 
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/sheets.py:1`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/excel_template.py:1`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/sheets.py:1`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/excel_template.py:1`
 
 Recommended direction:
 
@@ -117,11 +117,11 @@ These are not broken, but they are large enough that continued feature growth wi
 
 Relevant code:
 
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/api.py:128`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/api.py:964`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/analysis.py:53`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/analysis.py:1549`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/iopt_search.py:1`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/api.py:128`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/api.py:964`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/analysis.py:53`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/analysis.py:1549`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/iopt_search.py:1`
 
 Possible next split:
 
@@ -133,7 +133,7 @@ Possible next split:
 
 ### 4. Narrow the top-level package export surface
 
-`iopt_power_design.__init__` currently re-exports a very broad mix of:
+`lattice_doe.__init__` currently re-exports a very broad mix of:
 
 - core statistical APIs
 - low-level helpers
@@ -145,7 +145,7 @@ This is convenient, but it also broadens coupling and makes the public API harde
 
 Relevant code:
 
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/__init__.py:14`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/__init__.py:14`
 
 This is not urgent, but over time it would be cleaner to keep the package root focused on the core analytical surface and let optional integrations live behind explicit submodule imports.
 

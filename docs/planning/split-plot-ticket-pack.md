@@ -124,7 +124,7 @@ result = find_optimal_design(
 )
 
 # New analysis function
-from iopt_power_design import power_curve_by_wp
+from lattice_doe import power_curve_by_wp
 
 df = power_curve_by_wp(
     formula="~ 1 + A + B + C",
@@ -165,7 +165,7 @@ df = power_curve_by_wp(
 **Goal:** Add `SplitPlotOptions` dataclass and wire it into `DesignOptions`.
 
 **Files changed:**
-- `iopt_power_design/config.py`
+- `lattice_doe/config.py`
 
 **What to implement:**
 
@@ -233,8 +233,8 @@ Add cross-validation in `DesignOptions.__post_init__`:
 variance model.
 
 **Files changed:**
-- `iopt_power_design/split_plot.py` (new)
-- `iopt_power_design/__init__.py` (export new public helpers)
+- `lattice_doe/split_plot.py` (new)
+- `lattice_doe/__init__.py` (export new public helpers)
 
 **Key functions:**
 
@@ -314,7 +314,7 @@ def split_plot_df_denom(
 factor columns clearly labelled, enabling the exchange algorithm to reason about nesting.
 
 **Files changed:**
-- `iopt_power_design/candidate.py`
+- `lattice_doe/candidate.py`
 
 **Approach:**
 
@@ -376,7 +376,7 @@ def build_split_plot_candidate(
 **Goal:** Add GLS variants of the I, D, A criterion scorers that incorporate `V⁻¹`.
 
 **Files changed:**
-- `iopt_power_design/iopt_search.py`
+- `lattice_doe/iopt_search.py`
 
 **New private functions:**
 
@@ -432,7 +432,7 @@ def _criterion_score(X_sel, criterion, *, V_inv=None, jitter=1e-8) -> float:
 constraint and optimizes over both WP and SP factor settings jointly using the GLS criterion.
 
 **Files changed:**
-- `iopt_power_design/iopt_search.py`
+- `lattice_doe/iopt_search.py`
 
 **New function:**
 
@@ -536,7 +536,7 @@ Both are extensions of the existing `_fedorov_exchange_single` logic.
 **Goal:** Add GLS variants of the power functions in `power.py`.
 
 **Files changed:**
-- `iopt_power_design/power.py`
+- `lattice_doe/power.py`
 
 **New functions:**
 
@@ -605,7 +605,7 @@ tolerance) to the existing OLS `contrast_power` and `global_r2_power`.
 **Goal:** Wire split-plot design generation and power calculation into `find_optimal_design`.
 
 **Files changed:**
-- `iopt_power_design/api.py`
+- `lattice_doe/api.py`
 
 **Logic to add in `find_optimal_design`:**
 
@@ -678,8 +678,8 @@ report["split_plot"] = {
 **Goal:** Extend `analysis.py` with split-plot-aware analysis helpers.
 
 **Files changed:**
-- `iopt_power_design/analysis.py`
-- `iopt_power_design/__init__.py`
+- `lattice_doe/analysis.py`
+- `lattice_doe/__init__.py`
 
 **New function:**
 
@@ -726,13 +726,13 @@ def power_curve_by_wp(
 **Goal:** Expose split-plot options across all user-facing surfaces.
 
 **Files changed:**
-- `iopt_power_design/cli.py`
+- `lattice_doe/cli.py`
 - `app/pages/2_Power_Config.py`
 - `app/state.py`
 - `app/pages/3_Run_Results.py`
 - `app/pages/4_Analysis.py`
-- `iopt_power_design/sheets.py`
-- `iopt_power_design/excel_template.py`
+- `lattice_doe/sheets.py`
+- `lattice_doe/excel_template.py`
 
 **CLI additions:**
 

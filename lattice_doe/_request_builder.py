@@ -1,6 +1,6 @@
 # _request_builder.py
 # License: MIT
-"""Shared request/config translation layer for iopt_power_design.
+"""Shared request/config translation layer for lattice_doe.
 
 All interface layers (CLI, Sheets, Excel, Streamlit) normalise their raw input
 into plain Python dicts and call the builder functions here to construct the

@@ -49,7 +49,7 @@ from api_server.serialization import (
     serialize_design_result,
     serialize_report,
 )
-from iopt_power_design.config import DesignOptions, PowerContrastConfig, PowerR2Config
+from lattice_doe.config import DesignOptions, PowerContrastConfig, PowerR2Config
 
 
 class TestSanitizeFloat:
@@ -232,7 +232,7 @@ class TestPydanticDesignOptsToDataclass:
     def test_split_plot_fields_forwarded(self):
         """CR-28: all SplitPlotOptionsModel fields are mapped to SplitPlotOptions."""
         from api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
-        from iopt_power_design.config import SplitPlotOptions
+        from lattice_doe.config import SplitPlotOptions
         sp_model = SplitPlotOptionsModel(
             htc_factors=["Temp", "Press"],
             n_whole_plots=6,
@@ -683,7 +683,7 @@ class TestMultiResponseModels:
     def test_pydantic_multi_cfg_to_dataclass_returns_MultiResponseOptions(self):
         from api_server.models.common import MultiResponseOptionsModel
         from api_server.serialization import pydantic_multi_cfg_to_dataclass
-        from iopt_power_design.config import MultiResponseOptions
+        from lattice_doe.config import MultiResponseOptions
         model = MultiResponseOptionsModel(responses=_MR_TWO_RESPONSES)
         result = pydantic_multi_cfg_to_dataclass(model)
         assert isinstance(result, MultiResponseOptions)
@@ -1041,7 +1041,7 @@ class TestGLMPydanticModels:
 
     def test_pydantic_power_cfg_to_dataclass_glm_branch(self):
         from api_server.models.common import PowerGLMContrastModel
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3, family="binomial")
         cfg = pydantic_power_cfg_to_dataclass(m)
         assert isinstance(cfg, PowerGLMContrastConfig)

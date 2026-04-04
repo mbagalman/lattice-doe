@@ -1,16 +1,16 @@
 # tests/test_request_builder.py
-"""Unit tests for iopt_power_design._request_builder."""
+"""Unit tests for lattice_doe._request_builder."""
 import numpy as np
 import pytest
 
-from iopt_power_design._request_builder import (
+from lattice_doe._request_builder import (
     build_design_opts,
     build_multi_response,
     build_power_cfg,
     build_response_spec,
     build_split_plot_opts,
 )
-from iopt_power_design.config import (
+from lattice_doe.config import (
     DesignOptions,
     MultiResponseOptions,
     PowerContrastConfig,

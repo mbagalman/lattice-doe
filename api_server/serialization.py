@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 
-from iopt_power_design.config import DesignOptions, MultiResponseOptions, PowerContrastConfig, PowerGLMContrastConfig, PowerR2Config, ResponseSpec, SplitPlotOptions
+from lattice_doe.config import DesignOptions, MultiResponseOptions, PowerContrastConfig, PowerGLMContrastConfig, PowerR2Config, ResponseSpec, SplitPlotOptions
 
 
 # ---------------------------------------------------------------------------

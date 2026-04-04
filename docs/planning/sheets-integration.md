@@ -29,7 +29,7 @@ Tracks all work for **Enhancement 16** (bidirectional Google Sheets connector).
 
 ## Design Decisions
 
-### New file: `iopt_power_design/sheets.py`
+### New file: `lattice_doe/sheets.py`
 
 Single new module. Keeps all gspread logic isolated — the rest of the package
 never imports from `sheets.py`. Same pattern as `plot_backends.py` (Plotly) and
@@ -235,7 +235,7 @@ spreadsheet). If both are provided, the spreadsheet config takes precedence.
 
 **What to do:**
 
-Create `iopt_power_design/sheets.py` with:
+Create `lattice_doe/sheets.py` with:
 
 1. Module docstring explaining the bidirectional Sheets connector, auth modes,
    and sheet layout overview.
@@ -304,7 +304,7 @@ Create `iopt_power_design/sheets.py` with:
 import sys
 sys.modules['gspread'] = None          # simulate missing package
 import importlib
-import iopt_power_design.sheets as s
+import lattice_doe.sheets as s
 assert not s._HAS_GSPREAD
 assert "sheets" in s._INSTALL_HINT
 ```
@@ -793,7 +793,7 @@ In the `all` group, add:
   "google-auth>=2.0",
 ```
 
-**`iopt_power_design/__init__.py`** — add exports:
+**`lattice_doe/__init__.py`** — add exports:
 ```python
 from .sheets import SheetsError, sheets_run, create_sheet_template  # noqa: F401
 ```
@@ -805,7 +805,7 @@ And add to `__all__`:
 "create_sheet_template",
 ```
 
-**`iopt_power_design/cli.py`** — add two new flags to the argument parser:
+**`lattice_doe/cli.py`** — add two new flags to the argument parser:
 
 ```python
 parser.add_argument(
@@ -834,7 +834,7 @@ In the `main()` function, after parsing args:
 ```python
 if args.sheets:
     try:
-        from iopt_power_design.sheets import sheets_run, SheetsError
+        from lattice_doe.sheets import sheets_run, SheetsError
     except ImportError:
         print(
             "Error: Google Sheets support requires gspread.\n"
@@ -870,7 +870,7 @@ independent execution path.
 **Acceptance criteria:**
 - [ ] `pyproject.toml` has `[sheets]` extras.
 - [ ] `gspread` and `google-auth` are in the `all` group.
-- [ ] `sheets_run` and `create_sheet_template` are in `iopt_power_design.__all__`.
+- [ ] `sheets_run` and `create_sheet_template` are in `lattice_doe.__all__`.
 - [ ] `--sheets` and `--sheets-credentials` flags exist in CLI.
 - [ ] CLI exits cleanly with a message when gspread not installed.
 - [ ] `GOOGLE_APPLICATION_CREDENTIALS` env var is honoured as a fallback.
@@ -972,13 +972,13 @@ class TestParseConfigSheet:
             ["x1", "continuous", "-1.0", "1.0"],
             ["x2", "continuous", "-1.0", "1.0"],
         ]
-        from iopt_power_design.sheets import _parse_config_sheet
+        from lattice_doe.sheets import _parse_config_sheet
         ws = _make_mock_worksheet(rows)
         formula, factors, power_cfg, design_opts = _parse_config_sheet(ws)
         assert formula == "x1 + x2"
         assert factors["x1"] == (-1.0, 1.0)
         assert factors["x2"] == (-1.0, 1.0)
-        from iopt_power_design.config import PowerR2Config
+        from lattice_doe.config import PowerR2Config
         assert isinstance(power_cfg, PowerR2Config)
 ```
 
@@ -1010,7 +1010,7 @@ class TestParseConfigSheet:
 3. **`README.md`** — add a brief "Google Sheets" subsection under the
    "Export & Integration" section (or equivalent), showing:
    ```python
-   from iopt_power_design import sheets_run, create_sheet_template
+   from lattice_doe import sheets_run, create_sheet_template
 
    # Create a template spreadsheet (once)
    url = create_sheet_template(title="My DOE", credentials="sa.json")

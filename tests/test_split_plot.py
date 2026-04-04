@@ -1,34 +1,34 @@
 # tests/test_split_plot.py
-"""Unit tests for iopt_power_design.split_plot and build_split_plot_candidate."""
+"""Unit tests for lattice_doe.split_plot and build_split_plot_candidate."""
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from iopt_power_design.split_plot import (
+from lattice_doe.split_plot import (
     build_whole_plot_indicator,
     build_split_plot_covariance_inv,
     gls_information_matrix,
     classify_contrasts,
     split_plot_df_denom,
 )
-from iopt_power_design.candidate import build_split_plot_candidate
-from iopt_power_design.api import find_optimal_design
-from iopt_power_design.analysis import power_curve_by_wp, power_sensitivity
-from iopt_power_design.config import (
+from lattice_doe.candidate import build_split_plot_candidate
+from lattice_doe.api import find_optimal_design
+from lattice_doe.analysis import power_curve_by_wp, power_sensitivity
+from lattice_doe.config import (
     PowerContrastConfig,
     PowerR2Config,
     DesignOptions,
     SplitPlotOptions,
 )
-from iopt_power_design.power import (
+from lattice_doe.power import (
     contrast_power,
     global_r2_power,
     contrast_power_sp,
     global_r2_power_sp,
 )
-from iopt_power_design.iopt_search import (
+from lattice_doe.iopt_search import (
     _gls_i_criterion,
     _gls_d_criterion,
     _gls_a_criterion,
@@ -219,8 +219,8 @@ class TestBuildSplitPlotCovarianceInv:
         np.testing.assert_allclose(V_inv[:3, :3], expected_block, atol=1e-12)
 
     def test_importable_from_top_level(self):
-        import iopt_power_design
-        assert hasattr(iopt_power_design, "build_split_plot_covariance_inv")
+        import lattice_doe
+        assert hasattr(lattice_doe, "build_split_plot_covariance_inv")
 
 
 # ===========================================================================
@@ -291,8 +291,8 @@ class TestGlsInformationMatrix:
         assert not np.allclose(M_gls, M_ols)
 
     def test_importable_from_top_level(self):
-        import iopt_power_design
-        assert hasattr(iopt_power_design, "gls_information_matrix")
+        import lattice_doe
+        assert hasattr(lattice_doe, "gls_information_matrix")
 
 
 # ===========================================================================
@@ -872,7 +872,7 @@ class TestGLSCriterionScorers:
 
     def test_score_design_gls_equals_ols_when_vinv_identity(self):
         """_score_design_gls with identity V_inv matches OLS _score_design for D and A."""
-        from iopt_power_design.iopt_search import _score_design
+        from lattice_doe.iopt_search import _score_design
         X, _, _, _ = _make_sp_fixture()
         n, p = X.shape
         V_inv_eye = np.eye(n)
@@ -1681,7 +1681,7 @@ class TestCR25HtcColMapping:
 
     def test_htc_factor_cols_from_names_classifies_correctly(self):
         """htc_factor_cols_from_names correctly identifies WP vs SP columns."""
-        from iopt_power_design.split_plot import htc_factor_cols_from_names
+        from lattice_doe.split_plot import htc_factor_cols_from_names
 
         p_names = ["Intercept", "A", "B", "C", "A:B", "A:C", "B:C"]
         htc_factors = ["A"]
@@ -1698,7 +1698,7 @@ class TestCR25HtcColMapping:
             assert idx not in cols, f"Column {p_names[idx]!r} should NOT be in htc_factor_cols"
 
     def test_htc_factor_cols_empty_when_no_htc(self):
-        from iopt_power_design.split_plot import htc_factor_cols_from_names
+        from lattice_doe.split_plot import htc_factor_cols_from_names
 
         cols = htc_factor_cols_from_names(
             ["Intercept", "A", "B"], htc_factors=[], all_factor_names=["A", "B"],
@@ -1874,7 +1874,7 @@ class TestCR27CandidateSizing:
         build_split_plot_design is called with these values via the mock.
         """
         from unittest.mock import patch, call
-        from iopt_power_design.iopt_search import build_split_plot_design as _bsd
+        from lattice_doe.iopt_search import build_split_plot_design as _bsd
 
         captured_kwargs: list = []
 
@@ -1890,7 +1890,7 @@ class TestCR27CandidateSizing:
             candidate_points=300,
         )
 
-        with patch("iopt_power_design.api.build_split_plot_design", side_effect=_mock_bsd):
+        with patch("lattice_doe.api.build_split_plot_design", side_effect=_mock_bsd):
             find_optimal_design(
                 _SP7_FORMULA, _SP7_FACTORS, _sp7_r2_cfg(), design_opts=opts,
             )
@@ -1908,7 +1908,7 @@ class TestCR27CandidateSizing:
     def test_power_curve_by_wp_uses_candidate_points(self):
         """CR-27: power_curve_by_wp also forwards candidate_points to pool sizes."""
         from unittest.mock import patch
-        from iopt_power_design.iopt_search import build_split_plot_design as _bsd
+        from lattice_doe.iopt_search import build_split_plot_design as _bsd
 
         captured_kwargs: list = []
 
@@ -1920,7 +1920,7 @@ class TestCR27CandidateSizing:
 
         # power_curve_by_wp uses a deferred `from .iopt_search import ...`
         # inside the function body, so we patch at the source module.
-        with patch("iopt_power_design.iopt_search.build_split_plot_design", side_effect=_mock_bsd):
+        with patch("lattice_doe.iopt_search.build_split_plot_design", side_effect=_mock_bsd):
             power_curve_by_wp(
                 _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
                 subplots_per_wp=3, htc_factors=_SP7_HTC, eta=1.0,
@@ -2076,7 +2076,7 @@ class TestSplitPlotAnalysis:
 
     def test_eta_sweep_none_for_non_sp_design(self):
         """power_sensitivity returns eta_sweep=None when __wp_id__ not in design_df."""
-        from iopt_power_design import find_optimal_design as iopt
+        from lattice_doe import find_optimal_design as iopt
         result_ols = iopt(
             _SP8_FORMULA, _SP8_FACTORS,
             PowerContrastConfig(
@@ -2100,7 +2100,7 @@ class TestSplitPlotAnalysis:
 
     def test_power_sensitivity_ols_unchanged(self):
         """Existing power_sensitivity behavior unaffected when eta_range=None."""
-        from iopt_power_design import find_optimal_design as iopt
+        from lattice_doe import find_optimal_design as iopt
         result_ols = iopt(
             _SP8_FORMULA, _SP8_FACTORS,
             PowerContrastConfig(
@@ -2137,14 +2137,14 @@ class TestSplitPlotCLI:
 
     def test_make_design_opts_no_sp_block(self):
         """Without split_plot key, design_opts has split_plot=None."""
-        from iopt_power_design.cli import _make_design_opts
+        from lattice_doe.cli import _make_design_opts
         cfg: dict = {}
         opts = _make_design_opts(cfg)
         assert opts.split_plot is None
 
     def test_make_design_opts_sp_block_activates_split_plot(self):
         """YAML split_plot: block builds SplitPlotOptions correctly."""
-        from iopt_power_design.cli import _make_design_opts
+        from lattice_doe.cli import _make_design_opts
         cfg = {
             "split_plot": {
                 "htc_factors": ["A", "B"],
@@ -2165,7 +2165,7 @@ class TestSplitPlotCLI:
 
     def test_make_design_opts_sp_block_string_htc_factors(self):
         """htc_factors as comma-separated string is parsed into a list."""
-        from iopt_power_design.cli import _make_design_opts
+        from lattice_doe.cli import _make_design_opts
         cfg = {
             "split_plot": {
                 "htc_factors": "A, B, C",
@@ -2178,21 +2178,21 @@ class TestSplitPlotCLI:
 
     def test_make_design_opts_sp_block_missing_htc_factors_no_activate(self):
         """Empty htc_factors does not activate split-plot."""
-        from iopt_power_design.cli import _make_design_opts
+        from lattice_doe.cli import _make_design_opts
         cfg = {"split_plot": {"htc_factors": [], "n_whole_plots": 4}}
         opts = _make_design_opts(cfg)
         assert opts.split_plot is None
 
     def test_make_design_opts_sp_block_n_whole_plots_lt2_no_activate(self):
         """n_whole_plots < 2 does not activate split-plot."""
-        from iopt_power_design.cli import _make_design_opts
+        from lattice_doe.cli import _make_design_opts
         cfg = {"split_plot": {"htc_factors": ["A"], "n_whole_plots": 1}}
         opts = _make_design_opts(cfg)
         assert opts.split_plot is None
 
     def test_make_design_opts_sp_subplots_per_wp_none_when_zero(self):
         """subplots_per_wp=0 in YAML maps to None (auto)."""
-        from iopt_power_design.cli import _make_design_opts
+        from lattice_doe.cli import _make_design_opts
         cfg = {
             "split_plot": {
                 "htc_factors": ["A"],
@@ -2206,21 +2206,21 @@ class TestSplitPlotCLI:
 
     def test_template_contrast_contains_split_plot_section(self):
         """--template contrast output contains a commented split_plot block."""
-        from iopt_power_design.cli import _TEMPLATE_CONTRAST
+        from lattice_doe.cli import _TEMPLATE_CONTRAST
         assert "split_plot" in _TEMPLATE_CONTRAST
         assert "htc_factors" in _TEMPLATE_CONTRAST
         assert "n_whole_plots" in _TEMPLATE_CONTRAST
 
     def test_template_r2_contains_split_plot_section(self):
         """--template r2 output contains a commented split_plot block."""
-        from iopt_power_design.cli import _TEMPLATE_R2
+        from lattice_doe.cli import _TEMPLATE_R2
         assert "split_plot" in _TEMPLATE_R2
         assert "htc_factors" in _TEMPLATE_R2
 
     def test_cli_flags_merge_into_cfg(self, tmp_path):
         """CLI --htc-factors / --n-whole-plots override YAML split_plot block."""
         import textwrap
-        from iopt_power_design.cli import main
+        from lattice_doe.cli import main
 
         cfg_text = textwrap.dedent("""\
             formula: "~ 1 + A + B"
@@ -2254,7 +2254,7 @@ class TestSplitPlotCLI:
     def test_cli_no_sp_flags_is_unchanged(self, tmp_path):
         """Without SP flags, CLI behaves exactly as before (no regressions)."""
         import textwrap
-        from iopt_power_design.cli import main
+        from lattice_doe.cli import main
 
         cfg_text = textwrap.dedent("""\
             formula: "~ 1 + A + B"
@@ -2286,7 +2286,7 @@ class TestSplitPlotCLI:
     def test_apply_sp_cli_args_eta_standalone(self):
         """CR-26: --eta alone overrides YAML split_plot.eta."""
         from types import SimpleNamespace
-        from iopt_power_design.cli import _apply_sp_cli_args, _make_design_opts
+        from lattice_doe.cli import _apply_sp_cli_args, _make_design_opts
 
         yaml_cfg = {
             "split_plot": {"htc_factors": ["A"], "n_whole_plots": 3, "eta": 1.0}
@@ -2305,7 +2305,7 @@ class TestSplitPlotCLI:
     def test_apply_sp_cli_args_subplots_standalone(self):
         """CR-26: --subplots-per-wp alone overrides YAML split_plot.subplots_per_wp."""
         from types import SimpleNamespace
-        from iopt_power_design.cli import _apply_sp_cli_args, _make_design_opts
+        from lattice_doe.cli import _apply_sp_cli_args, _make_design_opts
 
         yaml_cfg = {
             "split_plot": {
@@ -2327,7 +2327,7 @@ class TestSplitPlotCLI:
     def test_apply_sp_cli_args_df_method_standalone(self):
         """CR-26: --df-method alone overrides YAML split_plot.df_method."""
         from types import SimpleNamespace
-        from iopt_power_design.cli import _apply_sp_cli_args, _make_design_opts
+        from lattice_doe.cli import _apply_sp_cli_args, _make_design_opts
 
         yaml_cfg = {
             "split_plot": {
@@ -2349,7 +2349,7 @@ class TestSplitPlotCLI:
     def test_apply_sp_cli_args_no_flags_leaves_cfg_unchanged(self):
         """CR-26: when no SP flags are provided, cfg is returned as-is."""
         from types import SimpleNamespace
-        from iopt_power_design.cli import _apply_sp_cli_args
+        from lattice_doe.cli import _apply_sp_cli_args
 
         yaml_cfg = {
             "split_plot": {"htc_factors": ["A"], "n_whole_plots": 3, "eta": 2.0}
@@ -2364,7 +2364,7 @@ class TestSplitPlotCLI:
     def test_apply_sp_cli_args_original_cfg_not_mutated(self):
         """CR-26: _apply_sp_cli_args does not mutate the input cfg."""
         from types import SimpleNamespace
-        from iopt_power_design.cli import _apply_sp_cli_args
+        from lattice_doe.cli import _apply_sp_cli_args
 
         yaml_cfg = {
             "split_plot": {"htc_factors": ["A"], "n_whole_plots": 3, "eta": 1.0}
@@ -2422,7 +2422,7 @@ class TestSplitPlotSheets:
 
     def test_template_rows_r2_contain_sp_fields(self):
         """R2 template contains all 5 SP field names."""
-        from iopt_power_design.sheets import _TEMPLATE_ROWS
+        from lattice_doe.sheets import _TEMPLATE_ROWS
         rows_r2 = _TEMPLATE_ROWS["r2"]
         keys = [r[0] for r in rows_r2]
         for key in ("htc_factors", "n_whole_plots", "eta", "subplots_per_wp", "df_method"):
@@ -2430,7 +2430,7 @@ class TestSplitPlotSheets:
 
     def test_template_rows_contrast_contain_sp_fields(self):
         """Contrast template contains all 5 SP field names."""
-        from iopt_power_design.sheets import _TEMPLATE_ROWS
+        from lattice_doe.sheets import _TEMPLATE_ROWS
         rows_contrast = _TEMPLATE_ROWS["contrast"]
         keys = [r[0] for r in rows_contrast]
         for key in ("htc_factors", "n_whole_plots", "eta", "subplots_per_wp", "df_method"):
@@ -2438,21 +2438,21 @@ class TestSplitPlotSheets:
 
     def test_sp_fields_disabled_by_default_in_template(self):
         """Default template has n_whole_plots=0 (SP disabled)."""
-        from iopt_power_design.sheets import _TEMPLATE_ROWS
+        from lattice_doe.sheets import _TEMPLATE_ROWS
         row_dict = {r[0]: r[1] for r in _TEMPLATE_ROWS["r2"] if len(r) > 1}
         assert row_dict["n_whole_plots"] == "0"
         assert row_dict["htc_factors"] == ""
 
     def test_design_opts_no_sp_when_htc_factors_empty(self):
         """Parsing settings with blank htc_factors produces no split_plot."""
-        from iopt_power_design.sheets import _parse_config_sheet
+        from lattice_doe.sheets import _parse_config_sheet
         rows = _sp_sheet_rows({"htc_factors": "", "n_whole_plots": "4"})
         _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_ws_sp(rows))
         assert design_opts.split_plot is None
 
     def test_design_opts_sp_activated_when_valid(self):
         """Parsing settings with htc_factors + n_whole_plots >= 2 creates SplitPlotOptions."""
-        from iopt_power_design.sheets import _parse_config_sheet
+        from lattice_doe.sheets import _parse_config_sheet
         rows = _sp_sheet_rows({
             "htc_factors": "x1",
             "n_whole_plots": "4",
@@ -2471,14 +2471,14 @@ class TestSplitPlotSheets:
 
     def test_design_opts_n_whole_plots_lt2_no_sp(self):
         """n_whole_plots < 2 does not activate split-plot even with htc_factors set."""
-        from iopt_power_design.sheets import _parse_config_sheet
+        from lattice_doe.sheets import _parse_config_sheet
         rows = _sp_sheet_rows({"htc_factors": "x1", "n_whole_plots": "1"})
         _, _, _, design_opts, _ = _parse_config_sheet(_make_mock_ws_sp(rows))
         assert design_opts.split_plot is None
 
     def test_design_opts_subplots_per_wp_zero_maps_to_none(self):
         """subplots_per_wp=0 in sheet maps to None (auto)."""
-        from iopt_power_design.sheets import _parse_config_sheet
+        from lattice_doe.sheets import _parse_config_sheet
         rows = _sp_sheet_rows({
             "htc_factors": "x1",
             "n_whole_plots": "3",
@@ -2499,7 +2499,7 @@ class TestSplitPlotExcel:
     def test_create_excel_template_r2_contains_sp_keys(self, tmp_path):
         """create_excel_template (r2) writes SP key rows to the Config sheet."""
         pytest.importorskip("openpyxl")
-        from iopt_power_design.excel_template import create_excel_template
+        from lattice_doe.excel_template import create_excel_template
         import openpyxl
 
         dest = create_excel_template(str(tmp_path / "tpl.xlsx"), example="r2")
@@ -2513,7 +2513,7 @@ class TestSplitPlotExcel:
     def test_create_excel_template_contrast_contains_sp_keys(self, tmp_path):
         """create_excel_template (contrast) writes SP key rows."""
         pytest.importorskip("openpyxl")
-        from iopt_power_design.excel_template import create_excel_template
+        from lattice_doe.excel_template import create_excel_template
         import openpyxl
 
         dest = create_excel_template(str(tmp_path / "tpl.xlsx"), example="contrast")
@@ -2527,7 +2527,7 @@ class TestSplitPlotExcel:
     def test_read_config_sheet_no_sp_when_n_whole_plots_zero(self, tmp_path):
         """Reading a default template (n_whole_plots=0) produces no SplitPlotOptions."""
         pytest.importorskip("openpyxl")
-        from iopt_power_design.excel_template import create_excel_template, _read_config_sheet
+        from lattice_doe.excel_template import create_excel_template, _read_config_sheet
         import openpyxl
 
         dest = create_excel_template(str(tmp_path / "tpl.xlsx"), example="r2")
@@ -2538,7 +2538,7 @@ class TestSplitPlotExcel:
     def test_read_config_sheet_sp_activated(self, tmp_path):
         """Writing SP values to the template then reading back produces SplitPlotOptions."""
         pytest.importorskip("openpyxl")
-        from iopt_power_design.excel_template import create_excel_template, _read_config_sheet
+        from lattice_doe.excel_template import create_excel_template, _read_config_sheet
         import openpyxl
 
         dest = create_excel_template(str(tmp_path / "tpl.xlsx"), example="r2")
@@ -2574,7 +2574,7 @@ class TestSplitPlotExcel:
     def test_sp_invalid_options_raise_excel_error(self, tmp_path):
         """Invalid SplitPlotOptions values (eta < 0) raise ExcelError."""
         pytest.importorskip("openpyxl")
-        from iopt_power_design.excel_template import (
+        from lattice_doe.excel_template import (
             create_excel_template, _read_config_sheet, ExcelError,
         )
         import openpyxl

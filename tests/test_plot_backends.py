@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from iopt_power_design.config import DesignOptions, PowerContrastConfig, PowerR2Config
+from lattice_doe.config import DesignOptions, PowerContrastConfig, PowerR2Config
 
 # ---------------------------------------------------------------------------
 # Availability flag used for skipif markers
@@ -72,7 +72,7 @@ class TestPlotlyBackendImport:
     """Verify that each helper raises ImportError when plotly is absent."""
 
     def _call_all_helpers_with_no_plotly(self):
-        import iopt_power_design.plot_backends as pb
+        import lattice_doe.plot_backends as pb
 
         dummy_df = pd.DataFrame({"n": [5], "power": [0.5], "i_criterion": [1.0], "d_efficiency": [0.5]})
         dummy_grid = np.array([[0.5, 0.6], [0.7, 0.8]])
@@ -93,7 +93,7 @@ class TestPlotlyBackendImport:
         self._call_all_helpers_with_no_plotly()
 
     def test_install_hint_mentions_viz(self):
-        import iopt_power_design.plot_backends as pb
+        import lattice_doe.plot_backends as pb
         assert "viz" in pb._INSTALL_HINT or "plotly" in pb._INSTALL_HINT
 
 
@@ -103,11 +103,11 @@ class TestPlotlyBackendImport:
 
 class TestPowerSurface2dExport:
     def test_power_surface_2d_importable(self):
-        from iopt_power_design import power_surface_2d
+        from lattice_doe import power_surface_2d
         assert callable(power_surface_2d)
 
     def test_power_surface_2d_in_all(self):
-        import iopt_power_design as iop
+        import lattice_doe as iop
         assert "power_surface_2d" in iop.__all__
 
 
@@ -119,7 +119,7 @@ class TestPowerSurface2dExport:
 class TestPlotlyCurveByN:
     def test_returns_plotly_figure(self):
         import plotly.graph_objects as go
-        from iopt_power_design.power_curves import power_curve_by_n
+        from lattice_doe.power_curves import power_curve_by_n
 
         result = power_curve_by_n(
             formula=FORMULA,
@@ -135,7 +135,7 @@ class TestPlotlyCurveByN:
 
     def test_has_expected_traces(self):
         import plotly.graph_objects as go
-        from iopt_power_design.power_curves import power_curve_by_n
+        from lattice_doe.power_curves import power_curve_by_n
 
         result = power_curve_by_n(
             formula=FORMULA,
@@ -154,7 +154,7 @@ class TestPlotlyCurveByN:
         assert "D-efficiency" in trace_names
 
     def test_plot_false_ignores_backend(self):
-        from iopt_power_design.power_curves import power_curve_by_n
+        from lattice_doe.power_curves import power_curve_by_n
 
         result = power_curve_by_n(
             formula=FORMULA,
@@ -170,7 +170,7 @@ class TestPlotlyCurveByN:
 
     def test_wrapper_accepts_plot_backend(self):
         # Wrapper has no n_range param; use FAST_OPTS_WIDE so pool >= auto-computed max_n
-        from iopt_power_design import power_curve_by_n as wrapper
+        from lattice_doe import power_curve_by_n as wrapper
 
         df = wrapper(
             formula=FORMULA,
@@ -187,7 +187,7 @@ class TestPlotlyCurveByN:
 class TestPlotlyCurveByEffect:
     def test_contrast_returns_plotly_figure(self):
         import plotly.graph_objects as go
-        from iopt_power_design.power_curves import power_curve_by_effect
+        from lattice_doe.power_curves import power_curve_by_effect
 
         result = power_curve_by_effect(
             formula=FORMULA,
@@ -203,7 +203,7 @@ class TestPlotlyCurveByEffect:
 
     def test_r2_returns_plotly_figure(self):
         import plotly.graph_objects as go
-        from iopt_power_design.power_curves import power_curve_by_effect
+        from lattice_doe.power_curves import power_curve_by_effect
 
         result = power_curve_by_effect(
             formula=FORMULA,
@@ -219,7 +219,7 @@ class TestPlotlyCurveByEffect:
 
     def test_has_power_trace(self):
         import plotly.graph_objects as go
-        from iopt_power_design.power_curves import power_curve_by_effect
+        from lattice_doe.power_curves import power_curve_by_effect
 
         result = power_curve_by_effect(
             formula=FORMULA,
@@ -235,7 +235,7 @@ class TestPlotlyCurveByEffect:
         assert any(t.name == "Power" for t in fig.data)
 
     def test_plot_false_ignores_backend(self):
-        from iopt_power_design.power_curves import power_curve_by_effect
+        from lattice_doe.power_curves import power_curve_by_effect
 
         result = power_curve_by_effect(
             formula=FORMULA,
@@ -254,7 +254,7 @@ class TestPlotlyCurveByEffect:
 class TestPlotlySurface2d:
     def test_returns_plotly_figure(self):
         import plotly.graph_objects as go
-        from iopt_power_design.power_curves import power_surface_2d
+        from lattice_doe.power_curves import power_surface_2d
 
         result = power_surface_2d(
             formula=FORMULA,
@@ -272,7 +272,7 @@ class TestPlotlySurface2d:
         assert isinstance(result["figure"], go.Figure)
 
     def test_has_heatmap_and_contour(self):
-        from iopt_power_design.power_curves import power_surface_2d
+        from lattice_doe.power_curves import power_surface_2d
 
         result = power_surface_2d(
             formula=FORMULA,
@@ -292,7 +292,7 @@ class TestPlotlySurface2d:
         assert "contour" in trace_types
 
     def test_plot_false_ignores_backend(self):
-        from iopt_power_design.power_curves import power_surface_2d
+        from lattice_doe.power_curves import power_surface_2d
 
         result = power_surface_2d(
             formula=FORMULA,
@@ -314,7 +314,7 @@ class TestPlotlySurface2d:
 class TestPlotlySensitivity:
     def test_contrast_returns_plotly_figure(self):
         import plotly.graph_objects as go
-        from iopt_power_design import power_sensitivity
+        from lattice_doe import power_sensitivity
 
         result = power_sensitivity(
             formula=FORMULA,
@@ -331,7 +331,7 @@ class TestPlotlySensitivity:
 
     def test_r2_returns_plotly_figure(self):
         import plotly.graph_objects as go
-        from iopt_power_design import power_sensitivity
+        from lattice_doe import power_sensitivity
 
         result = power_sensitivity(
             formula=FORMULA,
@@ -348,7 +348,7 @@ class TestPlotlySensitivity:
 
     def test_has_power_trace_and_reference_lines(self):
         import plotly.graph_objects as go
-        from iopt_power_design import power_sensitivity
+        from lattice_doe import power_sensitivity
 
         result = power_sensitivity(
             formula=FORMULA,
@@ -367,7 +367,7 @@ class TestPlotlySensitivity:
         assert len(fig.layout.shapes) == 3
 
     def test_plot_false_ignores_backend(self):
-        from iopt_power_design import power_sensitivity
+        from lattice_doe import power_sensitivity
 
         result = power_sensitivity(
             formula=FORMULA,

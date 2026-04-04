@@ -8,8 +8,8 @@ from functools import partial
 
 from fastapi import APIRouter
 
-from iopt_power_design import power_sensitivity, min_detectable_effect
-from iopt_power_design.config import PowerContrastConfig
+from lattice_doe import power_sensitivity, min_detectable_effect
+from lattice_doe.config import PowerContrastConfig
 from api_server.models.sensitivity import (
     MdeRequest,
     MdeResponse,

@@ -278,8 +278,8 @@ def i_optimal_allocation(
 
     Examples
     --------
-    >>> from iopt_power_design import DesignOptions
-    >>> from iopt_power_design.allocation import i_optimal_allocation
+    >>> from lattice_doe import DesignOptions
+    >>> from lattice_doe.allocation import i_optimal_allocation
     >>> factors = {
     ...     "Material": ["Steel", "Aluminum", "Titanium"],
     ...     "Temp":     (-10.0, 50.0),

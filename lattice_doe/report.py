@@ -1,7 +1,7 @@
 # report.py
 # License: MIT
 """
-iopt_power_design.report
+lattice_doe.report
 ========================
 Generate self-contained HTML (and optionally PDF) summary reports for
 powered optimal designs.
@@ -41,7 +41,7 @@ def _get_jinja_env():
         ) from exc
 
     return Environment(
-        loader=PackageLoader("iopt_power_design", "templates"),
+        loader=PackageLoader("lattice_doe", "templates"),
         autoescape=select_autoescape(["html"]),
         trim_blocks=True,
         lstrip_blocks=True,

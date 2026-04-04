@@ -1,7 +1,7 @@
 # design.py
 # License: MIT
 """
-Backward-compatibility wrapper for iopt_power_design.design
+Backward-compatibility wrapper for lattice_doe.design
 ============================================================
 
 All implementation has been split into focused modules:
@@ -12,7 +12,7 @@ All implementation has been split into focused modules:
                           public build + augment functions
 
 This file re-exports every public symbol so that existing code using
-``from .design import ...`` or ``from iopt_power_design.design import ...``
+``from .design import ...`` or ``from lattice_doe.design import ...``
 continues to work without modification.
 
 Do not add new implementation here.  New code belongs in one of the

@@ -28,9 +28,9 @@ That is appropriate for `power_combination="min"`, but not for `product` or `wei
 
 Relevant code:
 
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/api.py:1028`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/config.py:948`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/power.py:663`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/api.py:1028`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/config.py:948`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/power.py:663`
 
 Notes:
 
@@ -49,9 +49,9 @@ That is a valid local approximation for the narrow case the code documents, but 
 
 Relevant code:
 
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/power.py:257`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/power.py:304`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/config.py:797`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/power.py:257`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/power.py:304`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/config.py:797`
 
 ### Medium
 
@@ -61,8 +61,8 @@ The split-plot power path uses GLS for the information matrix, which is the righ
 
 Relevant code:
 
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/power.py:447`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/split_plot.py:324`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/power.py:447`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/split_plot.py:324`
 
 ### Medium
 
@@ -72,8 +72,8 @@ Correlated multi-response support is only implemented for shared-formula OLS con
 
 Relevant code:
 
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/api.py:1046`
-- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/iopt_power_design/api.py:1087`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/api.py:1046`
+- `/Users/michaelbagalman/Documents/GitHub Projects/DOE Idea/lattice_doe/api.py:1087`
 
 ## Review scope
 

@@ -7,7 +7,7 @@ import pytest
 import dataclasses
 import warnings
 
-from iopt_power_design.config import (
+from lattice_doe.config import (
     DesignOptions,
     PowerContrastConfig,
     PowerR2Config,
@@ -306,7 +306,7 @@ class TestValidateConfigKeysContrastType:
     """_validate_config_keys must raise KeyError with an actionable message
     when 'contrast' is present but is not a dict (issue #3)."""
 
-    from iopt_power_design.cli import _validate_config_keys as _vcfg
+    from lattice_doe.cli import _validate_config_keys as _vcfg
     _vcfg = staticmethod(_vcfg)  # prevent Python from treating it as an unbound method
 
     _BASE = {
@@ -545,8 +545,8 @@ class TestDesignOptionsSplitPlot:
         assert len(w) == 0
 
     def test_split_plot_importable_from_top_level(self):
-        import iopt_power_design
-        assert hasattr(iopt_power_design, "SplitPlotOptions")
+        import lattice_doe
+        assert hasattr(lattice_doe, "SplitPlotOptions")
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +611,7 @@ class TestResponseSpec:
         assert rs2.power_cfg is rs.power_cfg
 
     def test_all_exports_response_spec(self):
-        import iopt_power_design.config as cfg_module
+        import lattice_doe.config as cfg_module
         assert "ResponseSpec" in cfg_module.__all__
 
 
@@ -690,7 +690,7 @@ class TestMultiResponseOptions:
         assert [r.name for r in mro.responses] == names
 
     def test_all_exports_multi_response_options(self):
-        import iopt_power_design.config as cfg_module
+        import lattice_doe.config as cfg_module
         assert "MultiResponseOptions" in cfg_module.__all__
 
 
@@ -1020,7 +1020,7 @@ class TestPowerGLMContrastConfig:
         assert isinstance(cfg, PowerGLMContrastConfig)
 
     def test_public_export_accessible(self):
-        import iopt_power_design as pkg
+        import lattice_doe as pkg
         assert hasattr(pkg, "PowerGLMContrastConfig")
         assert pkg.PowerGLMContrastConfig is PowerGLMContrastConfig
 
@@ -1064,6 +1064,6 @@ class TestGLMFisherWeight:
         assert glm_fisher_weight(_glm_poisson_cfg(baseline=0.5)) > 0
 
     def test_public_export_accessible(self):
-        import iopt_power_design as pkg
+        import lattice_doe as pkg
         assert hasattr(pkg, "glm_fisher_weight")
         assert pkg.glm_fisher_weight is glm_fisher_weight

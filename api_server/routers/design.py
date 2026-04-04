@@ -8,8 +8,8 @@ from functools import partial
 
 from fastapi import APIRouter
 
-from iopt_power_design import find_optimal_design
-from iopt_power_design.api import find_multiresponse_design
+from lattice_doe import find_optimal_design
+from lattice_doe.api import find_multiresponse_design
 from api_server.models.design import (
     DesignRequest,
     DesignResponse,

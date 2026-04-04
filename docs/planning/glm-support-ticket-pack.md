@@ -80,7 +80,7 @@ the weights `wᵢ = μᵢ(1 − μᵢ)` vary by row. This requires a *weighted* 
 ## GL-1 — GLM Config Dataclasses
 
 **Status:** ✅ Completed
-**Files:** `iopt_power_design/config.py`
+**Files:** `lattice_doe/config.py`
 **Estimated new tests:** 25
 
 ### Goal
@@ -205,7 +205,7 @@ Add `PowerGLMContrastConfig` and `glm_fisher_weight` to `__init__.py` (public AP
 ## GL-2 — GLM Power Functions (Wald χ²)
 
 **Status:** ✅ Completed
-**Files:** `iopt_power_design/power.py`
+**Files:** `lattice_doe/power.py`
 **Estimated new tests:** 30
 **Depends on:** GL-1
 
@@ -357,7 +357,7 @@ elif isinstance(response.power_cfg, PowerGLMContrastConfig):
 ## GL-3 — GLM Design API Integration
 
 **Status:** ✅ Completed
-**Files:** `iopt_power_design/api.py`, `iopt_power_design/__init__.py`
+**Files:** `lattice_doe/api.py`, `lattice_doe/__init__.py`
 **Estimated new tests:** 20
 **Depends on:** GL-1, GL-2
 
@@ -453,7 +453,7 @@ Add `PowerGLMContrastConfig` to the public `__all__` export list. Also export `g
 ## GL-4 — GLM Power Curves and Baseline Sweep
 
 **Status:** ✅ Completed
-**Files:** `iopt_power_design/analysis.py`
+**Files:** `lattice_doe/analysis.py`
 **Estimated new tests:** 20
 **Depends on:** GL-3
 
@@ -556,7 +556,7 @@ Signature addition: detect `PowerGLMContrastConfig` and:
 ## GL-5 — GLM min_detectable_effect and compare_criteria
 
 **Status:** ✅ Completed
-**Files:** `iopt_power_design/analysis.py`
+**Files:** `lattice_doe/analysis.py`
 **Estimated new tests:** 15
 **Depends on:** GL-4
 
@@ -608,7 +608,7 @@ Add dispatch so that when `power_cfg` is `PowerGLMContrastConfig`, the result ta
 ## GL-6 — CLI and YAML Template Support
 
 **Status:** ✅ Completed
-**Files:** `iopt_power_design/cli.py`
+**Files:** `lattice_doe/cli.py`
 **Estimated new tests:** 15
 **Depends on:** GL-3
 
@@ -873,7 +873,7 @@ When GLM is active, sidebar shows `family`, `baseline` instead of σ:
 ## GL-9 — Sheets and Excel GLM Connector Support
 
 **Status:** ✅ Completed
-**Files:** `iopt_power_design/sheets.py`, `iopt_power_design/excel_template.py`
+**Files:** `lattice_doe/sheets.py`, `lattice_doe/excel_template.py`
 **Estimated new tests:** 20
 **Depends on:** GL-3
 
@@ -947,7 +947,7 @@ response instead of `PowerContrastConfig`.
 ## GL-10 — Weighted Fedorov Exchange (Phase 2 — Deferred)
 
 **Status:** ⬜ Deferred
-**Files:** `iopt_power_design/iopt_search.py`, `iopt_power_design/candidate.py`
+**Files:** `lattice_doe/iopt_search.py`, `lattice_doe/candidate.py`
 **Estimated new tests:** 25
 **Depends on:** GL-2
 
@@ -1001,7 +1001,7 @@ existing OLS scorers but use `M = X'WX`.
 ## GL-11 — Alternative-Based GLM Design API (Phase 2 — Deferred)
 
 **Status:** ⬜ Deferred
-**Files:** `iopt_power_design/api.py`, `iopt_power_design/analysis.py`
+**Files:** `lattice_doe/api.py`, `lattice_doe/analysis.py`
 **Estimated new tests:** 20
 **Depends on:** GL-10
 

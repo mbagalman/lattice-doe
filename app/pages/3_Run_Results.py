@@ -31,8 +31,8 @@ init_state()
 render_sidebar()
 
 try:
-    from iopt_power_design import find_optimal_design, find_multiresponse_design
-    from iopt_power_design.config import (
+    from lattice_doe import find_optimal_design, find_multiresponse_design
+    from lattice_doe.config import (
         DesignOptions,
         PowerContrastConfig,
         PowerGLMContrastConfig,
@@ -40,8 +40,8 @@ try:
         MultiResponseOptions,
         ResponseSpec,
     )
-    from iopt_power_design.contrasts import contrast_from_scenarios
-    from iopt_power_design._request_builder import build_power_cfg, build_design_opts
+    from lattice_doe.contrasts import contrast_from_scenarios
+    from lattice_doe._request_builder import build_power_cfg, build_design_opts
     _HAS_IOPT = True
 except ImportError:
     _HAS_IOPT = False
@@ -381,7 +381,7 @@ with col_clear:
             st.rerun()
 
 if not _HAS_IOPT:
-    st.error("iopt_power_design is not installed. Run `pip install -e '.[app]'` first.")
+    st.error("lattice_doe is not installed. Run `pip install -e '.[app]'` first.")
 
 if run_clicked and not _issues and _HAS_IOPT:
     try:
@@ -695,7 +695,7 @@ with exp_cols[3]:
     if _HAS_JINJA2:
         import os as _os
         import tempfile as _tempfile
-        from iopt_power_design import generate_report as _generate_report
+        from lattice_doe import generate_report as _generate_report
         _power_cfg_d3 = st.session_state.get("_last_power_cfg")
         _formula_d3 = st.session_state.get("formula", "")
         _factors_d3_raw = st.session_state.get("factors", [])

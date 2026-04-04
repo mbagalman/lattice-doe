@@ -24,7 +24,7 @@ Note on return types
 ``power_curve_by_n`` and ``power_curve_by_effect`` in this module return plain
 ``pd.DataFrame`` objects (not dicts) for a simpler default experience.  To
 access the figure object or the full result dict, call the canonical
-implementations in ``iopt_power_design.power_curves`` directly.
+implementations in ``lattice_doe.power_curves`` directly.
 """
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def power_curve_by_n(
         ``plot_backend="plotly"``.
 
     Note: To access the figure object directly, call
-    ``iopt_power_design.power_curves.power_curve_by_n()`` directly.
+    ``lattice_doe.power_curves.power_curve_by_n()`` directly.
     """
     out = _power_curve_by_n_impl(
         formula=formula,
@@ -113,7 +113,7 @@ def power_curve_by_effect(
     * R² mode: ``effect_size`` → ``r2_target``
 
     Note: To access the figure object directly, call
-    ``iopt_power_design.power_curves.power_curve_by_effect()`` directly.
+    ``lattice_doe.power_curves.power_curve_by_effect()`` directly.
     """
     out = _power_curve_by_effect_impl(
         formula=formula,

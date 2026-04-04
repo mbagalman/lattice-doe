@@ -1,6 +1,6 @@
 # tests/test_excel_template.py
 # License: MIT
-"""Unit tests for iopt_power_design.excel_template — openpyxl calls mocked where possible."""
+"""Unit tests for lattice_doe.excel_template — openpyxl calls mocked where possible."""
 from __future__ import annotations
 
 import tempfile
@@ -12,14 +12,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import iopt_power_design.excel_template as excel_module
-from iopt_power_design.excel_template import (
+import lattice_doe.excel_template as excel_module
+from lattice_doe.excel_template import (
     ExcelError,
     _read_config_sheet,
     create_excel_template,
     excel_run,
 )
-from iopt_power_design.config import DesignOptions, PowerContrastConfig, PowerR2Config
+from lattice_doe.config import DesignOptions, PowerContrastConfig, PowerR2Config
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +397,7 @@ class TestExcelRun:
         with tempfile.TemporaryDirectory() as td:
             p = create_excel_template(Path(td) / "test_r2.xlsx", example="r2")
             with patch(
-                "iopt_power_design.api.find_optimal_design",
+                "lattice_doe.api.find_optimal_design",
                 side_effect=RuntimeError("solver failed"),
             ):
                 with pytest.raises(ExcelError, match="Design search failed"):
@@ -689,7 +689,7 @@ class TestExcelGLMSupport:
         ]
         ws = _make_ws(rows)
         formula, factors, power_cfg, design_opts, multi_cfg = _read_config_sheet(ws)
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         assert isinstance(power_cfg, PowerGLMContrastConfig)
         assert formula == "x1 + x2"
         assert multi_cfg is None
@@ -711,7 +711,7 @@ class TestExcelGLMSupport:
         ]
         ws = _make_ws(rows)
         _, _, power_cfg, _, _ = _read_config_sheet(ws)
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         assert isinstance(power_cfg, PowerGLMContrastConfig)
         assert power_cfg.family == "poisson"
         assert power_cfg.baseline == pytest.approx(2.5)
@@ -750,7 +750,7 @@ class TestExcelGLMSupport:
             import openpyxl
             wb = openpyxl.load_workbook(p)
             _, _, power_cfg, _, multi_cfg = _read_config_sheet(wb["Config"])
-            from iopt_power_design.config import PowerGLMContrastConfig
+            from lattice_doe.config import PowerGLMContrastConfig
             assert isinstance(power_cfg, PowerGLMContrastConfig)
             assert power_cfg.family == "binomial"
             assert multi_cfg is None
@@ -780,7 +780,7 @@ class TestExcelGLMSupport:
         _, _, power_cfg, _, multi_cfg = _read_config_sheet(ws)
         assert power_cfg is None
         assert multi_cfg is not None
-        from iopt_power_design.config import PowerGLMContrastConfig, PowerR2Config
+        from lattice_doe.config import PowerGLMContrastConfig, PowerR2Config
         assert isinstance(multi_cfg.responses[0].power_cfg, PowerGLMContrastConfig)
         assert isinstance(multi_cfg.responses[1].power_cfg, PowerR2Config)
 
@@ -806,7 +806,7 @@ class TestExcelGLMSupport:
         ]
         ws = _make_ws(rows)
         _, _, _, _, multi_cfg = _read_config_sheet(ws)
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         y1 = multi_cfg.responses[0].power_cfg
         assert isinstance(y1, PowerGLMContrastConfig)
         assert y1.baseline == pytest.approx(3.5)
@@ -827,7 +827,7 @@ class TestExcelGLMSupport:
             import openpyxl
             wb = openpyxl.load_workbook(p)
             _, _, power_cfg, _, _ = _read_config_sheet(wb["Config"])
-            from iopt_power_design.config import PowerGLMContrastConfig
+            from lattice_doe.config import PowerGLMContrastConfig
             assert isinstance(power_cfg, PowerGLMContrastConfig)
             assert power_cfg.family == "poisson"
 

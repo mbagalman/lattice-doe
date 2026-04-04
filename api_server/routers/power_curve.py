@@ -8,7 +8,7 @@ from functools import partial
 
 from fastapi import APIRouter
 
-from iopt_power_design import power_curve_by_n, power_curve_by_effect
+from lattice_doe import power_curve_by_n, power_curve_by_effect
 from api_server.models.power_curve import (
     PowerCurveByNRequest,
     PowerCurveByEffectRequest,

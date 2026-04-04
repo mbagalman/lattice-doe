@@ -838,7 +838,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Handle --sheets before --config check (sheets path does not need --config)
     if args.sheets:
         try:
-            from iopt_power_design.sheets import sheets_run, SheetsError  # noqa: PLC0415
+            from lattice_doe.sheets import sheets_run, SheetsError  # noqa: PLC0415
         except ImportError:
             print(
                 "Error: Google Sheets support requires gspread.\n"
@@ -870,7 +870,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Handle --excel-template (create a starter workbook and exit)
     if args.excel_template:
         try:
-            from iopt_power_design.excel_template import create_excel_template, ExcelError  # noqa: PLC0415
+            from lattice_doe.excel_template import create_excel_template, ExcelError  # noqa: PLC0415
         except ImportError:
             print(
                 "Error: Excel support requires openpyxl.\n"
@@ -889,7 +889,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Handle --excel-run (bidirectional Excel run and exit)
     if args.excel_run:
         try:
-            from iopt_power_design.excel_template import excel_run, ExcelError  # noqa: PLC0415
+            from lattice_doe.excel_template import excel_run, ExcelError  # noqa: PLC0415
         except ImportError:
             print(
                 "Error: Excel support requires openpyxl.\n"
@@ -1114,7 +1114,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             if _is_multiresponse:
                 logger.warning("--robustness-report is not supported for multi-response designs; skipped.")
             try:
-                from iopt_power_design.analysis import robustness_report  # noqa: PLC0415
+                from lattice_doe.analysis import robustness_report  # noqa: PLC0415
                 rob = robustness_report(
                     design_df=design_df,
                     formula=formula,

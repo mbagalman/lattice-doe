@@ -11,14 +11,14 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from iopt_power_design.cli import (
+from lattice_doe.cli import (
     _make_power_cfg,
     _validate_config_keys,
     _apply_glm_cli_args,
     _print_template,
     main,
 )
-from iopt_power_design.config import PowerGLMContrastConfig, PowerContrastConfig, PowerR2Config
+from lattice_doe.config import PowerGLMContrastConfig, PowerContrastConfig, PowerR2Config
 
 
 # ---------------------------------------------------------------------------

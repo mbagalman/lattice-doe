@@ -240,7 +240,7 @@ Add an "Add categorical factor" button alongside the continuous one.
 **What to do:**
 In `app/pages/1_Factors.py`, below the factor table:
 1. Text input for `formula` (pre-filled from session state).
-2. On change, attempt to build a small candidate (using `iopt_power_design.design.build_model_matrix` or a dummy candidate) and display:
+2. On change, attempt to build a small candidate (using `lattice_doe.design.build_model_matrix` or a dummy candidate) and display:
    - Number of model parameters `p`
    - Column names from the Patsy model matrix
    - A green "Valid formula" or red error message.

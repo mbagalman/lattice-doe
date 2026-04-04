@@ -50,7 +50,7 @@ fig.show()               # interactive in Jupyter / browser
 
 ### All Plotly helpers live in `plot_backends.py`
 
-A new `iopt_power_design/plot_backends.py` holds one Plotly builder per chart type.
+A new `lattice_doe/plot_backends.py` holds one Plotly builder per chart type.
 This keeps `power_curves.py` and `api.py` clean and isolates the `plotly` import to
 one module (soft dependency — guarded by a try/except at module level).
 
@@ -116,7 +116,7 @@ remove them). For this enhancement:
 - Since the wrappers discard the figure and return only `data`, `plot_backend` has no
   user-visible effect via the public API wrappers. Document in the docstring that
   users who want a Plotly figure should call
-  `iopt_power_design.power_curves.power_curve_by_n(...)` directly.
+  `lattice_doe.power_curves.power_curve_by_n(...)` directly.
 
 ---
 
@@ -147,7 +147,7 @@ remove them). For this enhancement:
 
 **What to do:**
 
-1. Create `iopt_power_design/plot_backends.py` with:
+1. Create `lattice_doe/plot_backends.py` with:
    ```python
    """Plotly figure builders for power curve functions."""
    try:
@@ -176,11 +176,11 @@ remove them). For this enhancement:
    ```
    (Plotly is already in `[app]`; this makes it available for non-Streamlit users too.)
 
-3. Verify: `python -c "import iopt_power_design.plot_backends"` exits without error.
+3. Verify: `python -c "import lattice_doe.plot_backends"` exits without error.
 4. Run `pytest tests/ -q` — all existing tests still pass.
 
 **Acceptance criteria:**
-- [ ] `iopt_power_design/plot_backends.py` exists and is importable.
+- [ ] `lattice_doe/plot_backends.py` exists and is importable.
 - [ ] `[viz]` in `pyproject.toml` includes `plotly>=5.0`.
 - [ ] Existing tests unaffected.
 
@@ -525,10 +525,10 @@ Also add `Literal` to the `typing` import in `api.py` if not already present.
 3. **Update `__init__.py` re-exports** for the wrappers to include `plot_backend` (no code change needed in `__init__.py` itself — the signature change in `api.py` is enough since it re-exports via `from .api import ...`).
 
 4. **Docstring note on the api.py wrappers:** Add a note to `power_curve_by_n` and `power_curve_by_effect` docstrings:
-   > Note: This wrapper returns the curve DataFrame only. To access the figure (including Plotly figures), call `iopt_power_design.power_curves.power_curve_by_n(...)` directly.
+   > Note: This wrapper returns the curve DataFrame only. To access the figure (including Plotly figures), call `lattice_doe.power_curves.power_curve_by_n(...)` directly.
 
 **Acceptance criteria:**
-- [ ] `from iopt_power_design import power_surface_2d` works.
+- [ ] `from lattice_doe import power_surface_2d` works.
 - [ ] `power_surface_2d` appears in `__all__` in `__init__.py`.
 - [ ] `power_curve_by_n(..., plot_backend="plotly")` passes the parameter through without error (even though it's discarded).
 - [ ] `generate_power_curves(..., plot_backend="plotly")` passes through.
@@ -572,7 +572,7 @@ Create `tests/test_plot_backends.py` (or add to an existing test file).
 - `test_plot_false_ignores_backend`.
 
 **`TestPowerSurface2dExport`:**
-- `test_power_surface_2d_importable`: `from iopt_power_design import power_surface_2d` — no error.
+- `test_power_surface_2d_importable`: `from lattice_doe import power_surface_2d` — no error.
 
 All tests must use minimal `n_points`/`grid_points` (3–5) and `starts=1` to keep runtime short.
 

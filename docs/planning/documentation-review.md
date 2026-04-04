@@ -32,13 +32,13 @@ That said, the package is not yet at a fully polished public-library standard ac
 1. The repository is not fully aligned with its declared Black formatting target.
    - Static scan found many Python lines over 100 characters.
    - Representative examples:
-     - `iopt_power_design/__init__.py:40`
+     - `lattice_doe/__init__.py:40`
      - `app/pages/3_Run_Results.py:308`
-     - `iopt_power_design/cli.py:85`
+     - `lattice_doe/cli.py:85`
 
 2. There is still trailing whitespace in multiple files.
    - Representative example:
-     - `iopt_power_design/power_curves.py:58`
+     - `lattice_doe/power_curves.py:58`
 
 3. Formatting consistency is good enough for active development, but not yet at the level where a contributor can assume formatter-clean code across the repo.
 
@@ -53,7 +53,7 @@ That said, the package is not yet at a fully polished public-library standard ac
 
 - Many core modules have strong module docstrings and function docstrings.
 - The project often documents statistical assumptions and API intent well.
-- Complex modules such as `iopt_power_design/api.py`, `iopt_power_design/power.py`, and `iopt_power_design/_request_builder.py` are significantly easier to follow because of their explanatory docstrings.
+- Complex modules such as `lattice_doe/api.py`, `lattice_doe/power.py`, and `lattice_doe/_request_builder.py` are significantly easier to follow because of their explanatory docstrings.
 
 ### Issues found
 
@@ -216,8 +216,8 @@ Examples:
 2. The widgets chapter says widget `power_mode` can be `"contrast"`, `"r2"`, or `"glm_binomial"` / `"glm_poisson"`.
    - The widget code documents and implements only `"r2"` and `"contrast"`.
    - `docs/user-guide.md:304`
-   - `iopt_power_design/widgets.py:294-295`
-   - `iopt_power_design/widgets.py:923-924`
+   - `lattice_doe/widgets.py:294-295`
+   - `lattice_doe/widgets.py:923-924`
 
 3. The REST API chapter lists endpoint names that do not match the implemented routes.
    - Guide says:
@@ -242,8 +242,8 @@ Examples:
    - Code supports only `"auto"`, `"conservative"`, and `"sp_only"`.
    - `docs/user-guide.md:350`
    - `docs/user-guide.md:356`
-   - `iopt_power_design/config.py:369`
-   - `iopt_power_design/config.py:389`
+   - `lattice_doe/config.py:369`
+   - `lattice_doe/config.py:389`
 
 #### UG-3 — Medium — The Streamlit chapter overstates analysis support
 
@@ -275,7 +275,7 @@ The code uses a single `Config` sheet with sentinel sections:
 Relevant references:
 
 - `docs/user-guide.md:262`
-- `iopt_power_design/excel_template.py:10-24`
+- `lattice_doe/excel_template.py:10-24`
 
 #### UG-5 — Medium — Appendix C’s interface matrix is not reliable yet
 
@@ -285,7 +285,7 @@ Examples:
 
 1. It marks Widgets as supporting GLM mode, but widgets are contrast/R² only.
    - `docs/user-guide.md:580`
-   - `iopt_power_design/widgets.py:294-295`
+   - `lattice_doe/widgets.py:294-295`
 
 2. It marks Streamlit as not supporting blocking, but Streamlit exposes blocked design controls.
    - `docs/user-guide.md:583`
@@ -339,14 +339,14 @@ This matters because users may look for an `i_criterion` column that is not pres
 Relevant references:
 
 - `docs/user-guide.md:73`
-- `iopt_power_design/analysis.py:797-809`
-- `iopt_power_design/analysis.py:866-873`
+- `lattice_doe/analysis.py:797-809`
+- `lattice_doe/analysis.py:866-873`
 
 #### UG-9 - Medium - The public API guidance contradicts the guide's own normal usage pattern
 
 Section 2.5 says users should never need to import from submodules directly for ordinary use, with one exception for `power_curve_by_n`.
 
-But the guide itself later recommends `from iopt_power_design.contrasts import contrast_from_scenarios` as a normal workflow for building contrasts from scenarios. That helper is not re-exported from `iopt_power_design.__init__`.
+But the guide itself later recommends `from lattice_doe.contrasts import contrast_from_scenarios` as a normal workflow for building contrasts from scenarios. That helper is not re-exported from `lattice_doe.__init__`.
 
 So the guidance is too absolute and will confuse readers about whether submodule imports are expected.
 
@@ -354,7 +354,7 @@ Relevant references:
 
 - `docs/user-guide.md:331`
 - `docs/user-guide.md:474`
-- `iopt_power_design/__init__.py:56-124`
+- `lattice_doe/__init__.py:56-124`
 
 #### UG-10 - Low - The CLI chapter's "full flag reference" is still incomplete
 
@@ -365,7 +365,7 @@ This is a lower-severity issue than the API schema mismatch, but it still makes 
 Relevant references:
 
 - `docs/user-guide.md:2539-2584`
-- `iopt_power_design/cli.py:821-829`
+- `lattice_doe/cli.py:821-829`
 
 ### Recommendation for the user guide
 

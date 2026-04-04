@@ -4,12 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from iopt_power_design.candidate import (
+from lattice_doe.candidate import (
     build_candidate,
     estimate_candidate_size,
 )
-from iopt_power_design.model_matrix import build_model_matrix
-from iopt_power_design.iopt_search import (
+from lattice_doe.model_matrix import build_model_matrix
+from lattice_doe.iopt_search import (
     build_i_opt_design,
     build_i_opt_design_with_idx,
     _i_criterion_for_indices,
@@ -21,7 +21,7 @@ from iopt_power_design.iopt_search import (
     _score_design,
     augment_design,
 )
-from iopt_power_design.config import DesignOptions
+from lattice_doe.config import DesignOptions
 
 # ---------------------------------------------------------------------------
 # Fixtures / shared factor specs
@@ -450,7 +450,7 @@ class TestCR19JitterInParallelWorker:
     FACTORS = {"A": (0.0, 1.0), "B": (0.0, 1.0)}
 
     def _make_X_cand(self, seed=0):
-        from iopt_power_design.candidate import build_candidate
+        from lattice_doe.candidate import build_candidate
         cand = build_candidate(self.FACTORS, candidate_points=50, seed=seed)
         X, _ = build_model_matrix(self.FORMULA, cand)
         return X
@@ -483,7 +483,7 @@ class TestCR19JitterInParallelWorker:
 
     def test_build_i_opt_design_with_idx_parallel_custom_jitter(self):
         """build_i_opt_design_with_idx with workers=2 and custom jitter runs cleanly."""
-        from iopt_power_design.candidate import build_candidate
+        from lattice_doe.candidate import build_candidate
         cand = build_candidate(self.FACTORS, candidate_points=80, seed=3)
         design_df, sel_idx, _ = build_i_opt_design_with_idx(
             cand=cand, formula=self.FORMULA, n=10,

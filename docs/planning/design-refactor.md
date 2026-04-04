@@ -60,7 +60,7 @@ After the split, `design.py` is identical in spirit to the TD-2 `diagnostics.py`
 
 ### `test_design.py` imports internal functions — update in G1
 
-`test_design.py` imports `_i_criterion_for_indices`, `_d_criterion_for_indices`, `_a_criterion_for_indices`, `_criterion_score`, `_score_design` from `iopt_power_design.design`. After E1 these work via the wrapper. After G1 the test file is updated to import from the canonical new modules.
+`test_design.py` imports `_i_criterion_for_indices`, `_d_criterion_for_indices`, `_a_criterion_for_indices`, `_criterion_score`, `_score_design` from `lattice_doe.design`. After E1 these work via the wrapper. After G1 the test file is updated to import from the canonical new modules.
 
 ---
 
@@ -114,7 +114,7 @@ After E1 all callers still work (via wrapper). After F1 the production callers a
 
 **What to do:**
 
-Create `iopt_power_design/candidate.py` containing:
+Create `lattice_doe/candidate.py` containing:
 
 1. Module docstring describing candidate generation responsibility.
 2. Imports: `from __future__ import annotations`, `typing`, `math`, `warnings`, `itertools`, `random`, `numpy`, `pandas`, `scipy.stats.qmc.LatinHypercube`.
@@ -131,14 +131,14 @@ Create `iopt_power_design/candidate.py` containing:
 
 **Verification:**
 ```python
-from iopt_power_design.candidate import estimate_candidate_size, build_candidate
+from lattice_doe.candidate import estimate_candidate_size, build_candidate
 cand = build_candidate({"x": (-1, 1), "y": (-1, 1)}, candidate_points=50, seed=0)
 assert len(cand) == 50
 ```
 Run `pytest tests/ -q --tb=no` — all 248 tests pass (no changes to design.py yet).
 
 **Acceptance criteria:**
-- [ ] `iopt_power_design/candidate.py` exists and is importable.
+- [ ] `lattice_doe/candidate.py` exists and is importable.
 - [ ] `estimate_candidate_size` and `build_candidate` produce identical output to calling them via `design.py`.
 - [ ] No imports from `design`, `model_matrix`, or `iopt_search`.
 - [ ] 248 tests pass.
@@ -158,7 +158,7 @@ Run `pytest tests/ -q --tb=no` — all 248 tests pass (no changes to design.py y
 
 **What to do:**
 
-Create `iopt_power_design/model_matrix.py` containing:
+Create `lattice_doe/model_matrix.py` containing:
 
 1. Module docstring.
 2. Imports: `from __future__ import annotations`, `typing`, `numpy`, `pandas`, `from patsy import dmatrix`.
@@ -173,7 +173,7 @@ Create `iopt_power_design/model_matrix.py` containing:
 **Verification:**
 ```python
 import pandas as pd
-from iopt_power_design.model_matrix import build_model_matrix
+from lattice_doe.model_matrix import build_model_matrix
 df = pd.DataFrame({"x1": [-1, 0, 1], "x2": [-1, 0, 1]})
 X, names = build_model_matrix("x1 + x2", df)
 assert X.shape == (3, 3)   # intercept + 2 cols
@@ -181,7 +181,7 @@ assert X.shape == (3, 3)   # intercept + 2 cols
 Run `pytest tests/ -q --tb=no` — 248 tests pass.
 
 **Acceptance criteria:**
-- [ ] `iopt_power_design/model_matrix.py` exists and is importable.
+- [ ] `lattice_doe/model_matrix.py` exists and is importable.
 - [ ] `build_model_matrix` output matches the current `design.py` version identically.
 - [ ] No imports from `design`, `candidate`, or `iopt_search`.
 - [ ] 248 tests pass.
@@ -201,7 +201,7 @@ Run `pytest tests/ -q --tb=no` — 248 tests pass.
 
 **What to do:**
 
-Create `iopt_power_design/iopt_search.py` containing only the exchange algorithm, scoring helpers, and multi-start orchestration that **do not** require building a candidate set. Leave the public `build_*` functions and `augment_design` for D1.
+Create `lattice_doe/iopt_search.py` containing only the exchange algorithm, scoring helpers, and multi-start orchestration that **do not** require building a candidate set. Leave the public `build_*` functions and `augment_design` for D1.
 
 Contents (copy verbatim from `design.py`):
 
@@ -236,7 +236,7 @@ Contents (copy verbatim from `design.py`):
 **Verification:**
 ```python
 import numpy as np
-from iopt_power_design.iopt_search import (
+from lattice_doe.iopt_search import (
     _i_criterion_for_indices, _d_criterion_for_indices,
     _criterion_score, _score_design,
 )
@@ -267,7 +267,7 @@ Run `pytest tests/ -q --tb=no` — 248 tests pass.
 
 **What to do:**
 
-Append to `iopt_power_design/iopt_search.py` (open for editing — do **not** recreate):
+Append to `lattice_doe/iopt_search.py` (open for editing — do **not** recreate):
 
 1. Copy verbatim from `design.py`:
    - `build_i_opt_design_with_idx` (lines 880–1073)
@@ -295,10 +295,10 @@ Append to `iopt_power_design/iopt_search.py` (open for editing — do **not** re
 **Verification:**
 ```python
 import numpy as np
-from iopt_power_design.iopt_search import (
+from lattice_doe.iopt_search import (
     build_i_opt_design, build_i_opt_design_with_idx, augment_design,
 )
-from iopt_power_design.candidate import build_candidate
+from lattice_doe.candidate import build_candidate
 import pandas as pd
 
 cand = build_candidate({"x1": (-1,1), "x2": (-1,1)}, candidate_points=80, seed=0)
@@ -328,7 +328,7 @@ Run `pytest tests/ -q --tb=no` — 248 tests pass.
 
 **What to do:**
 
-Replace the entire content of `iopt_power_design/design.py` with the following thin wrapper:
+Replace the entire content of `lattice_doe/design.py` with the following thin wrapper:
 
 ```python
 """
@@ -373,7 +373,7 @@ __all__ = [
 
 **Acceptance criteria:**
 - [ ] `design.py` is ≤ 35 lines and contains only imports and `__all__`.
-- [ ] `from iopt_power_design.design import <anything>` still works for every symbol listed in the original `__all__`.
+- [ ] `from lattice_doe.design import <anything>` still works for every symbol listed in the original `__all__`.
 - [ ] Internal symbols (`_fedorov_exchange_single`, `_i_criterion_for_indices`, etc.) accessible via the wrapper for `test_design.py`.
 - [ ] 248 tests pass with **zero** changes to any caller.
 
@@ -451,7 +451,7 @@ from .iopt_search import augment_design  # noqa: F401
 **Verification:** Run `pytest tests/ -q --tb=no` — 248 tests pass. Then verify the import chain is matplotlib-free:
 ```python
 import sys
-import iopt_power_design.api
+import lattice_doe.api
 assert "matplotlib" not in sys.modules
 ```
 
@@ -479,7 +479,7 @@ assert "matplotlib" not in sys.modules
 1. Update `tests/test_design.py` imports to point to the canonical new modules:
    ```python
    # Before
-   from iopt_power_design.design import (
+   from lattice_doe.design import (
        build_candidate, build_model_matrix, estimate_candidate_size,
        build_i_opt_design, build_i_opt_design_with_idx,
        _i_criterion_for_indices, _d_criterion_for_indices, _a_criterion_for_indices,
@@ -487,11 +487,11 @@ assert "matplotlib" not in sys.modules
    )
 
    # After
-   from iopt_power_design.candidate import (
+   from lattice_doe.candidate import (
        build_candidate, estimate_candidate_size,
    )
-   from iopt_power_design.model_matrix import build_model_matrix
-   from iopt_power_design.iopt_search import (
+   from lattice_doe.model_matrix import build_model_matrix
+   from lattice_doe.iopt_search import (
        build_i_opt_design, build_i_opt_design_with_idx,
        _i_criterion_for_indices, _d_criterion_for_indices, _a_criterion_for_indices,
        _criterion_score, _score_design, augment_design,
@@ -503,17 +503,17 @@ assert "matplotlib" not in sys.modules
 3. Run a final import-chain check:
    ```python
    import sys
-   import iopt_power_design
+   import lattice_doe
    assert "matplotlib" not in sys.modules
    print("matplotlib-free import: OK")
    ```
 
 4. Verify file sizes are in expected ranges:
    ```bash
-   wc -l iopt_power_design/candidate.py    # ~330
-   wc -l iopt_power_design/model_matrix.py # ~30
-   wc -l iopt_power_design/iopt_search.py  # ~830
-   wc -l iopt_power_design/design.py       # ~35
+   wc -l lattice_doe/candidate.py    # ~330
+   wc -l lattice_doe/model_matrix.py # ~30
+   wc -l lattice_doe/iopt_search.py  # ~830
+   wc -l lattice_doe/design.py       # ~35
    ```
 
 **Acceptance criteria:**

@@ -343,7 +343,7 @@ def power_curve_by_n_multiresponse(
 **Goal:** Add `ResponseSpec` and `MultiResponseOptions` dataclasses to `config.py`.
 
 **Files changed:**
-- `iopt_power_design/config.py`
+- `lattice_doe/config.py`
 
 **What to implement:**
 
@@ -407,7 +407,7 @@ fixed design matrix X (or X_k for that response's formula). Returns a dict with
 `name`, `power`, `lam`, and (for contrast mode) `df1`, `df2`.
 
 **Files changed:**
-- `iopt_power_design/power.py`
+- `lattice_doe/power.py`
 
 **What to implement:**
 
@@ -470,8 +470,8 @@ Export `eval_response_power` from `__init__.py`.
 n-search binary bisection pattern.
 
 **Files changed:**
-- `iopt_power_design/power.py` (new `combine_powers` function)
-- `iopt_power_design/api.py` (new `_mr_eval(n)` inner function pattern)
+- `lattice_doe/power.py` (new `combine_powers` function)
+- `lattice_doe/api.py` (new `_mr_eval(n)` inner function pattern)
 
 **What to implement:**
 
@@ -533,8 +533,8 @@ responses use the same formula and therefore the same X). This is the primary de
 and the prerequisite for all downstream tickets.
 
 **Files changed:**
-- `iopt_power_design/api.py` (new function `find_multiresponse_design`)
-- `iopt_power_design/__init__.py` (export new function)
+- `lattice_doe/api.py` (new function `find_multiresponse_design`)
+- `lattice_doe/__init__.py` (export new function)
 
 **What to implement:**
 
@@ -616,8 +616,8 @@ split-plot `_sp_eval` pattern, calling `eval_response_power` with `split_plot_op
 optimality criterion over the shared run set.
 
 **Files changed:**
-- `iopt_power_design/api.py` (extend `find_multiresponse_design` with compound path)
-- `iopt_power_design/iopt_search.py` (new `build_compound_design` function)
+- `lattice_doe/api.py` (extend `find_multiresponse_design` with compound path)
+- `lattice_doe/iopt_search.py` (new `build_compound_design` function)
 
 **When activated:** Any `ResponseSpec.formula` is not None and differs from the global
 formula (or from another response's formula).
@@ -674,9 +674,9 @@ Hotelling T² (multivariate F) test instead of the per-response independence com
 Applies only to the shared-formula contrast path.
 
 **Files changed:**
-- `iopt_power_design/power.py` (new `hotelling_t2_power` function)
-- `iopt_power_design/api.py` (delegate to Hotelling T² when `sigma_joint` is set)
-- `iopt_power_design/__init__.py` (export `hotelling_t2_power`)
+- `lattice_doe/power.py` (new `hotelling_t2_power` function)
+- `lattice_doe/api.py` (delegate to Hotelling T² when `sigma_joint` is set)
+- `lattice_doe/__init__.py` (export `hotelling_t2_power`)
 
 **Mathematical derivation:**
 
@@ -729,8 +729,8 @@ power when they are positively correlated).
 **Goal:** Multi-response equivalents of `power_curve_by_n` and `power_sensitivity`.
 
 **Files changed:**
-- `iopt_power_design/analysis.py` (two new functions)
-- `iopt_power_design/__init__.py` (export both)
+- `lattice_doe/analysis.py` (two new functions)
+- `lattice_doe/__init__.py` (export both)
 
 **What to implement:**
 
@@ -799,11 +799,11 @@ def multiresponse_sensitivity(
 **Goal:** Expose multi-response design through all existing user-facing surfaces.
 
 **Files changed:**
-- `iopt_power_design/cli.py`
+- `lattice_doe/cli.py`
 - `app/pages/2_Power_Config.py` (Streamlit response config panel)
 - `app/pages/3_Run_Results.py` (display per-response breakdown)
-- `iopt_power_design/sheets.py` (RESPONSES sheet tab)
-- `iopt_power_design/excel_template.py` (RESPONSES sheet tab)
+- `lattice_doe/sheets.py` (RESPONSES sheet tab)
+- `lattice_doe/excel_template.py` (RESPONSES sheet tab)
 
 **CLI design:**
 
@@ -1022,11 +1022,11 @@ as a separate sub-task in session 6 if time permits.
 
 ## Reference Material
 
-- **Existing power functions:** `iopt_power_design/power.py` — `contrast_power`,
+- **Existing power functions:** `lattice_doe/power.py` — `contrast_power`,
   `global_r2_power`, `contrast_power_sp`, `global_r2_power_sp`
-- **Existing config:** `iopt_power_design/config.py` — `PowerContrastConfig`,
+- **Existing config:** `lattice_doe/config.py` — `PowerContrastConfig`,
   `PowerR2Config`, `DesignOptions`, `SplitPlotOptions`
-- **Existing API:** `iopt_power_design/api.py` — `find_optimal_design`,
+- **Existing API:** `lattice_doe/api.py` — `find_optimal_design`,
   `_sp_eval`, binary bisection loop structure
 - **Existing REST models:** `api_server/models/common.py`, `api_server/models/power.py` —
   `PowerCfgModel` discriminated union pattern

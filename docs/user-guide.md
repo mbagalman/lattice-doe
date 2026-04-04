@@ -241,7 +241,7 @@ pip install -e ".[all]"
 After installing, run a one-line smoke test to confirm the core package and its dependencies are working:
 
 ```bash
-python -c "import iopt_power_design; print(iopt_power_design.__version__)"
+python -c "import lattice_doe; print(lattice_doe.__version__)"
 ```
 
 This should print the current version string (e.g. `0.1.0`) without errors. If it fails, the most common causes are a missing dependency or a Python version below 3.9.
@@ -261,7 +261,7 @@ You should see the help text listing `--config`, `--template`, `--out`, `--dry-r
 Understanding where things live helps when you want to inspect or extend the code, run the tests, or look up a function's implementation.
 
 ```
-iopt_power_design/        # core Python package — importable as `iopt_power_design`
+lattice_doe/        # core Python package — importable as `lattice_doe`
 │
 ├── __init__.py           # public API surface: re-exports everything in __all__
 ├── config.py             # dataclasses: PowerContrastConfig, PowerR2Config,
@@ -328,7 +328,7 @@ docs/                     # documentation
 tests/                    # test suite (pytest)
 ```
 
-**The public API surface is everything exported from `iopt_power_design/__init__.py`.** You should never need to import from any submodule directly for ordinary use. The one exception noted in the recipes is `from iopt_power_design.power_curves import power_curve_by_n` when you need access to the Plotly figure object — the top-level wrapper discards it.
+**The public API surface is everything exported from `lattice_doe/__init__.py`.** You should never need to import from any submodule directly for ordinary use. The one exception noted in the recipes is `from lattice_doe.power_curves import power_curve_by_n` when you need access to the Plotly figure object — the top-level wrapper discards it.
 
 The backward-compat wrappers (`design.py`, `diagnostics.py`) exist because those modules were previously monolithic and were split during a refactoring pass. They continue to work exactly as before; you do not need to update existing code that imports from them.
 
@@ -448,7 +448,7 @@ L is always a list of lists (or a 2D array). Even if you have a single-row contr
 **Step 4: Set the remaining parameters.**
 
 ```python
-from iopt_power_design import PowerContrastConfig
+from lattice_doe import PowerContrastConfig
 
 power_cfg = PowerContrastConfig(
     L=[[0, 0, 1, 0]],   # contrast matrix: test the Concentration coefficient
@@ -471,7 +471,7 @@ Constructing L manually requires you to know the exact column order in the model
 The idea is simple: if scenario A and scenario B differ in factor values, the vector x_B − x_A encodes exactly which coefficients change and by how much when you move from A to B. That vector becomes L. The corresponding δ is the `sesoi` — the smallest total effect on the response scale that you care to detect at that scenario shift.
 
 ```python
-from iopt_power_design.contrasts import contrast_from_scenarios
+from lattice_doe.contrasts import contrast_from_scenarios
 
 # Compare Catalyst B against Catalyst A, holding Concentration fixed at 1.0 mol/L.
 # sesoi=0.5 means: detect a yield difference of at least 0.5 between the two catalysts.
@@ -502,7 +502,7 @@ This L = [[0, 1, 0, 1]] says: the total effect being tested is `β₁ + β₃ ×
 With `power_cfg` and `DesignOptions` in hand, the call is:
 
 ```python
-from iopt_power_design import DesignOptions, find_optimal_design
+from lattice_doe import DesignOptions, find_optimal_design
 
 opts = DesignOptions(
     auto_candidate=True,  # recommended: adaptive candidate sizing
@@ -596,12 +596,12 @@ The following script is self-contained and runs the complete contrast-mode workf
 
 ```python
 # chapter3_example.py
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,
     PowerContrastConfig,
     DesignOptions,
 )
-from iopt_power_design.contrasts import contrast_from_scenarios
+from lattice_doe.contrasts import contrast_from_scenarios
 
 # ── 1. Define the model ────────────────────────────────────────────────────
 formula = "~ 1 + Catalyst + Concentration + Catalyst:Concentration"
@@ -752,7 +752,7 @@ with `df_num` = p − 1 (number of slope parameters; intercept excluded) and `df
 #### 4.2 Setting up `PowerR2Config`
 
 ```python
-from iopt_power_design import PowerR2Config
+from lattice_doe import PowerR2Config
 
 power_cfg = PowerR2Config(
     r2_target=0.15,      # minimum R² worth detecting
@@ -797,7 +797,7 @@ For the returned design at n = 73: `df_num = 4`, `df_denom = 68`.
 For R² mode with continuous factors in a symmetric design space, the three optimality criteria (I, D, A) frequently produce the same required sample size. In the consumer survey example, running `compare_criteria` returns:
 
 ```python
-from iopt_power_design import compare_criteria, DesignOptions
+from lattice_doe import compare_criteria, DesignOptions
 
 comparison = compare_criteria(
     formula=formula,
@@ -835,7 +835,7 @@ The following script is self-contained and runs the complete R²-mode workflow f
 
 ```python
 # chapter4_example.py
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,
     PowerR2Config,
     DesignOptions,
@@ -1023,7 +1023,7 @@ It becomes less accurate when slopes are large, because the response surface cur
 `PowerGLMContrastConfig` extends the contrast-mode framework of Chapter 3 with three additional parameters: `baseline`, `family`, and `link`.
 
 ```python
-from iopt_power_design import PowerGLMContrastConfig
+from lattice_doe import PowerGLMContrastConfig
 
 power_cfg = PowerGLMContrastConfig(
     L=[[0, 1, 0]],           # contrast matrix: same as PowerContrastConfig
@@ -1098,7 +1098,7 @@ which gives p = 3 model-matrix columns: `[Intercept, Dose, PatientAge]`.
 ```python
 # chapter5_binomial.py
 import numpy as np
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,
     PowerGLMContrastConfig,
     DesignOptions,
@@ -1213,7 +1213,7 @@ Two factors are investigated in an interaction model: Temperature (normalised, �
 ```python
 # chapter5_poisson.py
 import numpy as np
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,
     PowerGLMContrastConfig,
     DesignOptions,
@@ -1465,7 +1465,7 @@ When using the `"min"` rule, the `"achieved_power"` at the top level equals the 
 **Scenario.** A polymer reactor team needs to characterise how Temperature (Temp) and Pressure (Press) affect both yield and purity in a continuous-flow process. Both factors are available in coded form on [−1, +1]. The team has preliminary estimates: yield noise σ = 1.0, purity noise σ = 1.5. Both responses should have ≥ 80% power to detect a main-effect coefficient of 0.5 at α = 0.05.
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     find_multiresponse_design,
     PowerContrastConfig,
     DesignOptions,
@@ -1548,7 +1548,7 @@ This is the central feature of the `"min"` rule: the design guarantees at least 
 To understand how each response's power changes with sample size, use `power_curve_by_n_multiresponse`:
 
 ```python
-from iopt_power_design import power_curve_by_n_multiresponse
+from lattice_doe import power_curve_by_n_multiresponse
 
 curve_df = power_curve_by_n_multiresponse(
     formula, factors, multi_cfg,
@@ -1584,7 +1584,7 @@ Pass `plot=True` to get an automatic line chart, or capture the DataFrame and bu
 This function requires all responses to use `PowerContrastConfig` (sigma scaling is undefined for R²-mode responses).
 
 ```python
-from iopt_power_design import multiresponse_sensitivity
+from lattice_doe import multiresponse_sensitivity
 
 sens_df = multiresponse_sensitivity(
     formula, factors, multi_cfg,
@@ -1725,7 +1725,7 @@ When you use `criterion="I"` (the default), the package minimises I-criterion an
 `compare_criteria` runs the full powered-design search independently under each criterion and returns a side-by-side summary. It is the recommended tool for understanding whether your criterion choice actually matters for a given problem.
 
 ```python
-from iopt_power_design import compare_criteria, PowerContrastConfig, DesignOptions
+from lattice_doe import compare_criteria, PowerContrastConfig, DesignOptions
 
 comparison = compare_criteria(formula, factors, power_cfg, design_opts=opts)
 print(comparison["summary"])
@@ -1755,7 +1755,7 @@ The full design and report for each criterion are available in `comparison["resu
 **Scenario.** The Chapter 3 polymer study (Catalyst A/B + Concentration 0–2 mol/L, with interaction) is being prepared for a final report. The statistician wants to confirm that the criterion choice is appropriate and to show the principal investigator a comparison of all three criteria before committing to the run schedule.
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     compare_criteria,
     PowerContrastConfig,
     DesignOptions,
@@ -1911,7 +1911,7 @@ The Python API is the foundation that all other interfaces build on. Every capab
 Two functions cover all design generation needs:
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,           # single response
     find_multiresponse_design,     # two or more responses simultaneously
 )
@@ -1934,7 +1934,7 @@ The optional keyword arguments on `find_optimal_design` that earlier chapters sk
 `DesignOptions` is a dataclass. All fields have defaults, so `DesignOptions()` is always valid. You only need to supply the fields you want to override.
 
 ```python
-from iopt_power_design import DesignOptions
+from lattice_doe import DesignOptions
 
 opts = DesignOptions(
     auto_candidate=True,
@@ -2264,7 +2264,7 @@ import logging
 import math
 from pathlib import Path
 
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,
     PowerContrastConfig,
     DesignOptions,
@@ -3276,7 +3276,7 @@ Special rows (in column A, value in column B):
 `create_excel_template` writes a new `.xlsx` workbook pre-populated with a runnable example in the chosen power mode:
 
 ```python
-from iopt_power_design import create_excel_template
+from lattice_doe import create_excel_template
 
 # Contrast-mode template
 path = create_excel_template("study_template.xlsx", example="contrast")
@@ -3311,7 +3311,7 @@ lattice --excel-template study_template.xlsx --template-mode contrast
 `excel_run` reads the `Config` sheet, runs the design search, and writes three output sheets back into the same workbook:
 
 ```python
-from iopt_power_design import excel_run
+from lattice_doe import excel_run
 
 result = excel_run("study_template.xlsx")
 ```
@@ -3343,7 +3343,7 @@ This is the fully no-Python workflow: create the template with `--excel-template
 **Overriding design options.** For programmatic control without modifying the workbook file, pass `design_opts_override`:
 
 ```python
-from iopt_power_design import excel_run, DesignOptions
+from lattice_doe import excel_run, DesignOptions
 
 result = excel_run(
     "study_template.xlsx",
@@ -3367,7 +3367,7 @@ The override replaces the design options read from the Config sheet entirely; po
 Catch `ExcelError` explicitly in scripts that run unattended:
 
 ```python
-from iopt_power_design import excel_run, ExcelError
+from lattice_doe import excel_run, ExcelError
 
 try:
     result = excel_run("study_template.xlsx")
@@ -3387,7 +3387,7 @@ except ExcelError as e:
 **Step 1 — Create the template.**
 
 ```python
-from iopt_power_design import create_excel_template
+from lattice_doe import create_excel_template
 
 create_excel_template("reactor_study.xlsx", example="contrast")
 ```
@@ -3450,7 +3450,7 @@ The formula `~ 1 + Temp + Press + FeedRate + Temp:Press + Temp:FeedRate` produce
 The statistician receives the file and runs it from Python:
 
 ```python
-from iopt_power_design import excel_run
+from lattice_doe import excel_run
 
 result = excel_run("reactor_study.xlsx")
 
@@ -3484,7 +3484,7 @@ The engineer opens `reactor_study.xlsx`, looks at the Design sheet to see the ru
 For reference, the equivalent Python API call for the same study:
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,
     PowerContrastConfig,
     DesignOptions,
@@ -3559,7 +3559,7 @@ Two authentication modes are supported. Choose based on whether you are running 
 Pass `credentials=None` (the default). On the first call, `gspread.oauth()` opens a browser tab and asks you to sign in to your Google account. After approval, the access token is cached in `~/.config/gspread/` and reused on subsequent calls — you only authenticate in the browser once per machine.
 
 ```python
-from iopt_power_design import sheets_run
+from lattice_doe import sheets_run
 
 # credentials=None → OAuth2 browser flow on first use
 result = sheets_run("https://docs.google.com/spreadsheets/d/YOUR_ID")
@@ -3584,7 +3584,7 @@ result = sheets_run(
 
 ```python
 import os
-from iopt_power_design import sheets_run
+from lattice_doe import sheets_run
 
 creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 result = sheets_run(spreadsheet_url, credentials=creds)
@@ -3613,7 +3613,7 @@ result = sheets_run(spreadsheet_url, credentials=creds)
 `create_sheet_template` creates a new Google Spreadsheet pre-populated with a runnable example and returns its URL:
 
 ```python
-from iopt_power_design import create_sheet_template
+from lattice_doe import create_sheet_template
 
 url = create_sheet_template(
     title="Consumer survey — powered design",
@@ -3673,7 +3673,7 @@ All `[SETTINGS]` keys from Chapter 11 (Table 11.3) apply here without change. Th
 `sheets_run` authenticates, reads the Config sheet, runs the design search, writes results back, and returns the result dict:
 
 ```python
-from iopt_power_design import sheets_run
+from lattice_doe import sheets_run
 
 result = sheets_run(
     spreadsheet_url_or_id,          # full URL or bare spreadsheet ID
@@ -3726,7 +3726,7 @@ The `--sheets` flag accepts both a full URL and a bare spreadsheet ID. `--sheets
 | Design search failure | `SheetsError: Design optimisation failed: <underlying error>` |
 
 ```python
-from iopt_power_design import sheets_run, SheetsError
+from lattice_doe import sheets_run, SheetsError
 
 try:
     result = sheets_run(url, credentials=creds)
@@ -3749,7 +3749,7 @@ except SheetsError as e:
 
 ```python
 import os
-from iopt_power_design import create_sheet_template
+from lattice_doe import create_sheet_template
 
 url = create_sheet_template(
     title="Consumer survey — powered design",
@@ -3798,7 +3798,7 @@ Once the protocol review is complete and the Config sheet is signed off, the sta
 
 ```python
 import os
-from iopt_power_design import sheets_run
+from lattice_doe import sheets_run
 
 result = sheets_run(
     "https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID",
@@ -3838,7 +3838,7 @@ The output sheets are cleared and rewritten with the updated results. The Config
 > **Tip — combining Sheets config with Python post-processing.** `sheets_run` returns the full result dict, so you can pipe the result directly into Python analysis functions without re-running the design:
 >
 > ```python
-> from iopt_power_design import sheets_run, power_sensitivity
+> from lattice_doe import sheets_run, power_sensitivity
 >
 > result = sheets_run(url, credentials=creds)
 >
@@ -3912,7 +3912,7 @@ rendering automatically.
 To verify that the installation worked:
 
 ```python
-from iopt_power_design.widgets import design_widget
+from lattice_doe.widgets import design_widget
 print("widgets OK")
 ```
 
@@ -3929,7 +3929,7 @@ instance, renders it in the current cell, and returns the instance so you can
 read the result later:
 
 ```python
-from iopt_power_design.widgets import design_widget
+from lattice_doe.widgets import design_widget
 
 w = design_widget(
     formula="~ 1 + Price + Quality + Convenience",
@@ -4026,7 +4026,7 @@ Convenience) using the widget UI instead of a pure API call.
 **Cell 1 — launch the widget**
 
 ```python
-from iopt_power_design.widgets import design_widget
+from lattice_doe.widgets import design_widget
 
 w = design_widget(
     formula="~ 1 + Price + Quality + Convenience",
@@ -4109,8 +4109,8 @@ so you can use `export_report_to` after the fact via the API if needed — or
 simply re-run with `export_report_to` set:
 
 ```python
-from iopt_power_design.api import find_optimal_design
-from iopt_power_design.config import PowerR2Config, DesignOptions
+from lattice_doe.api import find_optimal_design
+from lattice_doe.config import PowerR2Config, DesignOptions
 
 # Re-run programmatically with the parameters identified via the widget
 result = find_optimal_design(
@@ -4155,7 +4155,7 @@ object first and display it later, or if you want to embed it inside a larger
 `ipywidgets` layout:
 
 ```python
-from iopt_power_design.widgets import DesignWidget
+from lattice_doe.widgets import DesignWidget
 import ipywidgets as widgets
 
 w = DesignWidget(
@@ -4182,7 +4182,7 @@ If `ipywidgets` or `plotly` is not installed, the first call to `design_widget`
 or `DesignWidget(...)` raises `WidgetsError`:
 
 ```python
-from iopt_power_design.widgets import WidgetsError
+from lattice_doe.widgets import WidgetsError
 
 try:
     w = design_widget()
@@ -4195,7 +4195,7 @@ except WidgetsError as e:
 You can also import `WidgetsError` from the package root:
 
 ```python
-from iopt_power_design import WidgetsError
+from lattice_doe import WidgetsError
 ```
 
 ---
@@ -4722,11 +4722,11 @@ involves only HTC factors.
 
 #### 15.3 Setting up `SplitPlotOptions`
 
-`SplitPlotOptions` is a dataclass imported from `iopt_power_design.config`.
+`SplitPlotOptions` is a dataclass imported from `lattice_doe.config`.
 Pass it as `design_opts.split_plot`:
 
 ```python
-from iopt_power_design.config import SplitPlotOptions, DesignOptions
+from lattice_doe.config import SplitPlotOptions, DesignOptions
 
 sp_opts = SplitPlotOptions(
     htc_factors=["OvenTemp", "FlourType"],   # whole-plot (HTC) factors
@@ -4786,8 +4786,8 @@ power at each value, returning a DataFrame with columns `n_wp`, `n_total`,
 `power`, and `noncentrality_lambda`:
 
 ```python
-from iopt_power_design import power_curve_by_wp
-from iopt_power_design.config import PowerContrastConfig, DesignOptions, SplitPlotOptions
+from lattice_doe import power_curve_by_wp
+from lattice_doe.config import PowerContrastConfig, DesignOptions, SplitPlotOptions
 
 sp_curve_opts = DesignOptions(
     split_plot=SplitPlotOptions(
@@ -4913,8 +4913,8 @@ The BakeTime main-effect contrast is therefore `L = [[0, 0, 0, 1, 0]]`.
 **Step 2 — Run the power-assured design**
 
 ```python
-from iopt_power_design import find_optimal_design
-from iopt_power_design.config import (
+from lattice_doe import find_optimal_design
+from lattice_doe.config import (
     PowerContrastConfig, DesignOptions, SplitPlotOptions
 )
 
@@ -5186,7 +5186,7 @@ blocking — which compensates for the df loss.
 Blocking is activated by setting `n_blocks` in `DesignOptions`:
 
 ```python
-from iopt_power_design.config import DesignOptions
+from lattice_doe.config import DesignOptions
 
 design_opts = DesignOptions(
     n_blocks=2,               # number of blocks (≥ 2 to activate blocking)
@@ -5246,7 +5246,7 @@ need them directly, but they are useful for custom pipelines:
 **`balanced_block_sizes(n, n_blocks)`** — compute balanced block sizes:
 
 ```python
-from iopt_power_design.blocked import balanced_block_sizes
+from lattice_doe.blocked import balanced_block_sizes
 
 balanced_block_sizes(38, 2)   # [19, 19]
 balanced_block_sizes(10, 3)   # [4, 3, 3]  — first block gets extra run
@@ -5257,7 +5257,7 @@ balanced_block_sizes(44, 4)   # [11, 11, 11, 11]
 Patsy formula:
 
 ```python
-from iopt_power_design.blocked import blocked_formula
+from lattice_doe.blocked import blocked_formula
 
 blocked_formula("~ 1 + A + B")
 # "~ 1 + A + B + C(Block)"
@@ -5287,8 +5287,8 @@ half-standard-deviation effect of B (δ = 0.5, σ = 1.0) at 80% power.
 First, compute the sample size without blocking, as a reference:
 
 ```python
-from iopt_power_design import find_optimal_design
-from iopt_power_design.config import PowerContrastConfig, DesignOptions
+from lattice_doe import find_optimal_design
+from lattice_doe.config import PowerContrastConfig, DesignOptions
 
 result_unblocked = find_optimal_design(
     formula="~ 1 + A + B",
@@ -5506,7 +5506,7 @@ The expression can reference any factor column by name; rows where the expressio
 evaluates to `True` are kept; rows where it evaluates to `False` are removed.
 
 ```python
-from iopt_power_design.config import DesignOptions
+from lattice_doe.config import DesignOptions
 
 # Keep candidates only where the joint extreme is avoided
 opts = DesignOptions(
@@ -5563,7 +5563,7 @@ When the logic is too complex for a single expression — involving Python objec
 external lookup tables, or multi-step computation — use `constraint_func` instead.
 
 ```python
-from iopt_power_design.config import DesignOptions
+from lattice_doe.config import DesignOptions
 
 def feasible(row):
     """Keep rows that don't combine high temperature with high pressure."""
@@ -5653,8 +5653,8 @@ assuming residual standard deviation σ = 2.
 **Setting up the unconstrained design first.**
 
 ```python
-from iopt_power_design.api import find_optimal_design
-from iopt_power_design.config import DesignOptions, PowerContrastConfig
+from lattice_doe.api import find_optimal_design
+from lattice_doe.config import DesignOptions, PowerContrastConfig
 
 formula = "A + B + A:B"
 factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
@@ -5850,7 +5850,7 @@ that have fundamental multicollinearity problems.
 #### 18.2 `augment_design`: the API
 
 ```python
-from iopt_power_design import augment_design
+from lattice_doe import augment_design
 ```
 
 **Signature:**
@@ -5910,8 +5910,8 @@ augmented design meets the power target, evaluate the model matrix directly with
 
 ```python
 import numpy as np
-from iopt_power_design import build_model_matrix
-from iopt_power_design.power import contrast_power
+from lattice_doe import build_model_matrix
+from lattice_doe.power import contrast_power
 
 formula = "A + B + A:B"
 factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
@@ -5971,10 +5971,10 @@ The question: where should those runs go?
 
 ```python
 import numpy as np
-from iopt_power_design.iopt_search import build_i_opt_design_with_idx
-from iopt_power_design.candidate import build_candidate
-from iopt_power_design import build_model_matrix
-from iopt_power_design.power import contrast_power
+from lattice_doe.iopt_search import build_i_opt_design_with_idx
+from lattice_doe.candidate import build_candidate
+from lattice_doe import build_model_matrix
+from lattice_doe.power import contrast_power
 
 formula = "A + B + A:B"
 factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
@@ -5999,7 +5999,7 @@ Power is only 62% — the pilot study is underpowered for the A main-effect test
 **Step 2 — Augment by 12 runs.**
 
 ```python
-from iopt_power_design import augment_design, DesignOptions
+from lattice_doe import augment_design, DesignOptions
 
 aug_df, new_df = augment_design(
     design_df=pilot_df,
@@ -6118,7 +6118,7 @@ It is the most informative single diagnostic because it shows both where the
 80% threshold is crossed and how quickly power saturates at high n.
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     power_curve_by_n, PowerContrastConfig, DesignOptions
 )
 
@@ -6230,11 +6230,11 @@ zoom/pan interactions, making it more useful than the static matplotlib version 
 exploratory work.
 
 **`analysis.power_curve_by_n` vs. `power_curves.power_curve_by_n`.**
-The package exposes a thin wrapper in `iopt_power_design.analysis` that returns only
+The package exposes a thin wrapper in `lattice_doe.analysis` that returns only
 the DataFrame (discarding the figure and `target_n`):
 
 ```python
-from iopt_power_design import power_curve_by_n   # returns DataFrame
+from lattice_doe import power_curve_by_n   # returns DataFrame
 ```
 
 Use the `analysis` version when you only need the data and don't want to manage the
@@ -6242,7 +6242,7 @@ extra dict keys. Use `power_curves.power_curve_by_n` directly when you need the 
 or the `target_n` key:
 
 ```python
-from iopt_power_design.power_curves import power_curve_by_n as pcbn
+from lattice_doe.power_curves import power_curve_by_n as pcbn
 result = pcbn(formula, factors, power_cfg, ...)   # returns full dict
 ```
 
@@ -6255,7 +6255,7 @@ It answers: *what is the minimum effect this design can detect at 80% power?*
 — the **minimum detectable effect (MDE)**.
 
 ```python
-from iopt_power_design import power_curve_by_effect
+from lattice_doe import power_curve_by_effect
 
 result = power_curve_by_effect(
     formula, factors,
@@ -6322,7 +6322,7 @@ baseline event probability or rate because the Fisher information weight
 `power_curve_by_baseline` holds the design fixed and sweeps the baseline.
 
 ```python
-from iopt_power_design import power_curve_by_baseline, PowerGLMContrastConfig
+from lattice_doe import power_curve_by_baseline, PowerGLMContrastConfig
 
 glm_cfg = PowerGLMContrastConfig(
     L=[[0, 1, 0, 0]],
@@ -6369,7 +6369,7 @@ values, producing a heatmap that shows the "safe" vs. "risky" regions of the
 parameter space.
 
 ```python
-from iopt_power_design import power_surface_2d
+from lattice_doe import power_surface_2d
 
 result = power_surface_2d(
     formula, factors, power_cfg,
@@ -6422,7 +6422,7 @@ simultaneously, `power_curve_by_n_multiresponse` sweeps n and evaluates
 per-response power as well as the combined power at each step.
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     power_curve_by_n_multiresponse, MultiResponseOptions, ResponseSpec
 )
 
@@ -6483,12 +6483,12 @@ This section brings all five curve types together for the running example
 **Setup:**
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     power_curve_by_n, power_curve_by_effect,
     power_surface_2d, PowerContrastConfig, DesignOptions,
     find_optimal_design,
 )
-from iopt_power_design.power_curves import power_curve_by_n as pcbn_full
+from lattice_doe.power_curves import power_curve_by_n as pcbn_full
 
 formula  = "A + B + A:B"
 factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
@@ -6522,7 +6522,7 @@ freedom, not by placing points better.
 **Curve 2 — Power vs. effect size:**
 
 ```python
-from iopt_power_design.power_curves import power_curve_by_effect as pcbe_full
+from lattice_doe.power_curves import power_curve_by_effect as pcbe_full
 
 result_e = pcbe_full(
     formula, factors, n=39,
@@ -6613,7 +6613,7 @@ risk visible before the experiment runs.
 across a range of σ (contrast mode) or R² (R² mode). No new designs are built.
 
 ```python
-from iopt_power_design import power_sensitivity
+from lattice_doe import power_sensitivity
 
 sensitivity = power_sensitivity(
     formula,
@@ -6690,7 +6690,7 @@ simultaneously — effect size, σ, and α — and returns a structured summary 
 threshold values and an overall pass-rate statistic.
 
 ```python
-from iopt_power_design import robustness_report
+from lattice_doe import robustness_report
 
 rr = robustness_report(
     design_df,
@@ -6770,7 +6770,7 @@ design at a fixed n and sweeps a common σ *scale factor* across all responses.
 Each response's σ is multiplied by the scale factor at every point.
 
 ```python
-from iopt_power_design import multiresponse_sensitivity, MultiResponseOptions, ResponseSpec
+from lattice_doe import multiresponse_sensitivity, MultiResponseOptions, ResponseSpec
 
 multi_cfg = MultiResponseOptions(
     responses=[
@@ -6830,7 +6830,7 @@ experiment, they want to answer three questions:
 **Setup:**
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design, power_sensitivity, robustness_report,
     PowerContrastConfig, DesignOptions,
 )
@@ -6976,7 +6976,7 @@ effects are reliably detected — the design is underpowered for the stated δ.
 #### 21.2 `min_detectable_effect`
 
 ```python
-from iopt_power_design import min_detectable_effect
+from lattice_doe import min_detectable_effect
 
 mde_result = min_detectable_effect(
     design_df,        # fixed design to evaluate
@@ -7047,9 +7047,9 @@ scratch, the team wants to know:
 **Setup:**
 
 ```python
-from iopt_power_design import min_detectable_effect, DesignOptions, PowerContrastConfig
-from iopt_power_design.iopt_search import build_i_opt_design_with_idx
-from iopt_power_design.candidate import build_candidate
+from lattice_doe import min_detectable_effect, DesignOptions, PowerContrastConfig
+from lattice_doe.iopt_search import build_i_opt_design_with_idx
+from lattice_doe.candidate import build_candidate
 
 formula = "A + B + A:B"
 factors  = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
@@ -7194,7 +7194,7 @@ pip install "lattice-doe[report-pdf]"
 **Signature:**
 
 ```python
-from iopt_power_design import generate_report
+from lattice_doe import generate_report
 from pathlib import Path
 
 report_path = generate_report(
@@ -7286,7 +7286,7 @@ dependencies (Cairo, Pango) that vary by operating system.
 **Step 1 — Build the design and generate the report in one call.**
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design, PowerContrastConfig, DesignOptions,
 )
 
@@ -7312,7 +7312,7 @@ Open it in any browser to see the full design summary.
 **Step 2 — Generate a richer report separately with the power curve.**
 
 ```python
-from iopt_power_design import generate_report
+from lattice_doe import generate_report
 from pathlib import Path
 
 report_path = generate_report(
@@ -7751,7 +7751,7 @@ When using `workers > 1` in a Python script on macOS or Windows, put the call
 inside a `__main__` guard to prevent fork-bomb behaviour:
 
 ```python
-from iopt_power_design import find_optimal_design, DesignOptions
+from lattice_doe import find_optimal_design, DesignOptions
 
 if __name__ == "__main__":
     result = find_optimal_design(
@@ -7818,7 +7818,7 @@ Use `build_model_matrix` to see exactly how many columns your formula produces b
 
 ```python
 import pandas as pd
-from iopt_power_design import build_model_matrix
+from lattice_doe import build_model_matrix
 
 # Construct a single representative row — values do not matter for column counting
 sample = pd.DataFrame([{"A": 0.0, "B": 0.0, "C": "low"}])
@@ -7866,7 +7866,7 @@ A `NaN` power result means the design matrix was singular at that `n`, which typ
 1. **Raise `max_n`** — the most common fix. If your true minimum `n` is beyond the current ceiling, raise the ceiling.
 
     ```python
-    from iopt_power_design import PowerContrastConfig
+    from lattice_doe import PowerContrastConfig
     cfg = PowerContrastConfig(
         ...,
         max_n=500,      # default is 200
@@ -7876,7 +7876,7 @@ A `NaN` power result means the design matrix was singular at that `n`, which typ
 2. **Increase `starts`** — more random starts improve the quality of the I-optimal design at each `n`, which can recover power when the default single-start design is weakly conditioned.
 
     ```python
-    from iopt_power_design import DesignOptions
+    from lattice_doe import DesignOptions
     opts = DesignOptions(starts=10)   # default is 5
     ```
 
@@ -7907,7 +7907,7 @@ Python's `multiprocessing` module uses the *fork* start method on Linux and the 
 Wrap any call that uses `workers > 1` in the standard guard:
 
 ```python
-from iopt_power_design import find_optimal_design, DesignOptions, PowerContrastConfig
+from lattice_doe import find_optimal_design, DesignOptions, PowerContrastConfig
 import numpy as np
 
 formula = "~ 1 + A + B + A:B"
@@ -7957,7 +7957,7 @@ Use `build_model_matrix` to inspect the exact column names and count for your fo
 ```python
 import pandas as pd
 import numpy as np
-from iopt_power_design import build_model_matrix
+from lattice_doe import build_model_matrix
 
 sample = pd.DataFrame([{"A": 0.0, "B": 0.0}])
 _, col_names = build_model_matrix("~ 1 + A + B + A:B", sample)
@@ -8037,7 +8037,7 @@ The most common issues:
 - **API not enabled.** The Google Sheets API and Google Drive API must both be enabled in the Google Cloud project associated with the service account.
 
 ```python
-from iopt_power_design.sheets import sheets_run
+from lattice_doe.sheets import sheets_run
 
 result = sheets_run(
     spreadsheet_url_or_id="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
@@ -8150,7 +8150,7 @@ Used with `find_optimal_design` and the analysis functions for **contrast-based 
 
 ```python
 import numpy as np
-from iopt_power_design import PowerContrastConfig
+from lattice_doe import PowerContrastConfig
 
 cfg = PowerContrastConfig(
     L=np.array([[0, 1, 0, 0]]),   # test coefficient of A
@@ -8183,7 +8183,7 @@ Used for **global model F-tests** (is the full regression model significant?). S
 **Example.**
 
 ```python
-from iopt_power_design import PowerR2Config
+from lattice_doe import PowerR2Config
 
 cfg = PowerR2Config(
     r2_target=0.25,   # expect the model to explain 25 % of variance
@@ -8219,7 +8219,7 @@ Used for **GLM contrast tests** (logistic or Poisson regression). See Chapter 9.
 
 ```python
 import numpy as np
-from iopt_power_design import PowerGLMContrastConfig
+from lattice_doe import PowerGLMContrastConfig
 
 cfg = PowerGLMContrastConfig(
     L=np.array([[0, 1, 0, 0]]),
@@ -8319,7 +8319,7 @@ Nested inside `DesignOptions.split_plot`. Activates two-stratum (whole-plot / su
 **Example.**
 
 ```python
-from iopt_power_design import DesignOptions, SplitPlotOptions
+from lattice_doe import DesignOptions, SplitPlotOptions
 
 opts = DesignOptions(
     split_plot=SplitPlotOptions(
@@ -8368,7 +8368,7 @@ Top-level container for multi-response design configuration. Passed as the `mult
 
 ```python
 import numpy as np
-from iopt_power_design import (
+from lattice_doe import (
     ResponseSpec, MultiResponseOptions,
     PowerContrastConfig, PowerR2Config,
 )

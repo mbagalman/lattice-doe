@@ -1,7 +1,7 @@
 # __init__.py
 # License: MIT
 """
-iopt_power_design
+lattice_doe
 =================
 Power-assured optimal experimental designs for linear and GLM models.
 """

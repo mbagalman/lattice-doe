@@ -57,7 +57,7 @@ The output `.html` file must open correctly offline and be email-attachable:
 
 The power curve figure is generated using whichever plotting backend is available, in priority order: `plotly` → `matplotlib` → omitted (section shows a grey placeholder note). The figure is rasterised to PNG and base64-encoded before embedding.
 
-### New file: `iopt_power_design/report.py`
+### New file: `lattice_doe/report.py`
 
 Public API:
 
@@ -75,7 +75,7 @@ def generate_report(
     """Render and write the report. Returns the path written."""
 ```
 
-### New template: `iopt_power_design/templates/report_template.html`
+### New template: `lattice_doe/templates/report_template.html`
 
 Jinja2 template. Sections (all conditional on data availability):
 1. Header (title, generated timestamp, lattice-doe version)
@@ -100,16 +100,16 @@ Dependencies: none. Start here first; all other tickets depend on A1–A2.
 **Status:** Done
 **Claimed by:** Claude
 **Est.:** 2–3 hours
-**Progress note:** Complete. `iopt_power_design/report.py` created with `generate_report()` stub, `_get_jinja_env()`, and `_fig_to_base64()`. `iopt_power_design/templates/` directory created. `pyproject.toml` updated with `[report]` (jinja2, pillow) and `[report-pdf]` (+ weasyprint) extras and `[tool.setuptools.package-data]`. `__init__.py` exports `generate_report`.
+**Progress note:** Complete. `lattice_doe/report.py` created with `generate_report()` stub, `_get_jinja_env()`, and `_fig_to_base64()`. `lattice_doe/templates/` directory created. `pyproject.toml` updated with `[report]` (jinja2, pillow) and `[report-pdf]` (+ weasyprint) extras and `[tool.setuptools.package-data]`. `__init__.py` exports `generate_report`.
 
 **What to do:**
-1. Create `iopt_power_design/templates/` directory.
-2. Create `iopt_power_design/report.py` with:
+1. Create `lattice_doe/templates/` directory.
+2. Create `lattice_doe/report.py` with:
    - `generate_report(...)` function stub that raises `NotImplementedError`.
    - `_get_jinja_env()` helper that loads the template from the `templates/` package directory using `importlib.resources` (Python ≥ 3.9) or `pkg_resources` as fallback.
    - `_fig_to_base64(fig) -> str` helper stub.
    - Module-level `__all__ = ["generate_report"]`.
-3. Export `generate_report` from `iopt_power_design/__init__.py`.
+3. Export `generate_report` from `lattice_doe/__init__.py`.
 4. Add to `pyproject.toml`:
    ```toml
    [project.optional-dependencies]
@@ -117,13 +117,13 @@ Dependencies: none. Start here first; all other tickets depend on A1–A2.
    report-pdf = ["jinja2>=3.0", "pillow>=9.0", "weasyprint>=60.0"]
    ```
    Add both to the `all` meta-group.
-5. Add `iopt_power_design/templates/` to `package_data` (or use `include_package_data = true` with a `MANIFEST.in` entry `recursive-include iopt_power_design/templates *.html`).
-6. Verify: `pip install -e ".[report]"` succeeds and `from iopt_power_design import generate_report` works.
+5. Add `lattice_doe/templates/` to `package_data` (or use `include_package_data = true` with a `MANIFEST.in` entry `recursive-include lattice_doe/templates *.html`).
+6. Verify: `pip install -e ".[report]"` succeeds and `from lattice_doe import generate_report` works.
 
 **Acceptance criteria:**
-- [ ] `iopt_power_design/report.py` exists and is importable.
+- [ ] `lattice_doe/report.py` exists and is importable.
 - [ ] `pip install -e ".[report]"` installs `jinja2` and `pillow`.
-- [ ] `from iopt_power_design import generate_report` does not raise.
+- [ ] `from lattice_doe import generate_report` does not raise.
 - [ ] `pyproject.toml` `[all]` includes report deps.
 
 ---
@@ -134,10 +134,10 @@ Dependencies: none. Start here first; all other tickets depend on A1–A2.
 **Claimed by:** Claude
 **Est.:** 2–3 hours
 **Depends on:** A1
-**Progress note:** Complete. `iopt_power_design/templates/report_template.html` created with full inline CSS (metric-grid, tables, badges, alerts, print styles), and all section stubs guarded by `{% if ... %}`: header, config summary, power metrics grid, design table, buckets table, diagnostics (with VIF sub-table), power curve figure (with placeholder fallback), and footer. HTML structure verified clean.
+**Progress note:** Complete. `lattice_doe/templates/report_template.html` created with full inline CSS (metric-grid, tables, badges, alerts, print styles), and all section stubs guarded by `{% if ... %}`: header, config summary, power metrics grid, design table, buckets table, diagnostics (with VIF sub-table), power curve figure (with placeholder fallback), and footer. HTML structure verified clean.
 
 **What to do:**
-Create `iopt_power_design/templates/report_template.html` — a complete, valid Jinja2 template with:
+Create `lattice_doe/templates/report_template.html` — a complete, valid Jinja2 template with:
 
 1. **Document structure:** `<!DOCTYPE html>`, `<html lang="en">`, `<head>` (charset, viewport, title), `<body>`.
 2. **Inline CSS `<style>` block** covering:
@@ -160,7 +160,7 @@ Create `iopt_power_design/templates/report_template.html` — a complete, valid 
 4. Pass a minimal context dict `{"title": "Test", "generated_at": "..."}` from `generate_report()` stub and confirm the template renders without error.
 
 **Acceptance criteria:**
-- [ ] Template file exists at `iopt_power_design/templates/report_template.html`.
+- [ ] Template file exists at `lattice_doe/templates/report_template.html`.
 - [ ] `jinja2.Environment(...).get_template("report_template.html").render({"title": "Test", "generated_at": "now"})` produces valid HTML with no Jinja2 errors.
 - [ ] Rendered HTML passes the W3C Nu validator (or `html.parser` parse without errors) for the stub sections.
 
@@ -414,7 +414,7 @@ When `weasyprint` is present, also add `@media print` CSS adjustments in the tem
 **Progress note:** Complete. `export_report_to: Optional[str] = None` added to `find_optimal_design()` signature in `api.py`. After the diagnostics export block, calls `generate_report()` with `include_power_curve=False` (keeps API call fast). Stores written path in `result["report"]["report_path"]`; stores error string in `report_path_error` on failure — design result always returned.
 
 **What to do:**
-Add `export_report_to=` parameter to `find_optimal_design()` in `iopt_power_design/api.py`:
+Add `export_report_to=` parameter to `find_optimal_design()` in `lattice_doe/api.py`:
 
 ```python
 def find_optimal_design(
@@ -448,7 +448,7 @@ Behaviour:
 **Progress note:** Complete. `--html-report` argparse flag added to `cli.py`. Writes `<basename>_report.html` directly (does not go through `export_report_to=` on api — uses `generate_report()` directly so the path is deterministic). Also honoured via `output.html_report: true` in YAML. Report path printed in summary. `ImportError` and other failures emit `logger.warning()` and continue.
 
 **What to do:**
-In `iopt_power_design/cli.py`, add a `--html-report` flag:
+In `lattice_doe/cli.py`, add a `--html-report` flag:
 
 ```
 lattice --config config.yml --out ./output/design --html-report
@@ -562,7 +562,7 @@ Add a step "5b) Export a shareable HTML report" between the existing step 4 (Com
 **`docs/recipes.md`:**
 Add Recipe 7 "Generate a shareable HTML report for a team member":
 ```python
-from iopt_power_design import generate_report
+from lattice_doe import generate_report
 
 generate_report(
     result=result,

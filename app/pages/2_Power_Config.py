@@ -29,8 +29,8 @@ init_state()
 render_sidebar()
 
 try:
-    from iopt_power_design.design import build_model_matrix
-    from iopt_power_design.contrasts import contrast_from_scenarios
+    from lattice_doe.design import build_model_matrix
+    from lattice_doe.contrasts import contrast_from_scenarios
     _HAS_IOPT = True
 except ImportError:
     _HAS_IOPT = False
@@ -428,7 +428,7 @@ to find the index of each parameter.
             with st.expander("Preview L and \u03b4"):
                 if not _HAS_IOPT:
                     st.warning(
-                        "iopt_power_design not importable \u2014 "
+                        "lattice_doe not importable \u2014 "
                         "run `pip install -e '.[app]'` to enable preview."
                     )
                 elif not formula.strip():

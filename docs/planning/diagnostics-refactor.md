@@ -66,14 +66,14 @@ __all__ = [
 ]
 ```
 
-Code that does `from iopt_power_design.diagnostics import compute_design_metrics` continues to work without modification. This wrapper can be removed in a future major version bump once all internal callers have been updated to import from the new modules.
+Code that does `from lattice_doe.diagnostics import compute_design_metrics` continues to work without modification. This wrapper can be removed in a future major version bump once all internal callers have been updated to import from the new modules.
 
 ### Internal callers to update
 
 The following files import directly from `diagnostics` and should be updated to import from the specific new module in ticket E2:
 
-- `iopt_power_design/api.py` — imports `compute_leverages`, `compute_design_metrics`, `create_diagnostic_plots`, `export_diagnostics`
-- `iopt_power_design/__init__.py` — re-exports the four public symbols
+- `lattice_doe/api.py` — imports `compute_leverages`, `compute_design_metrics`, `create_diagnostic_plots`, `export_diagnostics`
+- `lattice_doe/__init__.py` — re-exports the four public symbols
 - `tests/test_diagnostics.py` (if it exists) — update imports; should pass unchanged if using the `diagnostics` wrapper
 
 ### matplotlib import guard
@@ -123,25 +123,25 @@ Create the three new module files as stubs so that all subsequent tickets have a
 
 **What to do:**
 
-1. Create `iopt_power_design/diag_metrics.py` with:
+1. Create `lattice_doe/diag_metrics.py` with:
    ```python
    """Pure-NumPy diagnostic metrics — no matplotlib dependency."""
    __all__ = ["compute_leverages", "compute_design_metrics"]
    ```
-2. Create `iopt_power_design/diag_plots.py` with:
+2. Create `lattice_doe/diag_plots.py` with:
    ```python
    """Matplotlib diagnostic figures."""
    __all__ = ["create_diagnostic_plots"]
    ```
-3. Create `iopt_power_design/diag_export.py` with:
+3. Create `lattice_doe/diag_export.py` with:
    ```python
    """Diagnostic file export (CSV, PNG, HTML)."""
    __all__ = ["export_diagnostics"]
    ```
-4. Confirm all three are importable: `python -c "import iopt_power_design.diag_metrics, iopt_power_design.diag_plots, iopt_power_design.diag_export"` exits with no error.
+4. Confirm all three are importable: `python -c "import lattice_doe.diag_metrics, lattice_doe.diag_plots, lattice_doe.diag_export"` exits with no error.
 
 **Acceptance criteria:**
-- [ ] Three new `.py` files exist in `iopt_power_design/`.
+- [ ] Three new `.py` files exist in `lattice_doe/`.
 - [ ] All three are importable without error.
 - [ ] Existing tests still pass (`pytest tests/` is green).
 
@@ -202,12 +202,12 @@ Steps:
 1. Copy both functions into `diag_metrics.py` (they call the private helpers already in place from B1).
 2. Update `__all__` in `diag_metrics.py` if not already correct.
 3. Do **not** yet remove them from `diagnostics.py`.
-4. Add a quick smoke-test import check: `from iopt_power_design.diag_metrics import compute_leverages, compute_design_metrics`.
+4. Add a quick smoke-test import check: `from lattice_doe.diag_metrics import compute_leverages, compute_design_metrics`.
 5. Run `pytest tests/` — must be green.
 
 **Acceptance criteria:**
 - [ ] `compute_leverages` and `compute_design_metrics` are importable from `diag_metrics`.
-- [ ] `diag_metrics.py` has no matplotlib import (enforce by running `grep -n "matplotlib" iopt_power_design/diag_metrics.py` — should be empty).
+- [ ] `diag_metrics.py` has no matplotlib import (enforce by running `grep -n "matplotlib" lattice_doe/diag_metrics.py` — should be empty).
 - [ ] Tests still pass.
 
 ---
@@ -333,8 +333,8 @@ Steps:
 
 **Acceptance criteria:**
 - [ ] `diagnostics.py` is ≤ 20 lines.
-- [ ] `from iopt_power_design.diagnostics import compute_leverages` still works.
-- [ ] `from iopt_power_design.diagnostics import export_diagnostics` still works.
+- [ ] `from lattice_doe.diagnostics import compute_leverages` still works.
+- [ ] `from lattice_doe.diagnostics import export_diagnostics` still works.
 - [ ] All tests pass.
 
 ---
@@ -345,14 +345,14 @@ Steps:
 **Claimed by:** Claude
 **Est.:** 1 hour
 **Depends on:** E1
-**Progress note:** Complete. Two callers updated: `api.py:43` (`from .diagnostics import ...` → `from .diag_metrics import compute_design_metrics` + `from .diag_export import export_diagnostics`); `power_curves.py:187` (lazy import updated to `from .diag_metrics import compute_design_metrics`). `__init__.py` had no direct diagnostics import. Verified `matplotlib` not in `sys.modules` after `import iopt_power_design.api`.
+**Progress note:** Complete. Two callers updated: `api.py:43` (`from .diagnostics import ...` → `from .diag_metrics import compute_design_metrics` + `from .diag_export import export_diagnostics`); `power_curves.py:187` (lazy import updated to `from .diag_metrics import compute_design_metrics`). `__init__.py` had no direct diagnostics import. Verified `matplotlib` not in `sys.modules` after `import lattice_doe.api`.
 
 **What to do:**
 
 Update internal callers to import from the specific new modules (not via the wrapper). This eliminates the hidden matplotlib dependency from `api.py` imports.
 
-**`iopt_power_design/api.py`:**
-- Find all `from .diagnostics import ...` or `from iopt_power_design.diagnostics import ...` lines.
+**`lattice_doe/api.py`:**
+- Find all `from .diagnostics import ...` or `from lattice_doe.diagnostics import ...` lines.
 - Replace with imports from the appropriate new module:
   ```python
   from .diag_metrics import compute_leverages, compute_design_metrics
@@ -360,7 +360,7 @@ Update internal callers to import from the specific new modules (not via the wra
   from .diag_export import export_diagnostics
   ```
 
-**`iopt_power_design/__init__.py`:**
+**`lattice_doe/__init__.py`:**
 - Find the re-export lines for diagnostic symbols.
 - Update them to import from `diag_metrics`, `diag_plots`, and `diag_export` directly (or leave them pointing to `diagnostics` — the wrapper is acceptable here since `__init__.py` does not have the matplotlib-at-import problem).
 
@@ -368,14 +368,14 @@ Update internal callers to import from the specific new modules (not via the wra
 - Leave test imports pointing at `diagnostics` (the wrapper keeps them working). No changes required.
 
 Steps:
-1. Search for all import references: `grep -rn "from.*diagnostics import\|import.*diagnostics" iopt_power_design/`.
+1. Search for all import references: `grep -rn "from.*diagnostics import\|import.*diagnostics" lattice_doe/`.
 2. Update each reference in `api.py` as described above.
 3. Run `pytest tests/` — must be green.
-4. Verify matplotlib is no longer imported at `api.py` load time (in a headless env): `python -c "import sys; import iopt_power_design.api; print('matplotlib' in sys.modules)"` should print `False`.
+4. Verify matplotlib is no longer imported at `api.py` load time (in a headless env): `python -c "import sys; import lattice_doe.api; print('matplotlib' in sys.modules)"` should print `False`.
 
 **Acceptance criteria:**
 - [ ] `api.py` imports diagnostic functions from `diag_metrics` / `diag_plots` / `diag_export`, not from `diagnostics`.
-- [ ] `python -c "import sys; import iopt_power_design.api; print('matplotlib' in sys.modules)"` prints `False`.
+- [ ] `python -c "import sys; import lattice_doe.api; print('matplotlib' in sys.modules)"` prints `False`.
 - [ ] All tests pass.
 
 ---
@@ -392,7 +392,7 @@ Confirm the refactor is complete, clean, and correct.
 **Claimed by:** Claude
 **Est.:** 30 minutes
 **Depends on:** E2
-**Progress note:** Complete. All checklist items verified: 229 tests pass (10 pre-existing failures unchanged); `diag_metrics.py` = 204 lines, `diag_plots.py` = 209 lines, `diag_export.py` = 228 lines, `diagnostics.py` = 20 lines; zero matplotlib import lines in `diag_metrics.py`; backward compat confirmed; `matplotlib` not in `sys.modules` after `import iopt_power_design.api`; ENHANCEMENTS.md updated to mark TD-2 resolved.
+**Progress note:** Complete. All checklist items verified: 229 tests pass (10 pre-existing failures unchanged); `diag_metrics.py` = 204 lines, `diag_plots.py` = 209 lines, `diag_export.py` = 228 lines, `diagnostics.py` = 20 lines; zero matplotlib import lines in `diag_metrics.py`; backward compat confirmed; `matplotlib` not in `sys.modules` after `import lattice_doe.api`; ENHANCEMENTS.md updated to mark TD-2 resolved.
 
 **What to do:**
 
@@ -400,13 +400,13 @@ Run the full verification checklist:
 
 1. **Full test suite:** `pytest tests/ -v` — all tests green, no new warnings.
 2. **Line count sanity:**
-   - `wc -l iopt_power_design/diagnostics.py` — should be ≤ 20 lines.
-   - `wc -l iopt_power_design/diag_metrics.py` — should be ~130–150 lines (helpers + 2 public functions).
-   - `wc -l iopt_power_design/diag_plots.py` — should be ~200–210 lines.
-   - `wc -l iopt_power_design/diag_export.py` — should be ~220–230 lines.
-3. **No matplotlib in metrics:** `grep -n "matplotlib" iopt_power_design/diag_metrics.py` — must return nothing.
-4. **Backward compat:** `python -c "from iopt_power_design.diagnostics import compute_leverages, compute_design_metrics, create_diagnostic_plots, export_diagnostics; print('OK')"` prints `OK`.
-5. **Clean api.py import:** `python -c "import sys; import iopt_power_design.api; print('matplotlib' in sys.modules)"` prints `False`.
+   - `wc -l lattice_doe/diagnostics.py` — should be ≤ 20 lines.
+   - `wc -l lattice_doe/diag_metrics.py` — should be ~130–150 lines (helpers + 2 public functions).
+   - `wc -l lattice_doe/diag_plots.py` — should be ~200–210 lines.
+   - `wc -l lattice_doe/diag_export.py` — should be ~220–230 lines.
+3. **No matplotlib in metrics:** `grep -n "matplotlib" lattice_doe/diag_metrics.py` — must return nothing.
+4. **Backward compat:** `python -c "from lattice_doe.diagnostics import compute_leverages, compute_design_metrics, create_diagnostic_plots, export_diagnostics; print('OK')"` prints `OK`.
+5. **Clean api.py import:** `python -c "import sys; import lattice_doe.api; print('matplotlib' in sys.modules)"` prints `False`.
 6. **Update ENHANCEMENTS.md:** Move TD-2 from the Technical Debt backlog table to a "Completed" note, or mark it resolved with a date.
 
 **Acceptance criteria:**

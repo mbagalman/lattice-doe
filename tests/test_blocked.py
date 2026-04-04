@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from iopt_power_design import (
+from lattice_doe import (
     DesignOptions,
     PowerContrastConfig,
     PowerR2Config,

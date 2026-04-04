@@ -20,7 +20,7 @@ It orchestrates:
 All analysis utilities (power_curve_by_n, power_curve_by_effect,
 generate_power_curves, power_sensitivity, min_detectable_effect,
 compare_criteria) live in ``analysis.py`` and are re-exported via
-``iopt_power_design.__init__``.
+``lattice_doe.__init__``.
 """
 from __future__ import annotations
 

@@ -24,17 +24,17 @@ init_state()
 render_sidebar()
 
 try:
-    from iopt_power_design import (
+    from lattice_doe import (
         compare_criteria,
         min_detectable_effect,
         power_sensitivity,
     )
-    from iopt_power_design.config import (
+    from lattice_doe.config import (
         DesignOptions,
         PowerContrastConfig,
         PowerR2Config,
     )
-    from iopt_power_design.contrasts import contrast_from_scenarios
+    from lattice_doe.contrasts import contrast_from_scenarios
 
     _HAS_IOPT = True
 except ImportError:
@@ -354,7 +354,7 @@ if not _HAS_RESULT:
 
 if not _HAS_IOPT:
     st.error(
-        "iopt_power_design is not importable. "
+        "lattice_doe is not importable. "
         "Run `pip install -e '.[app]'` from the project root."
     )
     st.stop()

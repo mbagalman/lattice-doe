@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from iopt_power_design.contrasts import contrast_from_scenarios
+from lattice_doe.contrasts import contrast_from_scenarios
 
 FORMULA = "~ 1 + A + B"
 FACTORS = {

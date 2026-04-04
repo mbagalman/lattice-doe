@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from iopt_power_design.power import contrast_power, global_r2_power, eval_response_power, combine_powers, hotelling_t2_power, glm_contrast_power
-from iopt_power_design.config import (
+from lattice_doe.power import contrast_power, global_r2_power, eval_response_power, combine_powers, hotelling_t2_power, glm_contrast_power
+from lattice_doe.config import (
     PowerContrastConfig, PowerR2Config, ResponseSpec, SplitPlotOptions,
     PowerGLMContrastConfig, glm_fisher_weight,
 )
@@ -291,7 +291,7 @@ class TestEvalResponsePower:
         X = _make_X()
         rs = _r2_rs()
         cfg = rs.power_cfg
-        from iopt_power_design.power import global_r2_power
+        from lattice_doe.power import global_r2_power
         expected = global_r2_power(cfg.r2_target, X, cfg.alpha, lambda_mode=cfg.lambda_mode)
         result = eval_response_power(rs, X, ["Intercept", "A", "B"])
         assert abs(result["power"] - expected.power) < 1e-12
@@ -322,8 +322,8 @@ class TestEvalResponsePower:
             )
 
     def test_exported_from_top_level(self):
-        import iopt_power_design
-        assert hasattr(iopt_power_design, "eval_response_power")
+        import lattice_doe
+        assert hasattr(lattice_doe, "eval_response_power")
 
 
 # ---------------------------------------------------------------------------
@@ -516,8 +516,8 @@ class TestHotellingT2Power:
         assert high.power > low.power
 
     def test_exported_from_top_level(self):
-        import iopt_power_design
-        assert hasattr(iopt_power_design, "hotelling_t2_power")
+        import lattice_doe
+        assert hasattr(lattice_doe, "hotelling_t2_power")
 
 
 # ---------------------------------------------------------------------------

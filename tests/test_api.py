@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from iopt_power_design import (
+from lattice_doe import (
     DesignOptions,
     PowerContrastConfig,
     PowerR2Config,
@@ -31,7 +31,7 @@ from iopt_power_design import (
     multiresponse_sensitivity,
     power_curve_by_baseline,
 )
-from iopt_power_design.contrasts import contrast_from_scenarios
+from lattice_doe.contrasts import contrast_from_scenarios
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -786,7 +786,7 @@ _ROB_OPTS = DesignOptions(candidate_points=100, starts=2, max_iter=40, random_st
 
 def _contrast_design():
     """Build a small contrast-mode design for robustness tests."""
-    from iopt_power_design.contrasts import contrast_from_scenarios
+    from lattice_doe.contrasts import contrast_from_scenarios
     L, delta = contrast_from_scenarios(
         FORMULA, FACTORS,
         {"A": "low",  "B": 0.0},
@@ -1053,7 +1053,7 @@ _SP_FAST_OPTS = DesignOptions(
 
 
 def _sp_contrast_cfg(max_n: int = 20) -> PowerContrastConfig:
-    from iopt_power_design.contrasts import contrast_from_scenarios
+    from lattice_doe.contrasts import contrast_from_scenarios
     L, delta = contrast_from_scenarios(
         _SP_FORMULA, _SP_FACTORS,
         {"A": -1.0, "B": -1.0},
@@ -1355,7 +1355,7 @@ class TestMultiResponseAPI:
         assert result["elapsed_sec"] > 0
 
     def test_achieved_power_equals_combine_powers(self):
-        from iopt_power_design import combine_powers
+        from lattice_doe import combine_powers
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")], rule="min")
         per_powers = [rd["power"] for rd in result["responses"]]
         expected = combine_powers(per_powers, None, "min")
@@ -1409,8 +1409,8 @@ class TestMultiResponseAPI:
         assert len(result["responses"]) == 2
 
     def test_exported_from_top_level(self):
-        import iopt_power_design
-        assert hasattr(iopt_power_design, "find_multiresponse_design")
+        import lattice_doe
+        assert hasattr(lattice_doe, "find_multiresponse_design")
 
 
 # ---------------------------------------------------------------------------
@@ -1612,7 +1612,7 @@ class TestCompoundCriterion:
 
     def test_compound_design_estimable_both_formulas(self):
         # Both model matrices formed from the returned design rows must have full rank.
-        from iopt_power_design.model_matrix import build_model_matrix
+        from lattice_doe.model_matrix import build_model_matrix
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20),
                           formula=_CP_FORMULA_LINEAR)
@@ -1816,7 +1816,7 @@ class TestMultiResponseAnalysis:
         assert df["n"].max() <= 25
 
     def test_combined_power_equals_combine_powers(self):
-        from iopt_power_design.power import combine_powers
+        from lattice_doe.power import combine_powers
         df = power_curve_by_n_multiresponse(
             _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
             n_range=(15, 25), n_points=4, design_opts=_ana_opts(),
@@ -1847,8 +1847,8 @@ class TestMultiResponseAnalysis:
         )
 
     def test_exported_from_top_level(self):
-        import iopt_power_design
-        assert hasattr(iopt_power_design, "power_curve_by_n_multiresponse")
+        import lattice_doe
+        assert hasattr(lattice_doe, "power_curve_by_n_multiresponse")
 
     # --- multiresponse_sensitivity ---
 
@@ -1905,8 +1905,8 @@ class TestMultiResponseAnalysis:
             )
 
     def test_sensitivity_exported_from_top_level(self):
-        import iopt_power_design
-        assert hasattr(iopt_power_design, "multiresponse_sensitivity")
+        import lattice_doe
+        assert hasattr(lattice_doe, "multiresponse_sensitivity")
 
 
 # ---------------------------------------------------------------------------
@@ -1942,42 +1942,42 @@ class TestMultiResponseCLI:
         }
 
     def test_validate_accepts_responses_block(self):
-        from iopt_power_design.cli import _validate_config_keys
+        from lattice_doe.cli import _validate_config_keys
         cfg = self._scenario_cfg()
         _validate_config_keys(cfg)  # must not raise
 
     def test_validate_still_rejects_missing_formula(self):
-        from iopt_power_design.cli import _validate_config_keys
+        from lattice_doe.cli import _validate_config_keys
         cfg = self._scenario_cfg()
         del cfg["formula"]
         with pytest.raises(KeyError, match="formula"):
             _validate_config_keys(cfg)
 
     def test_validate_still_rejects_no_power_keys(self):
-        from iopt_power_design.cli import _validate_config_keys
+        from lattice_doe.cli import _validate_config_keys
         cfg = {"formula": "~ 1 + A", "factors": {"A": [0.0, 1.0]}}
         with pytest.raises(KeyError):
             _validate_config_keys(cfg)
 
     def test_make_multi_response_cfg_returns_correct_type(self):
-        from iopt_power_design.cli import _make_multi_response_cfg
-        from iopt_power_design.config import MultiResponseOptions
+        from lattice_doe.cli import _make_multi_response_cfg
+        from lattice_doe.config import MultiResponseOptions
         cfg = self._scenario_cfg()
         formula = cfg["formula"]
-        from iopt_power_design.cli import _as_factors
+        from lattice_doe.cli import _as_factors
         factors = _as_factors(cfg["factors"])
         multi = _make_multi_response_cfg(cfg, formula, factors)
         assert isinstance(multi, MultiResponseOptions)
 
     def test_make_multi_response_cfg_response_count(self):
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         factors = _as_factors(cfg["factors"])
         multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
         assert len(multi.responses) == 2
 
     def test_make_multi_response_cfg_names(self):
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         factors = _as_factors(cfg["factors"])
         multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
@@ -1985,7 +1985,7 @@ class TestMultiResponseCLI:
         assert names == ["Yield", "Purity"]
 
     def test_make_multi_response_cfg_power_combination(self):
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         cfg["power_combination"] = "product"
         factors = _as_factors(cfg["factors"])
@@ -1993,8 +1993,8 @@ class TestMultiResponseCLI:
         assert multi.power_combination == "product"
 
     def test_make_multi_response_cfg_explicit_L(self):
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
-        from iopt_power_design.config import PowerContrastConfig
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.config import PowerContrastConfig
         import numpy as np
         cfg = self._scenario_cfg()
         # Replace first response with explicit L/delta
@@ -2008,7 +2008,7 @@ class TestMultiResponseCLI:
         assert isinstance(multi.responses[0].power_cfg, PowerContrastConfig)
 
     def test_make_multi_response_cfg_missing_name_raises(self):
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         cfg["responses"][0]["name"] = ""
         factors = _as_factors(cfg["factors"])
@@ -2016,7 +2016,7 @@ class TestMultiResponseCLI:
             _make_multi_response_cfg(cfg, cfg["formula"], factors)
 
     def test_make_multi_response_cfg_missing_power_key_raises(self):
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         # Remove both contrast and r2_target from second response
         del cfg["responses"][1]["r2_target"]
@@ -2025,8 +2025,8 @@ class TestMultiResponseCLI:
             _make_multi_response_cfg(cfg, cfg["formula"], factors)
 
     def test_make_multi_response_cfg_too_few_responses_raises(self):
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
-        from iopt_power_design.config import MultiResponseOptions
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.config import MultiResponseOptions
         cfg = self._scenario_cfg()
         cfg["responses"] = cfg["responses"][:1]  # only 1
         factors = _as_factors(cfg["factors"])
@@ -2037,7 +2037,7 @@ class TestMultiResponseCLI:
 
     def test_glm_keys_with_contrast_builds_glm_config(self):
         """CR-37: contrast + family/baseline → PowerGLMContrastConfig, not PowerContrastConfig."""
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         cfg["responses"][0] = {
             "name": "Yield",
@@ -2058,7 +2058,7 @@ class TestMultiResponseCLI:
 
     def test_glm_keys_without_contrast_raises(self):
         """CR-37: GLM keys with no contrast block → KeyError (no silent fallback)."""
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         cfg["responses"][0] = {
             "name": "Yield",
@@ -2072,7 +2072,7 @@ class TestMultiResponseCLI:
 
     def test_glm_contrast_missing_baseline_raises(self):
         """CR-37: contrast + family but no baseline → KeyError."""
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         cfg["responses"][0] = {
             "name": "Yield",
@@ -2090,7 +2090,7 @@ class TestMultiResponseCLI:
 
     def test_plain_contrast_no_glm_keys_unchanged(self):
         """CR-37 regression: contrast without family/baseline still builds PowerContrastConfig."""
-        from iopt_power_design.cli import _make_multi_response_cfg, _as_factors
+        from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         factors = _as_factors(cfg["factors"])
         multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
@@ -2099,7 +2099,7 @@ class TestMultiResponseCLI:
     def test_cli_main_multiresponse_dry_run(self, tmp_path):
         """--dry-run with a responses: config should succeed."""
         import yaml
-        from iopt_power_design.cli import main
+        from lattice_doe.cli import main
         cfg = self._scenario_cfg()
         cfg_path = tmp_path / "mr_config.yml"
         cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
@@ -2109,7 +2109,7 @@ class TestMultiResponseCLI:
     def test_cli_main_multiresponse_flag_dry_run(self, tmp_path):
         """--multi-response flag with responses: config should also work."""
         import yaml
-        from iopt_power_design.cli import main
+        from lattice_doe.cli import main
         cfg = self._scenario_cfg()
         cfg_path = tmp_path / "mr_config.yml"
         cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
@@ -2119,7 +2119,7 @@ class TestMultiResponseCLI:
     def test_cli_main_multiresponse_produces_output_files(self, tmp_path):
         """Full end-to-end: multi-response config writes CSV outputs."""
         import yaml
-        from iopt_power_design.cli import main
+        from lattice_doe.cli import main
         cfg = self._scenario_cfg()
         # Low power target and small max_n keeps the bisection bounded
         cfg["power"] = 0.50
@@ -2242,7 +2242,7 @@ class TestMR10Integration:
 
     def test_s3_weighted_mean_achieved_equals_formula(self):
         """achieved_power == weighted mean of per-response powers."""
-        from iopt_power_design.power import combine_powers
+        from lattice_doe.power import combine_powers
         opts = _mr10_opts()
         responses = [
             ResponseSpec("Y1", PowerContrastConfig(
@@ -2280,7 +2280,7 @@ class TestMR10Integration:
 
     def test_s4_compound_design_estimable_for_both_formulas(self):
         """Compound-criterion design is full-rank for both response model matrices."""
-        from iopt_power_design.model_matrix import build_model_matrix
+        from lattice_doe.model_matrix import build_model_matrix
         opts = _mr10_opts()
         r1 = ResponseSpec(
             "Y1",

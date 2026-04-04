@@ -1,6 +1,6 @@
 # tests/test_sheets.py
 # License: MIT
-"""Unit tests for iopt_power_design.sheets — all gspread calls mocked."""
+"""Unit tests for lattice_doe.sheets — all gspread calls mocked."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -9,14 +9,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import iopt_power_design.sheets as sheets_module
-from iopt_power_design.sheets import (
+import lattice_doe.sheets as sheets_module
+from lattice_doe.sheets import (
     SheetsError,
     _df_to_rows,
     _parse_config_sheet,
     _TEMPLATE_ROWS,
 )
-from iopt_power_design.config import DesignOptions, PowerContrastConfig, PowerR2Config
+from lattice_doe.config import DesignOptions, PowerContrastConfig, PowerR2Config
 
 
 # ---------------------------------------------------------------------------
@@ -449,7 +449,7 @@ class TestSheetsRun:
              patch.object(sheets_module, "_get_client", get_client), \
              patch.object(sheets_module, "_parse_config_sheet",
                           return_value=_simple_parse_return()), \
-             patch("iopt_power_design.api.find_optimal_design",
+             patch("lattice_doe.api.find_optimal_design",
                    side_effect=RuntimeError("solver failed")):
             with pytest.raises(SheetsError, match="Design optimisation"):
                 sheets_module.sheets_run("fake-id")
@@ -462,7 +462,7 @@ class TestSheetsRun:
              patch.object(sheets_module, "_get_client", get_client), \
              patch.object(sheets_module, "_parse_config_sheet",
                           return_value=_simple_parse_return()), \
-             patch("iopt_power_design.api.find_optimal_design",
+             patch("lattice_doe.api.find_optimal_design",
                    return_value=dr), \
              patch.object(sheets_module, "_write_results"):
             result = sheets_module.sheets_run("fake-id")
@@ -477,7 +477,7 @@ class TestSheetsRun:
              patch.object(sheets_module, "_get_client", get_client), \
              patch.object(sheets_module, "_parse_config_sheet",
                           return_value=_simple_parse_return()), \
-             patch("iopt_power_design.api.find_optimal_design",
+             patch("lattice_doe.api.find_optimal_design",
                    return_value=dr), \
              patch.object(sheets_module, "_write_results"):
             result = sheets_module.sheets_run("fake-id")
@@ -495,7 +495,7 @@ class TestSheetsRun:
              patch.object(sheets_module, "_get_client", get_client), \
              patch.object(sheets_module, "_parse_config_sheet",
                           return_value=_simple_parse_return()), \
-             patch("iopt_power_design.api.find_optimal_design",
+             patch("lattice_doe.api.find_optimal_design",
                    return_value=dr), \
              patch.object(sheets_module, "_write_results",
                           side_effect=Exception("API quota exceeded")):
@@ -825,7 +825,7 @@ class TestCR34ExtGLM:
         ]
         ws = _make_mock_worksheet(rows)
         _, _, power_cfg, _, multi_cfg = _parse_config_sheet(ws)
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         assert isinstance(power_cfg, PowerGLMContrastConfig)
         assert multi_cfg is None
 
@@ -846,7 +846,7 @@ class TestCR34ExtGLM:
         ]
         ws = _make_mock_worksheet(rows)
         _, _, power_cfg, _, _ = _parse_config_sheet(ws)
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         assert isinstance(power_cfg, PowerGLMContrastConfig)
         assert power_cfg.family == "poisson"
         assert power_cfg.baseline == pytest.approx(2.0)
@@ -869,7 +869,7 @@ class TestCR34ExtGLM:
         ]
         ws = _make_mock_worksheet(rows)
         _, _, power_cfg, _, _ = _parse_config_sheet(ws)
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         assert isinstance(power_cfg, PowerGLMContrastConfig)
         assert power_cfg.family == "binomial"
         assert power_cfg.baseline == pytest.approx(0.30)
@@ -928,14 +928,14 @@ class TestCR34ExtGLM:
         ws = _make_mock_worksheet(rows)
         # Should not raise; sigma is irrelevant for GLM
         _, _, power_cfg, _, _ = _parse_config_sheet(ws)
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         assert isinstance(power_cfg, PowerGLMContrastConfig)
 
     def test_glm_template_binomial_parseable(self):
         """Built-in 'glm-binomial' template parses without error."""
         ws = _make_mock_worksheet(_TEMPLATE_ROWS["glm-binomial"])
         _, _, power_cfg, _, multi_cfg = _parse_config_sheet(ws)
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         assert isinstance(power_cfg, PowerGLMContrastConfig)
         assert multi_cfg is None
         assert power_cfg.family == "binomial"
@@ -944,7 +944,7 @@ class TestCR34ExtGLM:
         """Built-in 'glm-poisson' template parses without error."""
         ws = _make_mock_worksheet(_TEMPLATE_ROWS["glm-poisson"])
         _, _, power_cfg, _, _ = _parse_config_sheet(ws)
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         assert isinstance(power_cfg, PowerGLMContrastConfig)
         assert power_cfg.family == "poisson"
 
@@ -976,7 +976,7 @@ class TestCR34ExtGLM:
         _, _, power_cfg, _, multi_cfg = _parse_config_sheet(ws)
         assert power_cfg is None
         assert multi_cfg is not None
-        from iopt_power_design.config import PowerGLMContrastConfig, PowerR2Config
+        from lattice_doe.config import PowerGLMContrastConfig, PowerR2Config
         assert isinstance(multi_cfg.responses[0].power_cfg, PowerGLMContrastConfig)
         assert isinstance(multi_cfg.responses[1].power_cfg, PowerR2Config)
 
@@ -1002,7 +1002,7 @@ class TestCR34ExtGLM:
         ]
         ws = _make_mock_worksheet(rows)
         _, _, _, _, multi_cfg = _parse_config_sheet(ws)
-        from iopt_power_design.config import PowerGLMContrastConfig
+        from lattice_doe.config import PowerGLMContrastConfig
         y1_cfg = multi_cfg.responses[0].power_cfg
         assert isinstance(y1_cfg, PowerGLMContrastConfig)
         assert y1_cfg.baseline == pytest.approx(3.0)

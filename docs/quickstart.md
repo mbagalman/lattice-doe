@@ -19,7 +19,7 @@ pip install -e ".[cli]"
 Create a small script and run it with `python your_script.py`.
 
 ```python
-from iopt_power_design import (
+from lattice_doe import (
     find_optimal_design,
     PowerContrastConfig,
     DesignOptions,
@@ -96,7 +96,7 @@ pip install -e ".[report]"
 ```
 
 ```python
-from iopt_power_design import generate_report
+from lattice_doe import generate_report
 
 generate_report(
     result=result,       # dict returned by find_optimal_design()

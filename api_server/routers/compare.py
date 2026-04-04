@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter
 
-from iopt_power_design import compare_criteria
+from lattice_doe import compare_criteria
 from api_server.models.compare import (
     CompareCriteriaRequest,
     CompareCriteriaResponse,
