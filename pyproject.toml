@@ -115,9 +115,9 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mbagalman/DOE-Idea"
-Repository = "https://github.com/mbagalman/DOE-Idea"
-Issues = "https://github.com/mbagalman/DOE-Idea/issues"
+Homepage = "https://github.com/mbagalman/lattice-doe"
+Repository = "https://github.com/mbagalman/lattice-doe"
+Issues = "https://github.com/mbagalman/lattice-doe/issues"
 
 
 [project.scripts]
