@@ -8,8 +8,11 @@ Power-assured optimal experimental designs for linear and GLM models.
 
 from __future__ import annotations
 
-# Public version string (keep in sync with pyproject.toml)
-__version__ = "0.1.0"
+from importlib.metadata import version, PackageNotFoundError
+try:
+    __version__ = version("lattice-doe")
+except PackageNotFoundError:
+    __version__ = "0.0.0.dev"  # fallback when package is not installed
 
 # Re-export primary API and configuration types
 from .api import find_optimal_design, find_multiresponse_design  # noqa: F401
