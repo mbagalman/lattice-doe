@@ -3,14 +3,14 @@ name = "lattice-doe"
 version = "0.1.0"
 description = "Lattice DOE: power-assured optimal experimental designs for linear and GLM models."
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Michael Bagalman", email = "Michael@ParadoxResolution.com" }]
 requires-python = ">=3.9"
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
