@@ -1,5 +1,88 @@
 # Lattice DOE
 
+## Stop Guessing Your Way Through Experimental Design
+
+Most experimental design advice assumes a world that doesn't exist.
+
+Clean factors. Unlimited sample sizes. Neatly separable effects.
+
+In the real world, you get:
+- Too many variables
+- Not enough runs
+- Constraints nobody told you about until it was too late
+
+So what happens? People either oversimplify the problem until it's wrong, or overcomplicate it until it's unusable. Neither leads to better decisions.
+
+---
+
+## What This Is
+
+`lattice-doe` is a Python toolkit for designing **efficient, structured experiments under real-world constraints**.
+
+It's built for the messy middle:
+- When full factorial designs are impossible
+- When fractional factorial feels like guesswork
+- When "just randomize it" isn't good enough
+
+This is about getting **maximum information from limited experiments** — without pretending your situation is cleaner than it is.
+
+---
+
+## Who This Is For
+
+- Data scientists running experiments with multiple interacting variables
+- Analysts asked to "design an experiment" without a textbook setup
+- Teams with **tight budgets on experimental runs**
+- Anyone who has ever thought: *"There has to be a better way to structure this"*
+
+---
+
+## A Concrete Example
+
+You have 8 continuous variables and a budget for 32 experimental runs. A full factorial design would require 256 runs. Random sampling leaves coverage gaps and hidden correlations.
+
+With `lattice-doe`, you generate a structured design that covers the space efficiently, minimises confounding, and makes your results interpretable — and it automatically finds the minimum run count needed to hit your power target:
+
+```python
+from lattice_doe import find_optimal_design, PowerContrastConfig, DesignOptions
+
+factors = [
+    {"name": "A", "low": -1, "high": 1},
+    {"name": "B", "low": -1, "high": 1},
+    # ... up to 8 factors
+]
+
+result = find_optimal_design(
+    formula="~ A + B + A:B",
+    factors=factors,
+    power_cfg=PowerContrastConfig(target_power=0.80, sigma=1.0, delta=1.0),
+    design_opts=DesignOptions(criterion="I"),
+)
+
+print(result["design_df"])   # the optimal run matrix
+print(result["n"])           # minimum sample size that achieves 80% power
+```
+
+Now you have a design you can execute — and defend.
+
+---
+
+## Why This Exists
+
+Experimental design isn't just a statistics problem. It's a **decision problem**.
+
+The goal isn't elegance. The goal is making better decisions with limited information.
+
+Most tools optimise for theoretical purity. This one optimises for practical constraints, interpretability, and real-world usability.
+
+---
+
+## What Comes Next
+
+Below you'll find full documentation, examples, and implementation details. If you're here to go deep, keep reading. If you're here because your last experiment was a mess, start with the [Quick Start Guide](docs/quickstart.md).
+
+---
+
 **Power-assured optimal experimental designs for linear and GLM models.**
 
 Generate powered optimal designs that are guaranteed (or as close as possible) to meet a target statistical power. The package automatically searches for the minimum sample size `n` that achieves your power target, then selects the best design at that `n` under your chosen criterion (`"I"` by default, or `"D"` / `"A"`).
