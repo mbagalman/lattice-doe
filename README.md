@@ -62,7 +62,7 @@ It supports:
 
 Imagine a real study with 8 continuous variables and a budget for 32 experimental runs. A full factorial design would require far more runs, and random sampling leaves coverage gaps and hidden correlations.
 
-Here is the same idea in a small runnable example:
+The same logic applies at any scale. Here is a minimal 2-factor example you can run immediately — the API is identical whether you have 2 factors or 20:
 
 ```python
 from lattice_doe import find_optimal_design, PowerContrastConfig, DesignOptions
