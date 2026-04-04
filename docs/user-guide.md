@@ -8754,7 +8754,7 @@ The Python API is the most capable interface and the one all other interfaces ar
 
 Best for: scripting, automation, post-processing results in pandas/matplotlib, integration with proprietary Python pipelines.
 
-Chapter references: §8 (Python API), §15 (reproducibility), §16 (multi-response), §17 (augmentation), §18–23 (analysis functions).
+Chapter references: §6 (multi-response), §8 (Python API), §15 (reproducibility), §17 (augmentation), §18–23 (analysis functions).
 
 #### CLI (`lattice`)
 
