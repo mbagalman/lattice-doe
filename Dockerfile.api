@@ -1,6 +1,6 @@
-# Dockerfile.api — iopt-power-design REST API server
-# Build: docker build -f Dockerfile.api -t iopt-api .
-# Run:   docker run -p 8000:8000 iopt-api
+# Dockerfile.api — Lattice DOE REST API server
+# Build: docker build -f Dockerfile.api -t lattice-api .
+# Run:   docker run -p 8000:8000 lattice-api
 
 FROM python:3.11-slim
 
@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Copy only what pip needs first (layer-cache friendly)
 COPY pyproject.toml README.md ./
-COPY iopt_power_design/ ./iopt_power_design/
+COPY lattice_doe/ ./lattice_doe/
 COPY api_server/ ./api_server/
 
 # Install the package with server extras

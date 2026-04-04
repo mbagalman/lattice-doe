@@ -1,7 +1,7 @@
-# Dockerfile — I-Opt Power Design Streamlit app
+# Dockerfile — Lattice DOE Streamlit app
 #
-# Build:  docker build -t iopt-doe .
-# Run:    docker run -p 8501:8501 iopt-doe
+# Build:  docker build -t lattice-doe .
+# Run:    docker run -p 8501:8501 lattice-doe
 # Open:   http://localhost:8501
 
 FROM python:3.11-slim
@@ -10,7 +10,7 @@ WORKDIR /app
 
 # Copy package metadata first so dependency layer is cached separately
 COPY pyproject.toml README.md ./
-COPY iopt_power_design/ ./iopt_power_design/
+COPY lattice_doe/ ./lattice_doe/
 
 # Install the package and all Streamlit app dependencies
 RUN pip install --no-cache-dir -e ".[app,extras]"
