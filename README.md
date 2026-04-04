@@ -11,20 +11,40 @@ In the real world, you get:
 - Not enough runs
 - Constraints nobody told you about until it was too late
 
-So what happens? People either oversimplify the problem until it's wrong, or overcomplicate it until it's unusable. Neither leads to better decisions.
+So what happens? People either oversimplify the problem until it's wrong, or overcomplicate it until it's unusable. Sometimes they do both in the same meeting.
+
+Lattice DOE is for that situation.
+
+It helps you design experiments that are:
+- statistically powered
+- run-efficient
+- reproducible
+- realistic about constraints
+
+In plain English: instead of doing a power analysis in one place, picking a design in another, and hoping they vaguely agree, Lattice DOE solves those decisions together.
 
 ---
 
 ## What This Is
 
-`lattice-doe` is a Python toolkit for designing **efficient, structured experiments under real-world constraints**.
+`lattice-doe` is a Python toolkit for designing **powered, efficient, structured experiments under real-world constraints**.
+
+It searches for the **smallest experiment that can still hit your target power**, then optimizes the run locations under your chosen criterion (`I`, `D`, or `A`).
 
 It's built for the messy middle:
 - When full factorial designs are impossible
 - When fractional factorial feels like guesswork
 - When "just randomize it" isn't good enough
 
-This is about getting **maximum information from limited experiments** — without pretending your situation is cleaner than it is.
+This is about getting **maximum information from limited experiments** without pretending your situation is cleaner than it is.
+
+It supports:
+- linear contrast power
+- global R² power
+- GLM contrast power for binomial and Poisson responses
+- multi-response design
+- blocked and split-plot structures
+- Python, CLI, app, API, and spreadsheet-driven workflows
 
 ---
 
@@ -34,36 +54,46 @@ This is about getting **maximum information from limited experiments** — witho
 - Analysts asked to "design an experiment" without a textbook setup
 - Teams with **tight budgets on experimental runs**
 - Anyone who has ever thought: *"There has to be a better way to structure this"*
+- Anyone tired of hearing "just use a factorial" from someone who is not paying for the runs
 
 ---
 
 ## A Concrete Example
 
-You have 8 continuous variables and a budget for 32 experimental runs. A full factorial design would require 256 runs. Random sampling leaves coverage gaps and hidden correlations.
+Imagine a real study with 8 continuous variables and a budget for 32 experimental runs. A full factorial design would require far more runs, and random sampling leaves coverage gaps and hidden correlations.
 
-With `lattice-doe`, you generate a structured design that covers the space efficiently, minimises confounding, and makes your results interpretable — and it automatically finds the minimum run count needed to hit your power target:
+Here is the same idea in a small runnable example:
 
 ```python
 from lattice_doe import find_optimal_design, PowerContrastConfig, DesignOptions
+from lattice_doe.contrasts import contrast_from_scenarios
 
-factors = [
-    {"name": "A", "low": -1, "high": 1},
-    {"name": "B", "low": -1, "high": 1},
-    # ... up to 8 factors
-]
+formula = "~ 1 + A + B + A:B"
+factors = {
+    "A": (-1.0, 1.0),
+    "B": (-1.0, 1.0),
+}
 
-result = find_optimal_design(
-    formula="~ A + B + A:B",
+L, delta = contrast_from_scenarios(
+    formula=formula,
     factors=factors,
-    power_cfg=PowerContrastConfig(target_power=0.80, sigma=1.0, delta=1.0),
-    design_opts=DesignOptions(criterion="I"),
+    scenario_a={"A": -1.0, "B": 0.0},
+    scenario_b={"A": 1.0, "B": 0.0},
+    sesoi=1.0,
 )
 
-print(result["design_df"])   # the optimal run matrix
-print(result["n"])           # minimum sample size that achieves 80% power
+result = find_optimal_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=PowerContrastConfig(L=L, delta=delta, power=0.80, sigma=1.0),
+    design_opts=DesignOptions(criterion="I", auto_candidate=True),
+)
+
+print(result["design_df"])          # the optimal run matrix
+print(result["report"]["n"])        # minimum n that achieves 80% power
 ```
 
-Now you have a design you can execute — and defend.
+Now you have a design you can execute and defend.
 
 ---
 
@@ -85,7 +115,7 @@ Below you'll find full documentation, examples, and implementation details. If y
 
 **Power-assured optimal experimental designs for linear and GLM models.**
 
-Generate powered optimal designs that are guaranteed (or as close as possible) to meet a target statistical power. The package automatically searches for the minimum sample size `n` that achieves your power target, then selects the best design at that `n` under your chosen criterion (`"I"` by default, or `"D"` / `"A"`).
+The package automatically searches for the minimum sample size `n` that achieves your target power, then selects the best design at that `n` under your chosen criterion (`"I"` by default, or `"D"` / `"A"`). If the search hits practical limits first, it returns the best design found and reports that clearly.
 
 **Supported power modes:**
 
@@ -136,6 +166,8 @@ Looking for task-oriented examples? See [Recipes](docs/recipes.md).
 
 Requires Python ≥ 3.9.
 
+If you just want the core optimizer, install that. If you want YAML, plots, reports, or the app, add the extras you actually need.
+
 ```bash
 # Core install (from source)
 pip install -e .
@@ -167,6 +199,8 @@ pip install -e ".[all]"
 ---
 
 ## Quick Start — Python API
+
+If you work in notebooks or scripts, this is the fastest path from "I need a design" to something you can actually run.
 
 ### Contrast-based power
 
@@ -263,6 +297,8 @@ result = find_optimal_design(formula, factors, power_cfg, opts)
 
 ## Quick Start — CLI
 
+If you would rather keep the logic in a config file and the outputs on disk, the CLI is the cleaner option.
+
 Install with `pip install -e ".[cli]"` for YAML support, then run:
 
 ```bash
@@ -342,7 +378,7 @@ The CLI always writes `<basename>_design.csv`, `<basename>_buckets.csv`, and `<b
 
 ## Streamlit Web UI
 
-An interactive browser-based frontend lets you configure and run designs, explore sensitivity, compare criteria, and download results — no coding required.
+An interactive browser-based frontend lets you configure and run designs, explore sensitivity, compare criteria, and download results. It is useful when you want something more guided than a script, or when not everyone on the team wants to touch Python.
 
 ### Local run
 
@@ -357,8 +393,8 @@ streamlit run app/app.py
 ### Docker
 
 ```bash
-docker build -t iopt-doe .
-docker run -p 8501:8501 iopt-doe
+docker build -t lattice-doe .
+docker run -p 8501:8501 lattice-doe
 # Open http://localhost:8501
 ```
 
@@ -374,6 +410,8 @@ For a full walkthrough see [Quick Start Guide § 5](docs/quickstart.md#5-streaml
 ---
 
 ## Power Modes
+
+Pick the power model that matches the question you are actually asking. This library does not make you pretend every problem is the same kind of effect test.
 
 ### Contrast-based (`PowerContrastConfig`)
 
@@ -515,7 +553,7 @@ lattice --template glm-poisson  > glm_config.yml
 
 ## Output Structure
 
-`find_optimal_design(...)` returns a dict with three keys. (For multi-response designs, see `find_multiresponse_design(...)` which returns a different structure with `design`, `buckets`, `responses`, and flat summary fields.)
+`find_optimal_design(...)` returns a dict with three keys: the design, the replication structure, and the audit trail for how the optimizer got there. (For multi-response designs, see `find_multiresponse_design(...)` which returns a different structure with `design`, `buckets`, `responses`, and flat summary fields.)
 
 ### `result["design_df"]` — `DataFrame`
 
@@ -561,7 +599,7 @@ Key metrics from the design search:
 
 ## Power Curves
 
-Explore how power varies with sample size or effect size without committing to a final design.
+Use power curves when you are not ready to commit to one design yet and want to see how much the answer moves as `n` or effect size changes.
 
 ```python
 from lattice_doe import power_curve_by_n, power_curve_by_effect
@@ -937,7 +975,7 @@ print(sens["data"])        # columns: eta, power, noncentrality_lambda
 
 ## Diagnostics
 
-Export design quality metrics alongside your design files:
+If you want more than "here is your design, good luck," export diagnostics alongside the main outputs:
 
 ```python
 result = find_optimal_design(
@@ -963,7 +1001,7 @@ Output formats: HTML tables, CSV, and optional plots.
 
 ## Shareable Reports
 
-Generate a self-contained HTML file (no external dependencies, works offline) that summarises the design configuration, power metrics, design table, diagnostics, and an embedded power-curve figure.
+Generate a self-contained HTML file (no external dependencies, works offline) that summarises the design configuration, power metrics, design table, diagnostics, and an embedded power-curve figure. This is handy when you need to hand results to someone who does not want a notebook or CLI log.
 
 ### Install
 
@@ -996,7 +1034,7 @@ result = find_optimal_design(
     factors=factors,
     power_cfg=power_cfg,
     design_opts=opts,
-    export_report_to="./output/",   # writes iopt_report.html into this folder
+    export_report_to="./output/",   # writes the default HTML report into this folder
 )
 
 # Path stored in result for reference
@@ -1033,7 +1071,7 @@ generate_report(..., output_path="report.pdf")
 
 ## Google Sheets Integration
 
-Connect directly to a Google Spreadsheet to read your design config and write results back — no local YAML file needed.
+Connect directly to a Google Spreadsheet to read your design config and write results back — no local YAML file needed. It is a practical option for teams who already live in spreadsheets.
 
 ### Install
 
@@ -1161,11 +1199,13 @@ If both `constraint_func` and `constraint_expr` are set, `constraint_expr` takes
 
 ## Reproducibility
 
-Fix `random_state` in `DesignOptions` to reproduce candidate generation, design search, and parallel start assignments exactly.
+Fix `random_state` in `DesignOptions` to reproduce candidate generation, design search, and parallel start assignments exactly. If you need to defend why a design changed, start here.
 
 ---
 
 ## Troubleshooting
+
+Most failures here are informative. The package is usually telling you that the model, the search limits, or the contrast definition needs another look.
 
 **`ValueError: power_cfg.max_n must be greater than p`**
 Your `max_n` is too small for the model. Increase `max_n` or simplify the formula. The number of parameters `p` is reported in the error message.

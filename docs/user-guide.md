@@ -8335,7 +8335,7 @@ opts = DesignOptions(
 
 ### A.6 `ResponseSpec`
 
-One entry per response in a multi-response design. Passed as a list inside `MultiResponseOptions.responses`. See Chapter 16.
+One entry per response in a multi-response design. Passed as a list inside `MultiResponseOptions.responses`. See Chapter 6.
 
 | Parameter | Type | Default | Description | Valid range |
 |---|---|---|---|---|
@@ -8348,7 +8348,7 @@ One entry per response in a multi-response design. Passed as a list inside `Mult
 
 ### A.7 `MultiResponseOptions`
 
-Top-level container for multi-response design configuration. Passed as the `multi_opts` argument to `find_multiresponse_design`. See Chapter 16.
+Top-level container for multi-response design configuration. Passed as the `multi_cfg` argument to `find_multiresponse_design`. See Chapter 6.
 
 | Parameter | Type | Default | Description | Valid range |
 |---|---|---|---|---|
@@ -8385,7 +8385,7 @@ responses = [
         weight=0.5,   # lower importance
     ),
 ]
-multi_opts = MultiResponseOptions(
+multi_cfg = MultiResponseOptions(
     responses=responses,
     power_combination="weighted_mean",
 )
