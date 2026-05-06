@@ -79,13 +79,13 @@ L, delta = contrast_from_scenarios(
     factors=factors,
     scenario_a={"A": -1.0, "B": 0.0},
     scenario_b={"A": 1.0, "B": 0.0},
-    sesoi=1.0,
+    sesoi=2.0,  # smallest response-scale effect worth detecting (in sigma units)
 )
 
 result = find_optimal_design(
     formula=formula,
     factors=factors,
-    power_cfg=PowerContrastConfig(L=L, delta=delta, power=0.80, sigma=1.0),
+    power_cfg=PowerContrastConfig(L=L, delta=delta, power=0.80, sigma=1.0, max_n=50),
     design_opts=DesignOptions(criterion="I", auto_candidate=True),
 )
 
