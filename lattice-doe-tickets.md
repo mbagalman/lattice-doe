@@ -199,6 +199,7 @@ a day or two each.
 - **Risk level:** Low
 
 ### TICKET-004: Confirm or remove the `Typing :: Typed` claim
+- **Status:** Done — 2026-05-06. Mypy reported 183 errors across 18 files on the current package, with many of them on the public API surface (e.g. `analysis.py` union-attr issues across `PowerContrastConfig | PowerR2Config`, missing return annotations in `cli.py`, undefined name imports in multi-response paths). That's well beyond the ticket's "quick" scope, so per the AC's second branch the `Typing :: Typed` classifier was removed from `pyproject.toml`. The `[tool.mypy]` config block is left in place as a north-star setting for future cleanup. Re-add the classifier when a real type-cleanup pass lands.
 - **Priority:** P0a
 - **Release target:** v0.1.0
 - **Depends on:** none

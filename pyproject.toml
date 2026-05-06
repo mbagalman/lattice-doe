@@ -18,7 +18,6 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering",
   "Topic :: Scientific/Engineering :: Mathematics",
-  "Typing :: Typed"
 ]
 
 # Core dependencies — minimal install required for core API functionality
