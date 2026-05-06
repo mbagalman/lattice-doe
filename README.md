@@ -1205,22 +1205,92 @@ Fix `random_state` in `DesignOptions` to reproduce candidate generation, design 
 
 ## Troubleshooting
 
-Most failures here are informative. The package is usually telling you that the model, the search limits, or the contrast definition needs another look.
+Most failures here are informative. The package is usually telling you that the model, the search limits, or the contrast definition needs another look. The three most common errors and how to fix them are below.
 
-**`ValueError: power_cfg.max_n must be greater than p`**
-Your `max_n` is too small for the model. Increase `max_n` or simplify the formula. The number of parameters `p` is reported in the error message.
+### `ValueError: power_cfg.max_n (N) must be greater than the number of model parameters p (M).`
 
-**Design did not converge to target power (RuntimeWarning)**
-The search hit `max_n` or `max_iter` without reaching the target. Try increasing `max_n`, increasing `starts`, or relaxing `power`. The best design found is still returned.
+**What it means.** The cap on the search range (`max_n`) is too small relative to the number of model parameters `p`. Patsy expanded the formula into `M` columns (intercept, main effects, interactions, dummy levels for categoricals), and any usable design needs more runs than parameters. The check fires before the search starts, so no design is returned.
 
-**Poor conditioning / near-singular X'X**
-Enable `allow_candidate_growth=True`, increase `candidate_points`, or increase `xtx_jitter` slightly (e.g., `1e-6`).
+**How to inspect `p` for your formula** without running the search:
 
-**Contrast shape errors**
-`L` must be `(q, p)` where `p` is the number of columns in the *Patsy-encoded* model matrix (includes intercept, dummy columns, interactions). Use `build_model_matrix(formula, candidate)` to inspect `p` before constructing `L` manually.
+```python
+from lattice_doe.candidate import build_candidate
+from lattice_doe.model_matrix import build_model_matrix
 
-**Parallelism on macOS / Windows**
-Guard `workers > 1` calls inside `if __name__ == "__main__":`.
+formula = "~ 1 + A + B + A:B + C"
+factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0), "C": ["low", "med", "high"]}
+
+cand = build_candidate(factors, candidate_points=20, seed=0)
+X, names = build_model_matrix(formula, cand)
+print(f"p = {X.shape[1]}")
+print("columns:", names)
+```
+
+**Fixes.** Raise `max_n` in the power config (e.g. `PowerContrastConfig(..., max_n=200)`), or simplify the formula by dropping interactions or collapsing categorical levels.
+
+### `ValueError: Contrast L has X columns but model has p_treat=Y treatment parameters.`
+
+**What it means.** Your contrast matrix `L` has the wrong number of columns. `L` must have one column per parameter in the **Patsy-encoded** model matrix — including the intercept, dummy columns for categorical factors, and interaction terms. Hand-written `L` arrays are the usual culprit.
+
+**How to inspect the column layout:**
+
+```python
+from lattice_doe.candidate import build_candidate
+from lattice_doe.model_matrix import build_model_matrix
+
+cand = build_candidate(factors, candidate_points=20, seed=0)
+X, names = build_model_matrix(formula, cand)
+for i, name in enumerate(names):
+    print(f"  column {i}: {name}")
+```
+
+**Fix (recommended).** Don't write `L` by hand. Use `contrast_from_scenarios`, which always produces a correctly-shaped row for the encoded matrix:
+
+```python
+from lattice_doe.contrasts import contrast_from_scenarios
+
+L, delta = contrast_from_scenarios(
+    formula=formula,
+    factors=factors,
+    scenario_a={"A": -1.0, "B": 0.0},
+    scenario_b={"A":  1.0, "B": 0.0},
+    sesoi=2.0,
+)
+```
+
+If you do need a hand-written `L`, rebuild it to match the printed `names` list — one entry per column.
+
+### `RuntimeWarning: Design generation finished without converging to target power.`
+
+**What it means.** The search stopped without the design hitting the target power. The full warning message names the limit that was hit (`max_iter` or `max_n`), the achieved power, and the final `n`. The best design found is still returned — `result["design_df"]` and `result["report"]` are both populated — but `report["achieved_power"]` is below `power_cfg.power` and the warning text lands in `report["warnings"]`.
+
+**How to inspect what happened:**
+
+```python
+result = find_optimal_design(
+    formula=formula,
+    factors=factors,
+    power_cfg=PowerContrastConfig(L=L, delta=delta, power=0.80, sigma=1.0, max_n=50),
+    design_opts=DesignOptions(criterion="I"),
+)
+
+print("achieved :", result["report"]["achieved_power"])
+print("target   :", result["report"]["target_power"])
+print("strategy :", result["report"]["search_strategy"])
+print("warnings :", result["report"]["warnings"])
+```
+
+**Fixes, in order of preference.**
+- Raise `max_n` to give the search more room.
+- Raise `starts` in `DesignOptions` to do more random restarts (helps when the search keeps landing in local optima).
+- Relax `power_cfg.power` to a target you can actually hit.
+- Increase the SESOI (`delta`) — if you're asking for an effect smaller than the noise can resolve at any reasonable `n`, no amount of design optimization will save you.
+
+### Other common failures
+
+**Poor conditioning / near-singular X'X.** Enable `allow_candidate_growth=True`, increase `candidate_points`, or bump `xtx_jitter` slightly (e.g. `1e-6`).
+
+**Parallelism on macOS / Windows.** Guard `workers > 1` calls inside `if __name__ == "__main__":`.
 
 ---
 

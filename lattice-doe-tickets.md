@@ -268,6 +268,7 @@ a day or two each.
 - **Risk level:** Very low; high downside if skipped
 
 ### TICKET-008-mini: Basic troubleshooting docs
+- **Status:** Done — 2026-05-06. README Troubleshooting section expanded for the three target failure modes (`max_n` vs `p`, contrast shape mismatch, did-not-converge), each with the verbatim error/warning string from source, a "what it means" paragraph, a runnable code example showing how to inspect the cause, and concrete fixes ranked by preference. The two existing entries ("Poor conditioning" and "Parallelism") were preserved under an "Other common failures" subsection. Code examples were exercised end-to-end to confirm they run. Cross-link to the planned Common Pitfalls doc (TICKET-010) is deferred — TICKET-010's own task list already includes adding that cross-link when it ships.
 - **Priority:** P0a
 - **Release target:** v0.1.0
 - **Depends on:** none
