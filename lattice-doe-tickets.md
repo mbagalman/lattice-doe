@@ -292,6 +292,7 @@ a day or two each.
 - **Risk level:** Very low
 
 ### TICKET-022-mini: Package metadata cleanup
+- **Status:** Done — 2026-05-06. Audited `pyproject.toml`: name, version, description, license, license-files, authors, requires-python, classifiers, project URLs all correct. Polish applied: author email lowercased (`michael@paradoxresolution.com`); added a `keywords` field for PyPI discoverability (DOE / optimal design / Fedorov / split-plot / etc.). `LICENSE` file present and correctly referenced. Created `CHANGELOG.md` following Keep a Changelog 1.1.0 with a `[0.1.0] — Unreleased` entry summarizing initial-release features; the "Unreleased" placeholder will become an actual date when TICKET-022 publishes. `python -m build` produces wheel + sdist with no warnings; produced METADATA confirms `Description-Content-Type: text/markdown` (so the README will render on PyPI), modern `License-Expression: MIT`, and `License-File: LICENSE`. Project URLs (Homepage, Issues) verified to resolve (HTTP 200). The remaining AC item — visually inspecting the README render on TestPyPI — requires PyPI account access and is deferred to TICKET-022 (publish).
 - **Priority:** P0a
 - **Release target:** v0.1.0
 - **Depends on:** TICKET-001, TICKET-004

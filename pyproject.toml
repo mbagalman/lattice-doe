@@ -5,8 +5,22 @@ description = "Lattice DOE: power-assured optimal experimental designs for linea
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Michael Bagalman", email = "Michael@ParadoxResolution.com" }]
+authors = [{ name = "Michael Bagalman", email = "michael@paradoxresolution.com" }]
 requires-python = ">=3.9"
+keywords = [
+  "design of experiments",
+  "doe",
+  "experimental design",
+  "optimal design",
+  "i-optimal",
+  "d-optimal",
+  "a-optimal",
+  "power analysis",
+  "split-plot",
+  "fedorov exchange",
+  "glm",
+  "statistics",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
