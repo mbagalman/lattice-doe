@@ -211,9 +211,8 @@ def contrast_power(
     # Var(L beta_hat) = sigma^2 * L (X'X)^-1 L'
     V_unscaled = _symmetrize(L @ XtX_inv @ L.T)
 
-    # ADDED: Validate for edge cases (zero variance)
-    # Check if the variance-covariance matrix of the contrast is rank-deficient
-    # A rank of 0 means the contrast has 0 variance and is untestable.
+    # Rank 0 of the contrast variance matrix means the contrast lies in the
+    # null space of X — there is no variance to test against.
     rank_V = np.linalg.matrix_rank(V_unscaled)
     if rank_V == 0:
         raise ValueError(
@@ -229,8 +228,8 @@ def contrast_power(
     V_inv = np.linalg.pinv(V)
     lam = float(delta.T @ V_inv @ delta)
 
-    # ADDED: Add validation that noncentrality parameter is non-negative
-    # A quadratic form should be >= 0, but clip to handle float error
+    # A quadratic form should be >= 0; clip small negative values from float error,
+    # but treat anything below tolerance as a numerical bug.
     if lam < -1e-8:  # Allow for small float tolerance
         raise ValueError(
             f"Computed noncentrality parameter lambda is negative ({lam}), "
@@ -242,7 +241,6 @@ def contrast_power(
     Fcrit = f_dist.isf(alpha, df_num, df_denom)
     power = float(1.0 - ncf_dist.cdf(Fcrit, df_num, df_denom, lam))
 
-    # ADDED: Clip power values to [0, 1] range
     power = np.clip(power, 0.0, 1.0)
 
     return ContrastPowerResult(power=power, lam=lam)
@@ -415,8 +413,7 @@ def global_r2_power(
     else:
         lam = float(f2 * df_denom)  # f2 * (n - p); df_denom = n - rank(X)
 
-    # ADDED: Add validation that noncentrality parameter is non-negative
-    # This should always be true if r2_target > 0, but good for safety.
+    # Always non-negative if r2_target > 0; defensive guard against numerical issues.
     if lam < 0.0:
         raise ValueError(
             f"Computed noncentrality parameter lambda is negative ({lam}), "
@@ -426,7 +423,6 @@ def global_r2_power(
     Fcrit = f_dist.isf(alpha, df_num, df_denom)
     power = float(1.0 - ncf_dist.cdf(Fcrit, df_num, df_denom, lam))
 
-    # ADDED: Clip power values to [0, 1] range
     power = np.clip(power, 0.0, 1.0)
 
     return GlobalPowerResult(power=power, lam=lam)

@@ -111,14 +111,12 @@ def estimate_candidate_size(
 
         final_points = min(raw_points, cand_max)
 
-        # --- ADDED: Clipping check ---
         if final_points == cand_max and raw_points > cand_max:
             warnings.warn(
                 f"Estimated candidate size ({raw_points}) for continuous factors "
                 f"exceeded cand_max ({cand_max}). Clipping to {final_points} points.",
                 UserWarning
             )
-        # --- END ADDED ---
         return final_points
 
     # Count categorical cells (with cap to prevent explosion)
@@ -136,7 +134,6 @@ def estimate_candidate_size(
         candidate_points_raw = int(cat_cells * per_cell_alpha)
         candidate_points = min(max(candidate_points_raw, cand_min), cand_max)
 
-        # --- ADDED: Clipping check ---
         if candidate_points == cand_max and candidate_points_raw > cand_max:
             warnings.warn(
                 f"Estimated candidate size ({candidate_points_raw}) for categorical factors "
@@ -149,7 +146,6 @@ def estimate_candidate_size(
                 f"was below cand_min ({cand_min}). Setting to {candidate_points} points.",
                 UserWarning
             )
-        # --- END ADDED ---
         return candidate_points
 
     # Case 3: Mixed categorical-continuous design (most complex case)
@@ -174,14 +170,12 @@ def estimate_candidate_size(
 
     candidate_points = min(max(candidate_points_raw, cand_min), cand_max)
 
-    # --- ADDED: Clipping check ---
     if candidate_points == cand_max and candidate_points_raw > cand_max:
         warnings.warn(
             f"Estimated candidate size ({candidate_points_raw}) for mixed factors "
             f"exceeded cand_max ({cand_max}). Clipping to {candidate_points} points.",
             UserWarning
         )
-    # --- END ADDED ---
     return candidate_points
 
 

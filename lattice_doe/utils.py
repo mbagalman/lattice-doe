@@ -31,7 +31,6 @@ def validate_factors(factors: FactorSpec) -> None:
     seen_factor_names: Dict[str, str] = {}
 
     for name, spec in factors.items():
-        # --- ADDED: Check for duplicate factor names (case-insensitive) ---
         name_lower = name.lower()
         if name_lower in seen_factor_names:
             original_name = seen_factor_names[name_lower]
@@ -59,7 +58,6 @@ def validate_factors(factors: FactorSpec) -> None:
                     f"Continuous factor '{name}' bounds must be numeric: {e}"
                 )
             
-            # --- ADDED: Check for finite bounds ---
             if not (np.isfinite(lo_f) and np.isfinite(hi_f)):
                 raise ValueError(
                     f"Continuous factor '{name}' bounds must be finite numbers; "
@@ -80,7 +78,6 @@ def validate_factors(factors: FactorSpec) -> None:
                     f"Categorical factor '{name}' must have at least one level."
                 )
                 
-            # --- ADDED: Check for unique levels ---
             if len(levels) != len(set(levels)):
                 raise ValueError(
                     f"Categorical factor '{name}' contains duplicate levels."

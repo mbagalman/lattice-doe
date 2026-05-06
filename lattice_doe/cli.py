@@ -49,7 +49,7 @@ import argparse
 import json
 import sys
 import os
-import logging  # ADDED: For logging
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, List, Union
 
@@ -81,20 +81,17 @@ def _load_config(path: Path) -> Dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() in {".yml", ".yaml"}:
         if not _HAS_YAML:
-            # CHANGED: Use logger for error
             logger.error("PyYAML is required to read YAML configs. Install with: pip install pyyaml")
             raise RuntimeError("PyYAML is not installed.")
         try:
             return yaml.safe_load(text)  # type: ignore
         except Exception as e:
-            # CHANGED: More specific error
             raise ValueError(f"Failed to parse YAML file at {path}: {e}") from e
             
     # Fallback to JSON
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
-        # CHANGED: More specific error
         raise ValueError(f"Failed to parse JSON file at {path}: {e}") from e
 
 
@@ -226,7 +223,6 @@ def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
             L = np.asarray(c["L"], dtype=float)
             delta = np.asarray(c["delta"], dtype=float)
         else:
-            # This path should be unreachable due to _validate_config_keys
             raise ValueError("Internal error: Invalid contrast config structure.")
         return build_power_cfg(
             dict(power_mode="contrast", L=L, delta=delta,
@@ -235,7 +231,6 @@ def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
 
     # Otherwise R^2 mode
     if "r2_target" not in cfg:
-        # This path should be unreachable due to _validate_config_keys
         raise ValueError("Internal error: Missing r2_target or contrast block.")
     return build_power_cfg(
         dict(power_mode="r2", r2_target=float(cfg["r2_target"]),
@@ -681,7 +676,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         metavar="MODE",
         help="Print a commented example config (contrast | r2 | glm-binomial | glm-poisson) to stdout and exit.",
     )
-    # ADDED: Verbose flag
     parser.add_argument(
         "-v", "--verbose",
         action="store_true",
@@ -923,7 +917,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             "--excel-run PATH to run from an existing Excel workbook."
         )
 
-    # --- ADDED: Setup Logging ---
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=log_level,
@@ -935,7 +928,6 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     cfg_path = Path(args.config)
 
-    # --- CHANGED: Wrapped main logic in try/except ---
     try:
         # 1. Load Config
         if not cfg_path.exists():
@@ -988,7 +980,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.debug("Output directory is writable.")
 
         # 5. Handle --dry-run
-        # FIXED: Use .dry_run, not .dry-run
         if args.dry_run:
             logger.info("\n--- Dry Run Validation Successful ---")
             logger.info(f"  Formula: {formula}")
@@ -1191,26 +1182,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     # --- Specific Error Handling ---
     except FileNotFoundError as e:
         logger.error(f"[Config Error] {e}")
-        return 2  # CHANGED: Exit code 2
+        return 2
         
     except (KeyError, ValueError) as e:
         # Catches validation errors, parsing errors
         logger.error(f"[Config Error] {e}")
-        return 2  # CHANGED: Exit code 2
+        return 2
         
     except PermissionError as e:
         logger.error(f"[IO Error] {e}")
-        return 2  # CHANGED: Exit code 2
+        return 2
         
     except IOError as e:
         logger.error(f"[IO Error] Failed to write output files: {e}")
-        return 2  # CHANGED: Exit code 2
+        return 2
 
     except Exception as e:
         # Catch-all for unexpected runtime errors
         # exc_info=True will add traceback if logging level is DEBUG
         logger.error(f"[Unexpected Error] {type(e).__name__}: {e}", exc_info=args.verbose)
-        return 2 # CHANGED: Exit code 2
+        return 2
     # --- End Error Handling ---
 
 

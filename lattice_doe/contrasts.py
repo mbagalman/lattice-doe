@@ -97,7 +97,6 @@ def _validate_scenario(
                     f"Value '{value}' is not one of the allowed categorical levels: {levels}."
                 )
         
-        # This case should be unreachable if FactorSpec is well-formed
         else:
             raise TypeError(
                 f"Invalid factor specification for '{factor_name}'. "
@@ -144,14 +143,12 @@ def contrast_from_scenarios(
     (L, delta) : (np.ndarray, np.ndarray)
         ``L`` has shape ``(1, p)``; ``delta`` has shape ``(1,)``.
     """
-    # --- ADDED: Input Validation ---
     _validate_scenario("scenario_a", scenario_a, factors)
     _validate_scenario("scenario_b", scenario_b, factors)
     if not isinstance(sesoi, (int, float)) or sesoi <= 0:
         raise ValueError(
             f"sesoi must be a positive number, but got {sesoi}."
         )
-    # --- End Validation ---
 
     # Build a tiny candidate to ensure patsy coding is anchored consistently and
     # that all categorical levels are represented somewhere in the matrix.

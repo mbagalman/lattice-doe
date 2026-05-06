@@ -252,7 +252,6 @@ class PowerContrastConfig:
         if self.max_n <= 0:
             raise ValueError(f"max_n must be > 0, but got {self.max_n}")
 
-        # --- ADDED: Contrast content validation ---
         if np.any(np.all(self.L == 0, axis=1)):
             raise ValueError("L matrix contains at least one all-zero row.")
         if np.any(np.isclose(self.delta, 0)):
@@ -262,7 +261,6 @@ class PowerContrastConfig:
             )
 
     def __str__(self) -> str:
-        # ADDED: String representation for debugging
         l_shape = self.L.shape
         d_shape = self.delta.shape
         return (
@@ -300,7 +298,7 @@ class PowerR2Config:
     r2_target: float
     alpha: float = 0.05
     power: float = 0.8
-    sigma: float = 1.0  # ADDED: Include sigma for consistency, though not used in R2 calc
+    sigma: float = 1.0  # Kept for symmetry with other power configs; not used in R² calc.
     tol_power: float = 1e-3
     max_iter: int = 200
     max_n: int = 2000
@@ -326,7 +324,6 @@ class PowerR2Config:
             raise ValueError(f"max_n must be > 0, but got {self.max_n}")
 
     def __str__(self) -> str:
-        # ADDED: String representation for debugging
         return (
             f"PowerR2Config(r2_target={self.r2_target}, "
             f"alpha={self.alpha}, power={self.power}, lambda_mode='{self.lambda_mode}')"
@@ -598,7 +595,6 @@ class DesignOptions:
     parallel_seed_stride: int = 10_000
 
     def __post_init__(self):
-        # ADDED: Range checks for numerical parameters
         if not isinstance(self.random_state, int) or isinstance(self.random_state, bool):
             raise ValueError(
                 f"random_state must be an int, got {type(self.random_state).__name__!r} "
@@ -694,7 +690,6 @@ class DesignOptions:
             self.constraint_func = _compile_constraint_expr(self.constraint_expr)
 
     def __str__(self) -> str:
-        # ADDED: String representation for debugging
         has_constraint = self.constraint_func is not None
         expr_preview = (
             f", expr={self.constraint_expr!r}" if self.constraint_expr else ""

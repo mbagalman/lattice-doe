@@ -172,7 +172,6 @@ def find_optimal_design(
 
     # --- 1. Validate factors and inputs (early exit) ---
     validate_factors(factors)
-    # ADDED: Early validation of formula, p, and max_n
     p = _validate_api_inputs(formula, factors, power_cfg)
 
     # --- Blocking setup ---
@@ -184,7 +183,6 @@ def find_optimal_design(
             "Blocked split-plot (three-stratum) designs are not yet supported."
         )
     if is_blocked:
-        # CR-17: Reject block_factor_name that collides with a treatment factor.
         if design_opts.block_factor_name in factors:
             raise ValueError(
                 f"block_factor_name={design_opts.block_factor_name!r} collides with "
@@ -237,11 +235,11 @@ def find_optimal_design(
             )
 
     # For blocked designs: compute p_full from augmented formula.
-    # CR-18: Use the full candidate set (all categorical treatment levels present)
-    # augmented with cyclic block labels so every block level appears at least once.
-    # The previous approach pinned each categorical treatment factor to a single level,
-    # causing Patsy to omit their dummy columns and undercount p_full relative to
-    # p_treat, triggering a false "no block dummy columns" error.
+    # Use the full candidate set (so every categorical treatment level appears),
+    # augmented with cyclic block labels (so every block level appears at least
+    # once). Pinning categorical treatment factors to a single level instead
+    # would cause Patsy to omit their dummy columns, undercount p_full relative
+    # to p_treat, and trigger a false "no block dummy columns" error.
     if is_blocked:
         _blk_labels = [f"B{i + 1}" for i in range(design_opts.n_blocks)]
         _cand_aug_tmp = cand.copy()
@@ -865,13 +863,11 @@ def find_optimal_design(
             "This can happen if power calculation failed repeatedly."
         )
 
-    # MODIFIED: Get key metrics for validation and warning
     final_power = best["report"]["achieved_power"]
     target_power = best["report"]["target_power"]
     final_n = best["report"]["n"]
     final_p = best["report"]["p"]
 
-    # MODIFIED: Warn with n and p if max_iter was hit without success
     if final_power + power_cfg.tol_power < target_power:
         _msg = (
             f"Design generation finished without converging to target power. "
@@ -882,14 +878,12 @@ def find_optimal_design(
         warnings.warn(_msg, RuntimeWarning)
         _run_warnings.append(_msg)
 
-    # ADDED: Final result validation
     if len(best["design_df"]) != final_n:
         raise RuntimeError(
             f"Result validation failed: Final design_df has {len(best['design_df'])} rows, "
             f"but report indicates n={final_n}."
         )
     
-    # MODIFIED: Reconstruct final X matrix for validation
     if is_blocked:
         final_X = best["_X"]
         # For blocked designs, p_full was estimated from the full candidate set.
@@ -900,7 +894,6 @@ def find_optimal_design(
     else:
         final_X = best["_X_cand"][best["_selected_idx"], :]
 
-    # MODIFIED: Add X.shape check per review
     if final_X.shape != (final_n, p_full):
         raise RuntimeError(
             f"Result validation failed: Final design matrix X has shape {final_X.shape}, "
@@ -923,7 +916,6 @@ def find_optimal_design(
     # 6. Optional export
     if export_diagnostics_to:
         try:
-            # MODIFIED: final_X is already defined
             export_paths = export_diagnostics(
                 X=final_X,
                 design_df=best["design_df"],
