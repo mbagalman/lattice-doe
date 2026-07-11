@@ -1,0 +1,145 @@
+# License: MIT
+"""Tests for the Streamlit app's shared session-state management (``app/state.py``).
+
+Regression coverage for the multipage state-persistence bug: values entered on
+one page were lost when the user navigated to another page and back, because
+Streamlit garbage-collects a widget's stored value once the widget is no longer
+rendered. ``init_state()`` now re-anchors widget-backed keys on every page load
+so they survive navigation.
+"""
+from __future__ import annotations
+
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+# The Streamlit app lives in ``app/`` and its modules import each other by bare
+# name (``from state import ...``), relying on Streamlit putting the app dir on
+# sys.path at runtime. Replicate that for the test process.
+_APP_DIR = Path(__file__).resolve().parents[1] / "app"
+if str(_APP_DIR) not in sys.path:
+    sys.path.insert(0, str(_APP_DIR))
+
+
+class TestPersistWidgetState:
+    """Unit tests for the key-classification logic of ``_persist_widget_state``."""
+
+    def _run_persist(self, seed: dict) -> set[str]:
+        """Run ``_persist_widget_state`` against a recording session_state.
+
+        Returns the set of keys that were written back (re-anchored). A fake
+        ``streamlit`` module is installed so ``state`` can be imported without a
+        running Streamlit server.
+        """
+
+        class RecordingState(dict):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.reassigned: list[str] = []
+
+            def __setitem__(self, key, value):
+                self.reassigned.append(key)
+                super().__setitem__(key, value)
+
+        fake_st = types.ModuleType("streamlit")
+        fake_st.session_state = RecordingState(seed)
+        saved = sys.modules.get("streamlit")
+        sys.modules["streamlit"] = fake_st
+        # Ensure ``state`` binds to the fake streamlit module.
+        sys.modules.pop("state", None)
+        try:
+            import state  # noqa: PLC0415
+
+            static_keys = {k for k in seed if not k.startswith(
+                ("fname_", "ftype_", "flow_", "fhigh_", "flevels_",
+                 "scen_a_", "scen_b_", "fdel_", "mr_name_", "mr_sigma_",
+                 "mr_remove_"))}
+            fake_st.session_state.reassigned.clear()
+            state._persist_widget_state(static_keys)
+            return set(fake_st.session_state.reassigned)
+        finally:
+            if saved is not None:
+                sys.modules["streamlit"] = saved
+            else:
+                sys.modules.pop("streamlit", None)
+            sys.modules.pop("state", None)
+
+    def test_static_and_dynamic_input_keys_are_reanchored(self):
+        touched = self._run_persist({
+            "alpha": 0.10,                 # static config
+            "criterion": "D",
+            "fname_ab12": "Temperature",   # factor-row input widgets
+            "ftype_ab12": "Continuous",
+            "flow_ab12": 20.0,
+            "scen_a_Temperature": 20.0,    # scenario-builder input widgets
+            "scen_b_Temperature": 80.0,
+        })
+        for key in ("alpha", "criterion", "fname_ab12", "ftype_ab12",
+                    "flow_ab12", "scen_a_Temperature", "scen_b_Temperature"):
+            assert key in touched, f"{key} must be re-anchored to survive navigation"
+
+    def test_button_keys_are_not_reanchored(self):
+        # Streamlit forbids setting a button's value via session_state, so the
+        # per-row delete/remove button keys must be left untouched.
+        touched = self._run_persist({
+            "alpha": 0.05,
+            "fdel_ab12": False,
+            "mr_remove_0": False,
+        })
+        assert "fdel_ab12" not in touched
+        assert "mr_remove_0" not in touched
+
+    def test_per_response_value_managed_keys_are_not_reanchored(self):
+        # Per-response multi-response widgets persist via the ``mr_responses``
+        # list using each widget's ``value=`` argument; re-anchoring them would
+        # clash with that default. Only the per-row keys are excluded here.
+        touched = self._run_persist({
+            "mr_enabled": True,     # static key beginning "mr_" -> MUST persist
+            "mr_name_0": "Yield",   # per-response value=-managed -> MUST skip
+            "mr_sigma_0": 1.0,
+        })
+        assert "mr_enabled" in touched
+        assert "mr_name_0" not in touched
+        assert "mr_sigma_0" not in touched
+
+
+# AppTest exercises the real Streamlit runtime; guard the import so the module
+# still collects if a future Streamlit drops the testing API.
+pytest.importorskip("streamlit.testing.v1")
+from streamlit.testing.v1 import AppTest  # noqa: E402
+
+
+class TestPageNavigationPersistence:
+    """End-to-end: a value entered on one page survives navigating away and back."""
+
+    def _fresh_app(self) -> AppTest:
+        # Import through the same app-dir path the pages use.
+        app_main = str(_APP_DIR / "app.py")
+        return AppTest.from_file(app_main, default_timeout=60)
+
+    def test_alpha_survives_round_trip_navigation(self):
+        at = self._fresh_app()
+        at.run()
+
+        # Go to Power Config and change alpha away from its 0.05 default.
+        at.switch_page("pages/2_Power_Config.py")
+        at.run()
+        alpha = next(w for w in at.number_input if w.key == "alpha")
+        assert alpha.value == pytest.approx(0.05)
+        alpha.set_value(0.10).run()
+        assert at.session_state["alpha"] == pytest.approx(0.10)
+
+        # Navigate to the Factors page (which does not render the alpha widget)
+        # and back to Power Config.
+        at.switch_page("pages/1_Factors.py")
+        at.run()
+        at.switch_page("pages/2_Power_Config.py")
+        at.run()
+
+        assert not at.exception
+        # The entered value must be remembered, not reset to the default.
+        assert at.session_state["alpha"] == pytest.approx(0.10)
+        alpha_after = next(w for w in at.number_input if w.key == "alpha")
+        assert alpha_after.value == pytest.approx(0.10)
