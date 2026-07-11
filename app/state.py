@@ -10,8 +10,43 @@ from __future__ import annotations
 import streamlit as st
 
 
+# Dynamic (per-row) widget keys that must survive page navigation. Unlike the
+# static keys below, these are created at runtime — one set per factor row and
+# per scenario-builder factor — so they can't be listed in `defaults`. They are
+# matched by prefix instead. Only input-widget keys are included: per-row *button*
+# keys (e.g. "fdel_<id>") are deliberately excluded because Streamlit forbids
+# setting a button's value through st.session_state.
+_PERSIST_DYNAMIC_PREFIXES = (
+    "fname_", "ftype_", "flow_", "fhigh_", "flevels_",   # factor table rows (Page 1)
+    "scen_a_", "scen_b_",                                 # scenario builder (Page 2)
+)
+
+
+def _persist_widget_state(static_keys) -> None:
+    """Re-anchor widget-backed session-state keys so they survive page changes.
+
+    In a Streamlit multipage app, a widget's stored value is garbage-collected
+    once the user navigates to a page where that widget is not rendered. Because
+    every page calls init_state() before drawing its widgets, the value is still
+    present at this point in the run; re-assigning it to itself converts it back
+    into ordinary session state that Streamlit will not discard, and the widget
+    re-binds to it when the user returns to its page.
+
+    Per-response multi-response keys (``mr_*`` created inside the response list)
+    are intentionally left out: they persist through the ``mr_responses`` list
+    via each widget's ``value=`` argument, and re-anchoring them would clash with
+    that default and emit spurious Streamlit warnings.
+    """
+    static = set(static_keys)
+    for key in list(st.session_state.keys()):
+        if key in static or key.startswith(_PERSIST_DYNAMIC_PREFIXES):
+            st.session_state[key] = st.session_state[key]
+
+
 def init_state() -> None:
-    """Populate st.session_state with defaults for any missing keys. Idempotent."""
+    """Populate st.session_state with defaults for any missing keys, and
+    re-anchor existing widget values so they persist across page navigation.
+    Idempotent."""
     defaults: dict = {
         # --- Factors & formula ---
         "factors": [],          # list of dicts: {name, type, low, high} or {name, type, levels}
@@ -77,6 +112,9 @@ def init_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+    # Keep previously entered values alive when the user moves between pages.
+    _persist_widget_state(defaults.keys())
 
 
 def render_sidebar() -> None:
