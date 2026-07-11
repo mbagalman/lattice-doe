@@ -73,6 +73,25 @@ from ._request_builder import build_power_cfg, build_design_opts
 logger = logging.getLogger("lattice")
 
 
+def _ensure_utf8_output() -> None:
+    """Reconfigure stdout/stderr to UTF-8 so help text and reports render correctly.
+
+    Help text and design summaries contain non-ASCII glyphs (e.g. subscripts like
+    n₀, Greek letters like σ). On Windows the console defaults to a legacy code page
+    (cp1252) that cannot encode these, raising UnicodeEncodeError. Switching the
+    streams to UTF-8 avoids that. Streams that do not support reconfigure (e.g. an
+    io.StringIO substituted in tests) are left untouched.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (ValueError, OSError):  # pragma: no cover - environment dependent
+            pass
+
+
 # -------------------------
 # Parsing helpers
 # -------------------------
@@ -648,6 +667,7 @@ def _print_template(mode: str) -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    _ensure_utf8_output()
     parser = argparse.ArgumentParser(
         prog="lattice",
         description="Lattice DOE — power-assured optimal design generator",

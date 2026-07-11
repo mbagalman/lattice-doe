@@ -136,10 +136,10 @@ Build and run with the included `Dockerfile`:
 
 ```bash
 # Build the image (from the project root)
-docker build -t iopt-doe .
+docker build -t lattice-doe .
 
 # Run — app available at http://localhost:8501
-docker run -p 8501:8501 iopt-doe
+docker run -p 8501:8501 lattice-doe
 ```
 
 ## 6) If something fails

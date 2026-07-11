@@ -2995,10 +2995,10 @@ The repository includes a `Dockerfile` that builds a self-contained image:
 
 ```bash
 # Build (from the project root)
-docker build -t iopt-doe .
+docker build -t lattice-doe .
 
 # Run — app available at http://localhost:8501
-docker run -p 8501:8501 iopt-doe
+docker run -p 8501:8501 lattice-doe
 ```
 
 The default image installs all extras (`[app]`, `[report]`, `[extras]`) so the full feature set including HTML reports and Excel download is available.
@@ -3017,7 +3017,7 @@ RUN pip install /tmp/lattice_doe-*.whl[app,report,extras]
 docker run -p 8501:8501 \
   -v /path/to/credentials.json:/app/credentials.json \
   -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json \
-  iopt-doe
+  lattice-doe
 ```
 
 ---
@@ -7623,8 +7623,8 @@ The included `Dockerfile` builds a self-contained image of the Streamlit app:
 
 ```bash
 # Build and run
-docker build -t iopt-doe .
-docker run -p 8501:8501 iopt-doe
+docker build -t lattice-doe .
+docker run -p 8501:8501 lattice-doe
 # → http://localhost:8501
 ```
 
