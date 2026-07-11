@@ -1426,6 +1426,7 @@ class TestSplitPlotAPI:
     # Return structure                                                      #
     # ------------------------------------------------------------------ #
 
+    @pytest.mark.slow  # ~182s measured 2026-07-11 (TICKET-006A)
     def test_returns_dict_with_required_keys(self):
         result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
@@ -1435,6 +1436,7 @@ class TestSplitPlotAPI:
         assert "buckets_df" in result
         assert "report" in result
 
+    @pytest.mark.slow  # ~148s measured 2026-07-11 (TICKET-006A)
     def test_design_df_is_dataframe(self):
         result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
@@ -1456,6 +1458,7 @@ class TestSplitPlotAPI:
     # HTC nesting constraint                                               #
     # ------------------------------------------------------------------ #
 
+    @pytest.mark.slow  # ~191s measured 2026-07-11 (TICKET-006A)
     def test_htc_constant_within_wp(self):
         """All sub-plots in a WP share the same HTC factor values."""
         result = find_optimal_design(
@@ -1474,6 +1477,7 @@ class TestSplitPlotAPI:
     # Report structure                                                     #
     # ------------------------------------------------------------------ #
 
+    @pytest.mark.slow  # ~132s measured 2026-07-11 (TICKET-006A)
     def test_report_contains_split_plot_dict(self):
         result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
@@ -1483,6 +1487,7 @@ class TestSplitPlotAPI:
         sp = result["report"]["split_plot"]
         assert isinstance(sp, dict)
 
+    @pytest.mark.slow  # ~130s measured 2026-07-11 (TICKET-006A)
     def test_split_plot_dict_has_required_keys(self):
         result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
@@ -1493,6 +1498,7 @@ class TestSplitPlotAPI:
                     "eta", "htc_factors", "etc_factors", "df_method"):
             assert key in sp, f"Missing key: {key!r}"
 
+    @pytest.mark.slow  # ~241s measured 2026-07-11 (TICKET-006A)
     def test_split_plot_dict_values_consistent(self):
         n_wp, s = 4, 3
         result = find_optimal_design(
@@ -1505,6 +1511,7 @@ class TestSplitPlotAPI:
         assert set(sp["htc_factors"]) == set(_SP7_HTC)
         assert sp["n_whole_plots"] * sp["subplots_per_wp"] == sp["n_total"]
 
+    @pytest.mark.slow  # ~130s measured 2026-07-11 (TICKET-006A)
     def test_report_n_equals_design_rows(self):
         result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
@@ -1512,6 +1519,7 @@ class TestSplitPlotAPI:
         )
         assert result["report"]["n"] == len(result["design_df"])
 
+    @pytest.mark.slow  # ~130s measured 2026-07-11 (TICKET-006A)
     def test_achieved_power_in_unit_interval(self):
         result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
@@ -1524,6 +1532,7 @@ class TestSplitPlotAPI:
     # R² power mode                                                        #
     # ------------------------------------------------------------------ #
 
+    @pytest.mark.slow  # ~131s measured 2026-07-11 (TICKET-006A)
     def test_r2_power_cfg_works(self):
         result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_r2_cfg(),
@@ -1600,6 +1609,7 @@ class TestSplitPlotAPI:
     # ------------------------------------------------------------------ #
 
     @pytest.mark.parametrize("df_method", ["auto", "conservative", "sp_only"])
+    @pytest.mark.slow  # ~130s x3 params measured 2026-07-11 (TICKET-006A)
     def test_all_df_methods_run_without_error(self, df_method):
         result = find_optimal_design(
             _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(),
@@ -1709,6 +1719,7 @@ class TestCR25HtcColMapping:
     # Integration: WP contrast uses WP df under df_method="auto"          #
     # ------------------------------------------------------------------ #
 
+    @pytest.mark.slow  # ~695s measured 2026-07-11 (TICKET-006A)
     def test_wp_contrast_auto_equals_conservative(self):
         """CR-25: WP contrast power under 'auto' must equal 'conservative'
         (both use WP df), not 'sp_only' (which uses SP df).
@@ -1757,6 +1768,7 @@ class TestCR25HtcColMapping:
             f"({power_conservative:.4f}) for a WP contrast, not 'sp_only' ({power_sp_only:.4f})"
         )
 
+    @pytest.mark.slow  # ~448s measured 2026-07-11 (TICKET-006A)
     def test_sp_contrast_auto_equals_sp_only(self):
         """CR-25: SP contrast power under 'auto' must equal 'sp_only'
         (both use SP df).  A pure-SP contrast is unaffected by the fix.
@@ -1945,6 +1957,7 @@ class TestSplitPlotAnalysis:
     # power_curve_by_wp — return type and structure                        #
     # ------------------------------------------------------------------ #
 
+    @pytest.mark.slow  # ~126s measured 2026-07-11 (TICKET-006A)
     def test_returns_dataframe(self):
         df = power_curve_by_wp(
             _SP8_FORMULA, _SP8_FACTORS, _sp8_contrast_cfg(),
@@ -1954,6 +1967,7 @@ class TestSplitPlotAnalysis:
         )
         assert isinstance(df, pd.DataFrame)
 
+    @pytest.mark.slow  # ~125s measured 2026-07-11 (TICKET-006A)
     def test_has_required_columns(self):
         df = power_curve_by_wp(
             _SP8_FORMULA, _SP8_FACTORS, _sp8_contrast_cfg(),
@@ -1964,6 +1978,7 @@ class TestSplitPlotAnalysis:
         for col in ("n_wp", "n_total", "power", "noncentrality_lambda"):
             assert col in df.columns, f"Missing column: {col!r}"
 
+    @pytest.mark.slow  # ~175s measured 2026-07-11 (TICKET-006A)
     def test_row_count_equals_wp_points(self):
         wp_points = 5
         df = power_curve_by_wp(
@@ -1974,6 +1989,7 @@ class TestSplitPlotAnalysis:
         )
         assert len(df) == wp_points
 
+    @pytest.mark.slow  # ~125s measured 2026-07-11 (TICKET-006A)
     def test_power_in_unit_interval(self):
         df = power_curve_by_wp(
             _SP8_FORMULA, _SP8_FACTORS, _sp8_contrast_cfg(),
@@ -1984,6 +2000,7 @@ class TestSplitPlotAnalysis:
         valid = df["power"].dropna()
         assert (valid >= 0.0).all() and (valid <= 1.0).all()
 
+    @pytest.mark.slow  # ~92s measured 2026-07-11 (TICKET-006A)
     def test_n_total_equals_n_wp_times_s(self):
         s = 3
         df = power_curve_by_wp(
@@ -1994,6 +2011,7 @@ class TestSplitPlotAnalysis:
         )
         assert (df["n_total"] == df["n_wp"] * s).all()
 
+    @pytest.mark.slow  # ~230s measured 2026-07-11 (TICKET-006A)
     def test_power_correlates_with_n_wp(self):
         """Power should be non-decreasing overall as n_wp grows."""
         df = power_curve_by_wp(
@@ -2009,6 +2027,7 @@ class TestSplitPlotAnalysis:
             corr, _ = sps.spearmanr(df["n_wp"].values[:len(valid)], valid.values)
             assert corr >= 0.0, f"Power unexpectedly decreases with n_wp: corr={corr:.3f}"
 
+    @pytest.mark.slow  # ~1039s measured 2026-07-11 (TICKET-006A)
     def test_r2_mode_works(self):
         df = power_curve_by_wp(
             _SP8_FORMULA, _SP8_FACTORS, _sp8_r2_cfg(),
@@ -2023,6 +2042,7 @@ class TestSplitPlotAnalysis:
     # power_sensitivity — eta sweep                                        #
     # ------------------------------------------------------------------ #
 
+    @pytest.mark.slow  # ~196s measured 2026-07-11 (TICKET-006A)
     def test_eta_sweep_present_for_sp_design(self):
         """power_sensitivity returns eta_sweep DataFrame when eta_range given."""
         # Build a small SP design first
@@ -2050,6 +2070,7 @@ class TestSplitPlotAnalysis:
         assert "eta" in eta_df.columns
         assert "power" in eta_df.columns
 
+    @pytest.mark.slow  # ~199s measured 2026-07-11 (TICKET-006A)
     def test_eta_sweep_power_decreases_with_eta(self):
         """WP contrast power should decrease as eta increases."""
         result_api = find_optimal_design(
