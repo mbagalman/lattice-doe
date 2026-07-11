@@ -35,6 +35,12 @@ _HAS_FASTAPI = importlib.util.find_spec("fastapi") is not None
 _HAS_HTTPX = importlib.util.find_spec("httpx") is not None
 _HAS_SERVER = _HAS_FASTAPI and _HAS_HTTPX
 
+# Layer 1 needs no HTTP stack, but the api_server request/response models it
+# converts are Pydantic v2 models, and pydantic ships only with the [server]
+# extra. Skip the whole module on a core install (same pattern as
+# test_report.py's jinja2 guard) so `pytest` passes without extras.
+pytest.importorskip("pydantic", reason="server extra not installed")
+
 # ---------------------------------------------------------------------------
 # Layer 1 — pure unit tests (no HTTP, no FastAPI needed)
 # ---------------------------------------------------------------------------

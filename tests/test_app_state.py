@@ -9,6 +9,7 @@ so they survive navigation.
 """
 from __future__ import annotations
 
+import importlib.util
 import sys
 import types
 from pathlib import Path
@@ -105,16 +106,24 @@ class TestPersistWidgetState:
         assert "mr_sigma_0" not in touched
 
 
-# AppTest exercises the real Streamlit runtime; guard the import so the module
-# still collects if a future Streamlit drops the testing API.
-pytest.importorskip("streamlit.testing.v1")
-from streamlit.testing.v1 import AppTest  # noqa: E402
+# AppTest needs a real Streamlit install ([app] extra). The unit tests above
+# use a fake streamlit module, so only this end-to-end class is skipped on a
+# core install — a module-level importorskip would needlessly skip those too.
+_HAS_STREAMLIT_TESTING = (
+    importlib.util.find_spec("streamlit") is not None
+    and importlib.util.find_spec("streamlit.testing.v1") is not None
+)
 
 
+@pytest.mark.skipif(
+    not _HAS_STREAMLIT_TESTING, reason="app extra (streamlit) not installed"
+)
 class TestPageNavigationPersistence:
     """End-to-end: a value entered on one page survives navigating away and back."""
 
-    def _fresh_app(self) -> AppTest:
+    def _fresh_app(self):
+        from streamlit.testing.v1 import AppTest
+
         # Import through the same app-dir path the pages use.
         app_main = str(_APP_DIR / "app.py")
         return AppTest.from_file(app_main, default_timeout=60)

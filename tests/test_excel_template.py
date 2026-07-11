@@ -67,6 +67,13 @@ def _minimal_result(
 # TestImportGuard
 # ---------------------------------------------------------------------------
 
+
+# Tests that write a real workbook need openpyxl (the [extras] group); the
+# parse-only tests in the same classes run fine on a core install.
+requires_openpyxl = pytest.mark.skipif(
+    not excel_module._HAS_OPENPYXL, reason="openpyxl not installed"
+)
+
 class TestImportGuard:
     def test_create_template_raises_import_error_when_no_openpyxl(self):
         with patch.object(excel_module, "_HAS_OPENPYXL", False):
@@ -488,6 +495,7 @@ class TestCR22BlockedPreAllocFields:
         with pytest.raises(ExcelError, match="true/false"):
             _read_config_sheet(_make_ws(rows))
 
+    @requires_openpyxl
     def test_template_contains_new_keys(self):
         """create_excel_template() must write all 5 new setting rows."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -509,6 +517,7 @@ class TestCR22BlockedPreAllocFields:
                         f"{example!r} template missing '{key}' in Config sheet"
                     )
 
+    @requires_openpyxl
     def test_template_still_parseable(self):
         """All templates must round-trip through _read_config_sheet cleanly."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -635,6 +644,7 @@ class TestCR34ExcelMultiResponseAdvancedFields:
         assert multi_cfg.responses[0].power_cfg.max_iter == 200
         assert multi_cfg.responses[0].power_cfg.tol_power == pytest.approx(1e-3)
 
+    @requires_openpyxl
     def test_multiresponse_template_round_trips(self):
         """The multiresponse Excel template must parse correctly."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -647,6 +657,7 @@ class TestCR34ExcelMultiResponseAdvancedFields:
             assert multi_cfg is not None
             assert len(multi_cfg.responses) == 2
 
+    @requires_openpyxl
     def test_multiresponse_template_sigma_joint_none(self):
         """Built-in multiresponse template has blank sigma_joint → None."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -657,6 +668,7 @@ class TestCR34ExcelMultiResponseAdvancedFields:
             _, _, _, _, multi_cfg = _read_config_sheet(wb["Config"])
             assert multi_cfg.sigma_joint is None
 
+    @requires_openpyxl
     def test_unknown_multiresponse_example_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
             with pytest.raises(ValueError, match="bayesian"):
@@ -736,6 +748,7 @@ class TestExcelGLMSupport:
         with pytest.raises(ExcelError, match="baseline"):
             _read_config_sheet(ws)
 
+    @requires_openpyxl
     def test_excel_glm_template_binomial_creates(self):
         """create_excel_template('glm-binomial') creates a valid .xlsx file."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -743,6 +756,7 @@ class TestExcelGLMSupport:
             assert p.exists()
             assert p.suffix == ".xlsx"
 
+    @requires_openpyxl
     def test_excel_glm_template_round_trips(self):
         """'glm-binomial' template can be written and parsed back."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -811,6 +825,7 @@ class TestExcelGLMSupport:
         assert isinstance(y1, PowerGLMContrastConfig)
         assert y1.baseline == pytest.approx(3.5)
 
+    @requires_openpyxl
     def test_linear_excel_unchanged(self):
         """Existing r2 template still round-trips correctly (regression guard)."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -820,6 +835,7 @@ class TestExcelGLMSupport:
             _, _, power_cfg, _, _ = _read_config_sheet(wb["Config"])
             assert isinstance(power_cfg, PowerR2Config)
 
+    @requires_openpyxl
     def test_glm_template_poisson_creates_and_parses(self):
         """'glm-poisson' template can be created and parsed back."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -831,6 +847,7 @@ class TestExcelGLMSupport:
             assert isinstance(power_cfg, PowerGLMContrastConfig)
             assert power_cfg.family == "poisson"
 
+    @requires_openpyxl
     def test_glm_template_has_baseline_row(self):
         """'glm-binomial' template Config sheet contains a 'baseline' key."""
         with tempfile.TemporaryDirectory() as tmp:

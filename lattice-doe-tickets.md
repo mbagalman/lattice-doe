@@ -172,6 +172,7 @@ a day or two each.
 
 ### TICKET-003A: Minimal CI workflow
 - **Status:** Done — 2026-05-06. Added [.github/workflows/ci.yml](.github/workflows/ci.yml) with two parallel jobs (test + build/smoke-install) on Python 3.11, plus [tests/test_readme_smoke.py](tests/test_readme_smoke.py). The smoke test runs both during the regular test pass and again against the freshly-built wheel in a fresh venv. Will only go green on the remote once pushed; the failure mode it catches has already been verified locally (caught the README example bug noted in TICKET-001).
+- **Addendum — 2026-07-11.** CI had in fact been red on every push since creation: the AC "pytest runs without requiring optional extras" was never met. Two gaps, both fixed by replicating CI's core+cli environment in a fresh venv: (1) `tests/test_api_server.py` Layer 1 imported `api_server.serialization` whose Pydantic models need the `[server]` extra — now guarded with a module-level `pytest.importorskip("pydantic")` (same pattern as test_report.py's jinja2 guard); (2) ten workbook-writing tests in `tests/test_excel_template.py` (CR-22/CR-34/GL-9 classes) lacked the `_HAS_OPENPYXL` skipif that the older classes had — now decorated with a shared `requires_openpyxl` marker, keeping the parse-only tests in those classes running on core installs. `tests/test_app_state.py`'s module-level streamlit importorskip was also narrowed to the AppTest class so the fake-streamlit unit tests run on core CI. Verified: full-suite collection in the core venv finds 1276 tests with 0 errors; the affected files report 358 passed / 78 skipped / 0 failed. Note: CI wall time (~1.5 h) is a separate issue — see the TICKET-006A note below.
 - **Priority:** P0a
 - **Release target:** v0.1.0
 - **Depends on:** none
@@ -470,6 +471,7 @@ that future tickets depend on.
 - **Risk level:** Low (gated by tag; reversible)
 
 ### TICKET-006A: Reorganize tests into unit and statistical
+- **Evidence — 2026-07-11.** The "fast" suite (`-m "not slow"`) takes ~1.5 h both locally and on CI. Measured with `--durations`: the top offenders are all unmarked tests in `tests/test_split_plot.py` — `TestSplitPlotAnalysis::test_r2_mode_works` 1039 s, `TestCR25HtcColMapping::test_wp_contrast_auto_equals_conservative` 695 s, `test_sp_contrast_auto_equals_sp_only` 448 s, plus seven more at 170–240 s. Marking roughly the top dozen split-plot tests `@pytest.mark.slow` (or shrinking their configs) would cut the fast suite to minutes. This should be an early task when this ticket is pulled.
 - **Priority:** P0b
 - **Release target:** v0.1.1
 - **Depends on:** none
