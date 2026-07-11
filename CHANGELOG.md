@@ -25,4 +25,18 @@ Initial public release of `lattice-doe`.
 - Google Sheets and Excel workbook integrations
 - Jupyter `ipywidgets` UI for interactive design exploration
 
+### Fixed
+
+- The sample-size search no longer crashes when `max_n` exceeds the candidate
+  set size (e.g. default `max_n=2000` with a 1000-point pool requested a
+  1000+-run design on the first bisection step and raised `ValueError`). The
+  search upper bound is now capped at what the candidate pool supports; if the
+  capped search cannot reach the target power, a warning names both `max_n`
+  and `candidate_points`, and a pool too small for the smallest estimable
+  design raises an actionable error up front. (TICKET-039)
+- Streamlit app: values entered on one page are no longer lost when
+  navigating to another page and back.
+- CLI output is forced to UTF-8 on Windows so `lattice --help` and design
+  summaries render instead of raising `UnicodeEncodeError` on legacy consoles.
+
 [0.1.0]: https://github.com/mbagalman/lattice-doe/releases/tag/v0.1.0

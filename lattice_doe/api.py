@@ -125,6 +125,43 @@ def _is_split_plot(design_opts: Optional[DesignOptions]) -> bool:
     return design_opts is not None and design_opts.split_plot is not None
 
 
+def _capped_search_max_n(max_n: int, n_ceiling: int, lo: int) -> int:
+    """Cap the n-search upper bound at what the candidate set can support.
+
+    The exchange algorithms select design rows from the candidate set without
+    replacement, so no search may request more runs than the candidate pool
+    provides (``n_ceiling``: the candidate count, times ``n_blocks`` for
+    blocked designs since each block draws independently). Without this cap,
+    a bisection midpoint can exceed the pool and crash — e.g. the default
+    ``max_n=2000`` with a 1000-point candidate set requests n≈1003 on the
+    very first iteration.
+
+    Raises an actionable error if even the smallest estimable design (``lo``)
+    does not fit in the candidate pool (typically after heavy constraint
+    filtering).
+    """
+    if n_ceiling < lo:
+        raise ValueError(
+            f"The candidate set supports at most n={n_ceiling} runs, but the "
+            f"model needs at least n={lo} to be estimable. Increase "
+            f"candidate_points (or raise cand_max with auto_candidate=True), "
+            f"or relax constraint_expr if it filters out most candidates."
+        )
+    return min(max_n, n_ceiling)
+
+
+def _candidate_cap_warning(max_n: int, capped_max_n: int, n_cand: int) -> str:
+    """Warning text for when the candidate-set cap truncated a failed search."""
+    return (
+        f"The sample-size search was capped at n={capped_max_n} by the "
+        f"candidate set size (n_cand={n_cand}) before reaching "
+        f"max_n={max_n}, and the target power was not achieved. Increase "
+        f"candidate_points (or cand_max with auto_candidate=True) so the "
+        f"search can explore larger n, or reduce max_n to silence this "
+        f"warning."
+    )
+
+
 def find_optimal_design(
     formula: str,
     factors: Dict[str, Any],
@@ -538,7 +575,13 @@ def find_optimal_design(
     # =========================================================================
 
     lo = max(p_full + 1, design_opts.n_blocks if is_blocked else 1)
-    hi = power_cfg.max_n + 1  # exclusive sentinel — hi is only updated to evaluated achievers
+    # Blocked designs draw each block independently from the candidate set, so
+    # they support up to n_blocks * n_cand total runs; unblocked designs draw
+    # all n runs from the pool at once.
+    _n_cand = len(cand)
+    _n_ceiling = _n_cand * design_opts.n_blocks if is_blocked else _n_cand
+    _capped_max_n = _capped_search_max_n(power_cfg.max_n, _n_ceiling, lo)
+    hi = _capped_max_n + 1  # exclusive sentinel — hi is only updated to evaluated achievers
 
     best: Optional[Dict[str, Any]] = None
     grew_candidates_once = False
@@ -652,52 +695,61 @@ def find_optimal_design(
             and diags.get("condition_number", np.inf) > 1e6
         ):
             grew_candidates_once = True
-            _strategy_parts.append("growth")
-            candidate_points = min(
+            _grown_points = min(
                 int(candidate_points * design_opts.growth_factor),
                 design_opts.cand_max,
             )
-            cand = build_candidate(
+            _cand_new = build_candidate(
                 factors=factors,
-                candidate_points=candidate_points,
+                candidate_points=_grown_points,
                 seed=design_opts.random_state,
                 constraint_func=design_opts.constraint_func,
                 cat_cells_cap=design_opts.cat_cells_cap,
             )
-            X_cand, _ = build_model_matrix(formula, cand)
-            p = X_cand.shape[1]
-            it += 1  # count the re-evaluation
-            # Update cand in shared kwargs after candidate growth
-            _search_kwargs["cand"] = cand
-            design_df, selected_idx, _ = build_i_opt_design_with_idx(
-                n=n, **_search_kwargs
-            )
-            X = X_cand[selected_idx, :]
-            if mode == "glm":
-                _glm_res = glm_contrast_power(power_cfg, X, jitter=design_opts.xtx_jitter)
-                power, lam = _glm_res.power, _glm_res.lam
-                df_num = int(np.linalg.matrix_rank(power_cfg.L))
-            elif mode == "contrast":
-                power, lam = contrast_power(
-                    L=L_eff, delta=power_cfg.delta, X=X,
-                    sigma=power_cfg.sigma, alpha=power_cfg.alpha,
-                    jitter=design_opts.xtx_jitter,
+            # Growth must never shrink the pool: the capped search bound (hi)
+            # was computed from the original candidate count, and later
+            # iterations may request up to that bound. Constraint filtering
+            # can in principle retain fewer rows despite more requested
+            # points; keep the pre-growth evaluation for this n in that case.
+            if len(_cand_new) >= _n_cand:
+                _strategy_parts.append("growth")
+                candidate_points = _grown_points
+                cand = _cand_new
+                _n_cand = len(cand)
+                X_cand, _ = build_model_matrix(formula, cand)
+                p = X_cand.shape[1]
+                it += 1  # count the re-evaluation
+                # Update cand in shared kwargs after candidate growth
+                _search_kwargs["cand"] = cand
+                design_df, selected_idx, _ = build_i_opt_design_with_idx(
+                    n=n, **_search_kwargs
                 )
-                df_num = int(np.linalg.matrix_rank(power_cfg.L))
-            else:
-                power, lam = global_r2_power(
-                    r2_target=power_cfg.r2_target, X=X,
-                    alpha=power_cfg.alpha, lambda_mode=power_cfg.lambda_mode,
-                )
-                df_num = _r2_df_num(X)
-            if np.isnan(power):
-                _msg = f"Power is NaN at n={n} after candidate growth. Searching higher n."
-                warnings.warn(_msg, RuntimeWarning)
-                _run_warnings.append(_msg)
-                lo = n + 1
-                continue
-            df_denom = int(X.shape[0] - np.linalg.matrix_rank(X))
-            diags = compute_design_metrics(X, X_cand=X_cand if not is_blocked else None)
+                X = X_cand[selected_idx, :]
+                if mode == "glm":
+                    _glm_res = glm_contrast_power(power_cfg, X, jitter=design_opts.xtx_jitter)
+                    power, lam = _glm_res.power, _glm_res.lam
+                    df_num = int(np.linalg.matrix_rank(power_cfg.L))
+                elif mode == "contrast":
+                    power, lam = contrast_power(
+                        L=L_eff, delta=power_cfg.delta, X=X,
+                        sigma=power_cfg.sigma, alpha=power_cfg.alpha,
+                        jitter=design_opts.xtx_jitter,
+                    )
+                    df_num = int(np.linalg.matrix_rank(power_cfg.L))
+                else:
+                    power, lam = global_r2_power(
+                        r2_target=power_cfg.r2_target, X=X,
+                        alpha=power_cfg.alpha, lambda_mode=power_cfg.lambda_mode,
+                    )
+                    df_num = _r2_df_num(X)
+                if np.isnan(power):
+                    _msg = f"Power is NaN at n={n} after candidate growth. Searching higher n."
+                    warnings.warn(_msg, RuntimeWarning)
+                    _run_warnings.append(_msg)
+                    lo = n + 1
+                    continue
+                df_denom = int(X.shape[0] - np.linalg.matrix_rank(X))
+                diags = compute_design_metrics(X, X_cand=X_cand if not is_blocked else None)
 
         buckets = _buckets_df(design_df)
         report = {
@@ -877,6 +929,10 @@ def find_optimal_design(
         )
         warnings.warn(_msg, RuntimeWarning)
         _run_warnings.append(_msg)
+        if _capped_max_n < power_cfg.max_n:
+            _cap_msg = _candidate_cap_warning(power_cfg.max_n, _capped_max_n, _n_cand)
+            warnings.warn(_cap_msg, RuntimeWarning)
+            _run_warnings.append(_cap_msg)
 
     if len(best["design_df"]) != final_n:
         raise RuntimeError(
@@ -1282,7 +1338,11 @@ def find_multiresponse_design(
         # Lower bound: must be estimable under the largest formula.
         p_compound = max(X_cand_k.shape[1] for X_cand_k in candidates_list)
         lo_c = p_compound + 1
-        hi_c = max_n + 1
+        # All per-response model matrices share the candidate rows, so the
+        # shared pool bounds the largest reachable n (see _capped_search_max_n).
+        _n_cand_c = len(cand)
+        _capped_max_n_c = _capped_search_max_n(max_n, _n_cand_c, lo_c)
+        hi_c = _capped_max_n_c + 1
         best_c: Optional[Dict[str, Any]] = None
         it_c = 0
         _run_warnings_c: List[str] = []
@@ -1376,6 +1436,10 @@ def find_multiresponse_design(
             )
             warnings.warn(_msg, RuntimeWarning)
             _run_warnings_c.append(_msg)
+            if _capped_max_n_c < max_n:
+                _cap_msg_c = _candidate_cap_warning(max_n, _capped_max_n_c, _n_cand_c)
+                warnings.warn(_cap_msg_c, RuntimeWarning)
+                _run_warnings_c.append(_cap_msg_c)
 
         for resp, rd in zip(multi_cfg.responses, _per_r_final_c):
             if rd["power"] > resp.power_cfg.power + 0.1:
@@ -1436,7 +1500,11 @@ def find_multiresponse_design(
         _L_common = _Delta_joint = _sigma_joint_arr = None  # type: ignore[assignment]
 
     lo = p + 1
-    hi = max_n + 1
+    # The shared candidate pool bounds the largest reachable n (see
+    # _capped_search_max_n).
+    _n_cand_mr = len(cand)
+    _capped_max_n_mr = _capped_search_max_n(max_n, _n_cand_mr, lo)
+    hi = _capped_max_n_mr + 1
     best = None
     it = 0
     _run_warnings = []
@@ -1538,6 +1606,10 @@ def find_multiresponse_design(
         )
         warnings.warn(_msg, RuntimeWarning)
         _run_warnings.append(_msg)
+        if _capped_max_n_mr < max_n:
+            _cap_msg_mr = _candidate_cap_warning(max_n, _capped_max_n_mr, _n_cand_mr)
+            warnings.warn(_cap_msg_mr, RuntimeWarning)
+            _run_warnings.append(_cap_msg_mr)
 
     for resp, rd in zip(multi_cfg.responses, _per_r_final):
         if rd["power"] > resp.power_cfg.power + 0.1:

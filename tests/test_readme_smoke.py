@@ -30,7 +30,7 @@ def test_readme_quickstart_runs_end_to_end():
     result = find_optimal_design(
         formula=formula,
         factors=factors,
-        power_cfg=PowerContrastConfig(L=L, delta=delta, power=0.80, sigma=1.0, max_n=50),
+        power_cfg=PowerContrastConfig(L=L, delta=delta, power=0.80, sigma=1.0),
         design_opts=DesignOptions(criterion="I", auto_candidate=True),
     )
 

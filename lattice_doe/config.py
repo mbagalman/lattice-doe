@@ -208,7 +208,12 @@ class PowerContrastConfig:
     max_iter : int, default 200
         Maximum iterations for n-search.
     max_n : int, default 2000
-        Hard cap on sample size.
+        Hard cap on sample size. The n-search is additionally capped by the
+        candidate set size (designs draw rows from the candidate pool without
+        replacement), so the effective search ceiling is
+        ``min(max_n, n_candidates)``; a warning names both knobs if that cap
+        prevents the target power from being reached. See
+        ``DesignOptions.candidate_points``.
     verbose : bool, default False
         Print progress during search.
     """
@@ -286,7 +291,12 @@ class PowerR2Config:
     max_iter : int, default 200
         Maximum iterations for n-search.
     max_n : int, default 2000
-        Hard cap on sample size.
+        Hard cap on sample size. The n-search is additionally capped by the
+        candidate set size (designs draw rows from the candidate pool without
+        replacement), so the effective search ceiling is
+        ``min(max_n, n_candidates)``; a warning names both knobs if that cap
+        prevents the target power from being reached. See
+        ``DesignOptions.candidate_points``.
     verbose : bool, default False
         Print progress during search.
     lambda_mode : {'n', 'n_minus_p'}, default 'n'
@@ -448,6 +458,13 @@ class DesignOptions:
     candidate_points : int, default 2000
         Number of candidate points to sample for continuous factors when
         auto_candidate=False. Ignored when auto_candidate=True.
+
+        The candidate pool also bounds the sample-size search: designs draw
+        rows from the pool without replacement, so no design larger than the
+        (post-constraint-filtering) pool can be built and the n-search ceiling
+        is ``min(power_cfg.max_n, n_candidates)``. If the target power is not
+        reached because of that cap, a warning suggests raising
+        candidate_points (or cand_max when auto_candidate=True).
     auto_candidate : bool, default False
         If True, automatically determine candidate size based on factor complexity:
         - Pure continuous: uses cand_min
@@ -773,7 +790,12 @@ class PowerGLMContrastConfig:
     max_iter : int, default 200
         Maximum n-search iterations.
     max_n : int, default 2000
-        Hard cap on sample size.
+        Hard cap on sample size. The n-search is additionally capped by the
+        candidate set size (designs draw rows from the candidate pool without
+        replacement), so the effective search ceiling is
+        ``min(max_n, n_candidates)``; a warning names both knobs if that cap
+        prevents the target power from being reached. See
+        ``DesignOptions.candidate_points``.
     """
 
     L: np.ndarray

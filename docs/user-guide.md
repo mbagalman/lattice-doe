@@ -462,6 +462,8 @@ power_cfg = PowerContrastConfig(
 
 `max_n` is a safety cap. If the binary search reaches `max_n` without achieving the target power, the function returns the best design it found at `max_n` rather than raising an error — the `achieved_power` in the report will be below the target. Set `max_n` large enough that the search is unlikely to hit it; 200–500 is a reasonable default for most problems.
 
+**`max_n` and the candidate set.** Designs draw their rows from the candidate set without replacement, so the candidate pool is a second, independent ceiling on the search: the effective upper bound is `min(max_n, n_candidates)`, where `n_candidates` is the pool size *after* any constraint filtering (see `DesignOptions.candidate_points`, or `cand_min`/`cand_max` with `auto_candidate=True`). When the candidate pool is the binding limit and the target power is still out of reach, the returned report carries a warning naming both knobs — increase `candidate_points` (or `cand_max`) to let the search explore larger `n`, or lower `max_n` to make the budget explicit. If the pool cannot even hold the smallest estimable design (`n_candidates ≤ p`, e.g. after aggressive constraint filtering), the function raises a `ValueError` immediately with the same remediation advice.
+
 ---
 
 #### 3.3 `contrast_from_scenarios`: building L and δ from two experimental scenarios
@@ -5612,6 +5614,14 @@ The `allow_candidate_growth` option addresses this: if the first design found
 has a condition number above `1e6`, the candidate set is grown by `growth_factor`
 (default `2.0`) up to `cand_max` and the search is re-run at the same `n`.
 This one-time growth step is tried at most once per bisection iteration.
+
+**Consequence 3 — the pool caps the sample-size search.** Designs draw rows
+from the feasible pool without replacement, so the n-search cannot explore
+beyond the post-filtering pool size regardless of `max_n`
+(see §3.2, "`max_n` and the candidate set"). A heavily filtered pool that
+prevents the target power from being reached produces a warning naming both
+`max_n` and `candidate_points`; a pool too small to hold even `p + 1` runs
+raises a `ValueError` up front.
 
 ```python
 opts = DesignOptions(
