@@ -904,3 +904,71 @@ class TestGLMContrastPower:
         # V_unscaled will be zero-matrix → rank 0
         with pytest.raises(ValueError):
             glm_contrast_power(cfg, _glm_X())
+
+
+# ---------------------------------------------------------------------------
+# SR-8: the X'X ridge must be scale-relative, not absolute
+# ---------------------------------------------------------------------------
+
+class TestSR8ScaleInvariantJitter:
+    """SR-8 regression: an absolute ridge (jitter * I) dominated columns in
+    small physical units and silently inflated the noncentrality parameter
+    (power 0.81 -> 1.000 at column scale 1e-5 before the fix). The ridge is
+    now relative to each diagonal entry, so the same physical effect gives
+    the same power regardless of the units the factor columns are stated in."""
+
+    def _design(self):
+        rng = np.random.default_rng(0)
+        n = 12
+        x = rng.uniform(-1, 1, n)
+        X = np.column_stack([np.ones(n), x])
+        return X, np.array([[0.0, 1.0]]), np.array([1.2])
+
+    @pytest.mark.parametrize("scale", [1e-3, 1e-5, 1e-8, 1e3, 1e6])
+    def test_contrast_power_unit_invariant(self, scale):
+        from lattice_doe.power import contrast_power
+        X, L, delta = self._design()
+        base = contrast_power(L, delta, X, sigma=1.0, alpha=0.05)
+        Xs = X.copy()
+        Xs[:, 1] *= scale
+        # Same physical effect: the slope coefficient scales by 1/scale.
+        res = contrast_power(L, delta / scale, Xs, sigma=1.0, alpha=0.05)
+        assert res.lam == pytest.approx(base.lam, rel=1e-6)
+        assert res.power == pytest.approx(base.power, abs=1e-9)
+
+    def test_contrast_power_sp_unit_invariant(self):
+        from lattice_doe.power import contrast_power_sp
+        from lattice_doe.split_plot import build_whole_plot_indicator
+        X, L, delta = self._design()
+        Z = build_whole_plot_indicator(12, 4, 3)
+        base = contrast_power_sp(L, delta, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05)
+        Xs = X.copy()
+        Xs[:, 1] *= 1e-5
+        res = contrast_power_sp(L, delta / 1e-5, Xs, Z, sigma_sp=1.0, eta=1.0,
+                                alpha=0.05)
+        assert res.lam == pytest.approx(base.lam, rel=1e-6)
+        assert res.power == pytest.approx(base.power, abs=1e-9)
+
+    def test_glm_contrast_power_unit_invariant(self):
+        from lattice_doe.power import glm_contrast_power
+        from lattice_doe.config import PowerGLMContrastConfig
+        X, L, delta = self._design()
+        cfg = PowerGLMContrastConfig(L=L, delta=delta, baseline=0.3,
+                                     family="binomial")
+        base = glm_contrast_power(cfg, X)
+        Xs = X.copy()
+        Xs[:, 1] *= 1e-5
+        cfg_s = PowerGLMContrastConfig(L=L, delta=delta / 1e-5, baseline=0.3,
+                                       family="binomial")
+        res = glm_contrast_power(cfg_s, Xs)
+        assert res.power == pytest.approx(base.power, abs=1e-9)
+
+    def test_unit_scale_results_unchanged(self):
+        """At ordinary scales the relative ridge is as negligible as the old
+        absolute one: lambda matches the ridgeless computation closely."""
+        from lattice_doe.power import contrast_power
+        X, L, delta = self._design()
+        res = contrast_power(L, delta, X, sigma=1.0, alpha=0.05)
+        XtX_inv = np.linalg.inv(X.T @ X)
+        lam_exact = float(delta @ np.linalg.inv(L @ XtX_inv @ L.T) @ delta)
+        assert res.lam == pytest.approx(lam_exact, rel=1e-6)

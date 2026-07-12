@@ -75,14 +75,24 @@ def _require_scipy() -> None:
 
 def _pinv_xtx(X: np.ndarray, jitter: float = 1e-8) -> np.ndarray:
     """
-    Compute pinv(X'X + jitter*I) with a small ridge for stability.
+    Compute pinv(X'X + ridge) with a small scale-relative ridge for stability.
+
+    The ridge added to each diagonal entry is ``jitter * (X'X)_ii`` (with 1.0
+    substituted for all-zero columns), i.e. the regularization is applied in
+    a column-equilibrated space. An absolute ridge ``jitter * I`` would be
+    huge relative to columns expressed in small physical units (e.g. mole
+    fractions ~1e-5), shrinking the contrast variance and silently inflating
+    the noncentrality parameter — power estimates became anti-conservative
+    for small-scale factors (SR-8). The relative ridge makes power results
+    invariant to the units of the factor columns.
 
     Parameters
     ----------
     X : ndarray (n x p)
         Model/design matrix.
     jitter : float
-        Small positive number added to the diagonal before inversion.
+        Relative ridge magnitude; each diagonal entry is inflated by the
+        factor ``(1 + jitter)``.
 
     Returns
     -------
@@ -90,10 +100,19 @@ def _pinv_xtx(X: np.ndarray, jitter: float = 1e-8) -> np.ndarray:
         Moore–Penrose inverse of the (regularized) X'X.
     """
     XtX = X.T @ X
-    p = XtX.shape[0]
-    XtX_reg = XtX + float(jitter) * np.eye(p, dtype=XtX.dtype)
-    # Return the (regularized) pseudo-inverse
-    return np.linalg.pinv(XtX_reg)
+    diag = np.diag(XtX)
+    ridge = np.where(diag > 0, diag, 1.0)
+    XtX_reg = XtX + float(jitter) * np.diag(ridge)
+    # Invert in a column-equilibrated space: with badly scaled columns the
+    # direct (pseudo-)inverse loses precision (the condition number grows
+    # with the squared column-scale ratio); scaling to unit diagonal keeps
+    # the inversion accurate, and the ridge makes XtX_reg full rank so the
+    # scaled-back result equals pinv(XtX_reg) exactly in real arithmetic.
+    d = np.sqrt(np.diag(XtX_reg))
+    d = np.where(d > 0, d, 1.0)
+    S = 1.0 / d
+    A = XtX_reg * S[:, None] * S[None, :]
+    return np.linalg.pinv(A) * S[:, None] * S[None, :]
 
 
 def _symmetrize(A: np.ndarray) -> np.ndarray:

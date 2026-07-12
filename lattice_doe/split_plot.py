@@ -146,7 +146,14 @@ def gls_information_matrix(
     V_inv: np.ndarray,
     jitter: float = 1e-8,
 ) -> np.ndarray:
-    """Compute the GLS information matrix M = X' V⁻¹ X + jitter · I_p.
+    """Compute the GLS information matrix M = X' V⁻¹ X with a relative ridge.
+
+    The ridge added to each diagonal entry is ``jitter * M_ii`` (with 1.0
+    substituted for zero diagonal entries), i.e. relative to each column's
+    own scale. An absolute ridge ``jitter * I`` dominated columns expressed
+    in small physical units, silently inflating GLS noncentrality parameters
+    (anti-conservative power, SR-8); the relative ridge makes results
+    invariant to factor-column units.
 
     Parameters
     ----------
@@ -156,17 +163,19 @@ def gls_information_matrix(
         Scaled inverse covariance (η Z Z' + I_n)⁻¹.  Pass ``np.eye(n)``
         to recover the standard OLS information matrix X'X.
     jitter : float, default 1e-8
-        Small positive ridge added to the diagonal for numerical stability.
+        Relative ridge magnitude; each diagonal entry is inflated by the
+        factor ``(1 + jitter)``.
 
     Returns
     -------
     M : ndarray, shape (p, p), dtype float64
         Symmetric positive semi-definite GLS information matrix.
     """
-    p = X.shape[1]
     M = X.T @ V_inv @ X
     M = 0.5 * (M + M.T)  # enforce symmetry
-    M += jitter * np.eye(p, dtype=np.float64)
+    diag = np.diag(M)
+    ridge = np.where(diag > 0, diag, 1.0)
+    M += jitter * np.diag(ridge)
     return M
 
 

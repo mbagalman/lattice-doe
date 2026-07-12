@@ -270,13 +270,15 @@ class TestGlsInformationMatrix:
         eigvals = np.linalg.eigvalsh(M)
         assert np.all(eigvals > 0), f"Non-positive eigenvalue: {eigvals.min()}"
 
-    def test_jitter_adds_to_diagonal(self):
-        """Increasing jitter increases diagonal entries by exactly that amount."""
+    def test_jitter_inflates_diagonal_relatively(self):
+        """SR-8: the ridge is relative — each diagonal entry is inflated by
+        the factor (1 + jitter), not by an absolute additive constant."""
         X = self._simple_X()
-        M1 = gls_information_matrix(X, np.eye(6), jitter=1e-8)
-        M2 = gls_information_matrix(X, np.eye(6), jitter=1e-4)
-        diff = np.diag(M2) - np.diag(M1)
-        np.testing.assert_allclose(diff, np.full(3, 1e-4 - 1e-8), atol=1e-12)
+        M0 = gls_information_matrix(X, np.eye(6), jitter=0.0)
+        M1 = gls_information_matrix(X, np.eye(6), jitter=1e-4)
+        np.testing.assert_allclose(
+            np.diag(M1), np.diag(M0) * (1.0 + 1e-4), rtol=1e-12
+        )
 
     def test_gls_differs_from_ols_when_eta_nonzero(self):
         """GLS information matrix is not equal to OLS (X'X) when η > 0."""
@@ -726,7 +728,9 @@ class TestGLSCriterionScorers:
         V_inv_eye = np.eye(n)
         gls = _gls_d_criterion(X, V_inv_eye)
         ols = _d_criterion_for_indices(X_cand, idx)
-        assert abs(gls - ols) < 1e-8
+        # 1e-6 tolerance: the GLS path uses a scale-relative ridge (SR-8)
+        # while the OLS engine keeps an absolute one; both are ~1e-8.
+        assert abs(gls - ols) < 1e-6
 
     def test_gls_a_equals_ols_a_when_vinv_identity(self):
         X, X_cand, idx = _make_ols_fixture()
@@ -854,7 +858,8 @@ class TestGLSCriterionScorers:
         for crit in ("D", "A"):
             ols_score = _criterion_score(crit, X_cand, idx)
             gls_score = _criterion_score(crit, X_cand, idx, V_inv=V_inv_eye)
-            assert abs(gls_score - ols_score) < 1e-8, f"Mismatch for criterion={crit!r}"
+            # 1e-6: GLS uses a relative ridge (SR-8), OLS an absolute one.
+            assert abs(gls_score - ols_score) < 1e-6, f"Mismatch for criterion={crit!r}"
 
     def test_criterion_score_invalid_criterion_raises(self):
         X, X_cand, idx = _make_ols_fixture()
@@ -879,7 +884,8 @@ class TestGLSCriterionScorers:
         for crit in ("D", "A"):
             ols = _score_design(crit, X)
             gls = _score_design_gls(crit, X, V_inv_eye)
-            assert abs(gls - ols) < 1e-8, f"Mismatch for criterion={crit!r}"
+            # 1e-6: GLS uses a relative ridge (SR-8), OLS an absolute one.
+            assert abs(gls - ols) < 1e-6, f"Mismatch for criterion={crit!r}"
 
     def test_score_design_gls_invalid_criterion_raises(self):
         X, _, _, V_inv = _make_sp_fixture()
@@ -2799,7 +2805,8 @@ class TestSP10PropertyBased:
         X = rng.standard_normal((n_total, p))
         Z = build_whole_plot_indicator(n_total, n_wp, s)
         V_inv = build_split_plot_covariance_inv(Z, eta)
-        M = X.T @ V_inv @ X + 1e-8 * np.eye(p)
+        M = X.T @ V_inv @ X
+        M += 1e-8 * np.diag(np.diag(M))  # scale-relative ridge (SR-8)
         expected = float(np.trace(np.linalg.inv(M)))
         got = _gls_a_criterion(X, V_inv)
         assert abs(got - expected) < 1e-6, (
