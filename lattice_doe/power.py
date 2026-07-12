@@ -123,19 +123,23 @@ def _symmetrize(A: np.ndarray) -> np.ndarray:
 def _r2_df_num(X: np.ndarray) -> int:
     """Numerator df for the global R² F-test (slopes only, intercept excluded).
 
-    Matches the G*Power / ``pwr.f2.test`` convention: if X contains an
-    intercept column (all-ones, std ≈ 0, mean ≈ 1), df_num = rank(X) - 1;
-    otherwise df_num = rank(X).  This is the single authoritative source of
-    truth shared by ``global_r2_power`` and any caller that needs the same
-    value for reporting.
+    Matches the G*Power / ``pwr.f2.test`` convention: if the model contains
+    an intercept, df_num = rank(X) - 1; otherwise df_num = rank(X).  This is
+    the single authoritative source of truth shared by ``global_r2_power``
+    and any caller that needs the same value for reporting.
+
+    An intercept is detected as the constant vector lying in the column span
+    of X — ``rank([X, 1]) == rank(X)`` — not as a literal all-ones column.
+    This correctly handles implicit intercepts such as cell-means coding
+    (``0 + C(group)``: the dummies sum to 1, so "all group means equal" has
+    k − 1 numerator df) and constant columns with values other than 1 (SR-10).
     """
     rank_X = int(np.linalg.matrix_rank(X))
-    p = X.shape[1]
-    has_intercept = any(
-        float(np.std(X[:, j])) < 1e-12
-        and bool(np.allclose(X[:, j].mean(), 1.0, atol=1e-8))
-        for j in range(p)
-    )
+    if X.shape[1] == 0 or rank_X == 0:
+        return rank_X
+    ones = np.ones((X.shape[0], 1), dtype=float)
+    rank_aug = int(np.linalg.matrix_rank(np.hstack([np.asarray(X, dtype=float), ones])))
+    has_intercept = rank_aug == rank_X
     return (rank_X - 1) if (has_intercept and rank_X > 1) else rank_X
 
 

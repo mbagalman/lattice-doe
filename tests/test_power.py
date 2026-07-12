@@ -972,3 +972,58 @@ class TestSR8ScaleInvariantJitter:
         XtX_inv = np.linalg.inv(X.T @ X)
         lam_exact = float(delta @ np.linalg.inv(L @ XtX_inv @ L.T) @ delta)
         assert res.lam == pytest.approx(lam_exact, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# SR-10: implicit intercepts must be detected for the global R2 numerator df
+# ---------------------------------------------------------------------------
+
+class TestSR10ImplicitIntercept:
+    """SR-10 regression: _r2_df_num scanned for a literal all-ones column, so
+    cell-means coding (0 + C(group)) got df1 = k instead of k - 1 -- a 7.5 pp
+    power error in the audit's k=3 example. The intercept is now detected as
+    the constant vector lying in the column span (rank([X, 1]) == rank(X))."""
+
+    def _group_designs(self, n=30, k=3):
+        g = np.repeat(np.arange(k), n // k)
+        X_cm = np.zeros((n, k))
+        X_cm[np.arange(n), g] = 1.0
+        X_int = np.column_stack(
+            [np.ones(n)] + [(g == j).astype(float) for j in range(1, k)]
+        )
+        return X_cm, X_int
+
+    def test_cell_means_df_matches_intercept_coding(self):
+        from lattice_doe.power import _r2_df_num
+        X_cm, X_int = self._group_designs()
+        assert _r2_df_num(X_cm) == _r2_df_num(X_int) == 2
+
+    def test_cell_means_power_matches_intercept_coding(self):
+        """Same model space must give the same global R2 power under either
+        coding (MC-verified at 0.767 for this configuration)."""
+        X_cm, X_int = self._group_designs()
+        p_cm = global_r2_power(0.25, X_cm, alpha=0.05).power
+        p_int = global_r2_power(0.25, X_int, alpha=0.05).power
+        assert p_cm == pytest.approx(p_int, abs=1e-12)
+        assert p_cm == pytest.approx(0.7674, abs=5e-4)
+
+    def test_constant_non_unit_column_detected(self):
+        from lattice_doe.power import _r2_df_num
+        _, X_int = self._group_designs()
+        X_c2 = X_int.copy()
+        X_c2[:, 0] = 2.0  # constant column that is not all-ones
+        assert _r2_df_num(X_c2) == 2
+
+    def test_true_no_intercept_model_unchanged(self):
+        """A genuine through-the-origin model keeps df1 = rank(X)."""
+        from lattice_doe.power import _r2_df_num
+        rng = np.random.default_rng(3)
+        X = np.column_stack(
+            [rng.uniform(0.5, 1.5, 24), rng.uniform(-1.0, -0.2, 24)]
+        )
+        assert _r2_df_num(X) == 2
+
+    def test_explicit_intercept_unchanged(self):
+        from lattice_doe.power import _r2_df_num
+        _, X_int = self._group_designs()
+        assert _r2_df_num(X_int) == 2
