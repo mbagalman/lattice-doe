@@ -120,6 +120,37 @@ def _symmetrize(A: np.ndarray) -> np.ndarray:
     return 0.5 * (A + A.T)
 
 
+def _check_delta_consistency(
+    V: np.ndarray,
+    V_pinv: np.ndarray,
+    delta: np.ndarray,
+) -> None:
+    """Raise if the hypothesis L·β = δ is infeasible for every β (SR-9).
+
+    When rows of L are linearly dependent, V = L M⁻¹ Lᵀ is rank-deficient and
+    the components of L·β satisfy the same linear relations as the rows of L.
+    A δ violating those relations specifies a hypothesis no β can satisfy;
+    the pseudo-inverse would silently project δ onto range(V), changing the
+    tested hypothesis without warning (e.g. duplicated contrast rows with a
+    sign-flipped δ yield λ = 0 and power = α). Feasibility is equivalent to
+    δ ∈ range(V), checked as ‖δ − V V⁺ δ‖ ≈ 0. For full-rank V the projector
+    is the identity and the check always passes.
+
+    Accepts a vector δ (shape (q,)) or a matrix Δ (shape (q, k), checked
+    column-wise).
+    """
+    resid = delta - V @ (V_pinv @ delta)
+    resid_norm = float(np.linalg.norm(resid))
+    if resid_norm > 1e-8 * max(1.0, float(np.linalg.norm(delta))):
+        raise ValueError(
+            "delta is inconsistent with the linear dependencies among the "
+            "rows of L: the hypothesis L·beta = delta cannot hold for any "
+            f"beta (||delta − proj(delta)|| = {resid_norm:.3g}). Remove "
+            "redundant contrast rows, or make the delta entries of dependent "
+            "rows satisfy the same linear relation as the rows themselves."
+        )
+
+
 def _r2_df_num(X: np.ndarray) -> int:
     """Numerator df for the global R² F-test (slopes only, intercept excluded).
 
@@ -243,13 +274,15 @@ def contrast_power(
             "Contrast variance matrix (L @ (X'X_inv) @ L.T) has rank 0. "
             "The contrast is not testable (e.g., it is in the null space of X)."
         )
-    # Note: If rank_V < df_num, contrasts are linearly dependent,
-    # but pinv will correctly handle this, so we don't error.
+    # If rank_V < df_num the contrast rows are linearly dependent; pinv
+    # handles the inversion, but delta must satisfy the same dependencies
+    # for the hypothesis to be well-posed — checked below (SR-9).
 
     V = V_unscaled * (sigma ** 2)
 
     # Use pseudo-inverse in case V is singular
     V_inv = np.linalg.pinv(V)
+    _check_delta_consistency(V, V_inv, delta)
     lam = float(delta.T @ V_inv @ delta)
 
     # A quadratic form should be >= 0; clip small negative values from float error,
@@ -355,6 +388,7 @@ def glm_contrast_power(
         )
 
     V_inv = np.linalg.pinv(V_unscaled)
+    _check_delta_consistency(V_unscaled, V_inv, delta)
     lam = float(w * (delta @ V_inv @ delta))
     lam = max(0.0, lam)
 
@@ -599,7 +633,9 @@ def contrast_power_sp(
         if np.linalg.matrix_rank(V_c) == 0:
             return ContrastPowerResult(power=0.0, lam=0.0)
         df_num = int(np.linalg.matrix_rank(L))
-        lam = max(0.0, float(delta @ np.linalg.pinv(V_c) @ delta) / (sigma_sp ** 2))
+        V_c_pinv = np.linalg.pinv(V_c)
+        _check_delta_consistency(V_c, V_c_pinv, delta)
+        lam = max(0.0, float(delta @ V_c_pinv @ delta) / (sigma_sp ** 2))
         df_d = int(df_denoms[0])
         if df_d <= 0:
             return ContrastPowerResult(power=0.0, lam=lam)
@@ -1080,10 +1116,14 @@ def hotelling_t2_power(
     # [L (X'X)⁻¹ L']⁻¹  (q × q)
     XtX_inv = _pinv_xtx(X, jitter=jitter)
     V_unscaled = _symmetrize(L @ XtX_inv @ L.T)
-    try:
-        V_inv = np.linalg.inv(V_unscaled)
-    except np.linalg.LinAlgError:
+    if np.linalg.matrix_rank(V_unscaled) < q:
         V_inv = np.linalg.pinv(V_unscaled)
+    else:
+        try:
+            V_inv = np.linalg.inv(V_unscaled)
+        except np.linalg.LinAlgError:
+            V_inv = np.linalg.pinv(V_unscaled)
+    _check_delta_consistency(V_unscaled, V_inv, Delta)
 
     # Σ⁻¹  (k × k)
     Sigma_inv = np.linalg.inv(sigma_joint)

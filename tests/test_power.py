@@ -1027,3 +1027,69 @@ class TestSR10ImplicitIntercept:
         from lattice_doe.power import _r2_df_num
         _, X_int = self._group_designs()
         assert _r2_df_num(X_int) == 2
+
+
+# ---------------------------------------------------------------------------
+# SR-9: infeasible hypotheses (rank-deficient L, inconsistent delta) must raise
+# ---------------------------------------------------------------------------
+
+class TestSR9DeltaConsistency:
+    """SR-9 regression: with linearly dependent contrast rows, delta must
+    satisfy the same dependencies for L*beta = delta to be feasible. The
+    pseudo-inverse used to silently project an infeasible delta onto
+    range(V) -- a sign-flipped duplicate gave lambda = 0 (power = alpha) and
+    a zeroed duplicate gave lambda/4, both without warning. All four power
+    functions now raise a ValueError instead."""
+
+    def _fixture(self):
+        rng = np.random.default_rng(0)
+        n = 16
+        x = rng.uniform(-1, 1, n)
+        X = np.column_stack([np.ones(n), x])
+        l = np.array([0.0, 1.0])
+        return X, l, np.vstack([l, l])
+
+    def test_consistent_duplicate_matches_single_row(self):
+        X, l, L2 = self._fixture()
+        ref = contrast_power(l, np.array([1.2]), X, sigma=1.0, alpha=0.05)
+        dup = contrast_power(L2, np.array([1.2, 1.2]), X, sigma=1.0, alpha=0.05)
+        assert dup.lam == pytest.approx(ref.lam, abs=1e-8)
+        assert dup.power == pytest.approx(ref.power, abs=1e-10)
+
+    @pytest.mark.parametrize("bad_delta", [[1.2, -1.2], [1.2, 0.0]])
+    def test_contrast_power_inconsistent_delta_raises(self, bad_delta):
+        X, _, L2 = self._fixture()
+        with pytest.raises(ValueError, match="inconsistent with the linear"):
+            contrast_power(L2, np.array(bad_delta), X, sigma=1.0, alpha=0.05)
+
+    def test_glm_contrast_power_inconsistent_delta_raises(self):
+        from lattice_doe.power import glm_contrast_power
+        from lattice_doe.config import PowerGLMContrastConfig
+        X, _, L2 = self._fixture()
+        cfg = PowerGLMContrastConfig(L=L2, delta=np.array([0.9, -0.9]),
+                                     baseline=0.3, family="binomial")
+        with pytest.raises(ValueError, match="inconsistent with the linear"):
+            glm_contrast_power(cfg, X)
+
+    def test_contrast_power_sp_inconsistent_delta_raises(self):
+        from lattice_doe.power import contrast_power_sp
+        from lattice_doe.split_plot import build_whole_plot_indicator
+        X, _, L2 = self._fixture()
+        Z = build_whole_plot_indicator(16, 4, 4)
+        with pytest.raises(ValueError, match="inconsistent with the linear"):
+            contrast_power_sp(L2, np.array([1.2, -1.2]), X, Z,
+                              sigma_sp=1.0, eta=1.0, alpha=0.05)
+
+    def test_hotelling_inconsistent_delta_raises(self):
+        from lattice_doe.power import hotelling_t2_power
+        X, _, L2 = self._fixture()
+        Sig = np.array([[1.0, 0.3], [0.3, 2.0]])
+        with pytest.raises(ValueError, match="inconsistent with the linear"):
+            hotelling_t2_power(L2, np.array([[1.0, 0.5], [-1.0, 0.5]]), X,
+                               Sig, alpha=0.05)
+
+    def test_full_rank_L_unaffected(self):
+        X, _, _ = self._fixture()
+        L = np.array([[0.0, 1.0], [1.0, 0.0]])
+        res = contrast_power(L, np.array([1.0, 0.5]), X, sigma=1.0, alpha=0.05)
+        assert 0.0 < res.power < 1.0
