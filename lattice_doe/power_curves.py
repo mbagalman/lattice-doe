@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 
 import copy
+import warnings
 
 from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions
 from .config import glm_fisher_weight
@@ -510,15 +511,16 @@ def power_surface_2d(
     param2_range: Tuple[float, float],
     grid_points: int = 20,
     design_opts: Optional[DesignOptions] = None,
+    n: Optional[int] = None,
     plot: bool = False,
     figsize: Tuple[float, float] = (10, 8),
     plot_backend: Literal["matplotlib", "plotly"] = "matplotlib",
 ) -> Dict[str, Union[pd.DataFrame, Optional["Figure"]]]:
     """Generate 2D power surface varying two parameters simultaneously.
-    
+
     Creates a grid of power values for sensitivity analysis across two
     dimensions (e.g., n vs effect size, or effect vs sigma).
-    
+
     Parameters
     ----------
     formula : str
@@ -535,24 +537,35 @@ def power_surface_2d(
         Points along each axis (total evaluations = grid_points²).
     design_opts : DesignOptions, optional
         Design generation options.
+    n : int, optional
+        Sample size at which to evaluate the surface when neither
+        ``param1`` nor ``param2`` is ``'n'`` — typically the ``n``
+        returned by ``find_optimal_design``.  **Required** in that case:
+        power depends strongly on n, so a surface at an undisclosed
+        sample size is not interpretable.  Must satisfy
+        ``p < n <= len(candidate set)``.  Not allowed when one of the
+        swept parameters is ``'n'``.
     plot : bool, default False
         If True and matplotlib available, return a contour plot.
     figsize : tuple, default (10, 8)
         Figure size if plotting.
-    
+
     Returns
     -------
     dict
         {
           'data': DataFrame with columns [param1, param2, power],
           'figure': matplotlib Figure with contour plot if requested,
-          'power_grid': 2D numpy array of power values
+          'power_grid': 2D numpy array of power values,
+          'fixed_n': the n used for a non-'n' sweep (None when n is an axis)
         }
-    
+
     Notes
     -----
     This is computationally expensive, especially if 'n' is varied,
-    as it may require generating many I-optimal designs.
+    as it may require generating many I-optimal designs.  An 'n' axis is
+    capped at the candidate-set size (designs sample candidates without
+    replacement); a warning is issued if the requested range is clipped.
     """
     _VALID_PARAMS = {"n", "effect", "sigma", "alpha"}
     if grid_points <= 0:
@@ -598,13 +611,38 @@ def power_surface_2d(
     )
     X_cand, _ = build_model_matrix(formula, cand)
     p = X_cand.shape[1]
+    n_cand = len(cand)
+    if n_cand <= p:
+        raise ValueError(
+            f"Candidate set has {n_cand} rows but the model has p={p} "
+            "parameters; no evaluable design exists. Increase "
+            "candidate_points or relax constraints."
+        )
 
     # Build parameter grids
     def _make_axis(param: str, rng: tuple) -> np.ndarray:
         lo, hi = float(rng[0]), float(rng[1])
         if param == "n":
-            # Integer grid, log-spaced for better resolution at small n
-            return np.unique(np.geomspace(max(lo, p + 1), max(hi, p + 2), grid_points).astype(int))
+            # Integer grid, log-spaced for better resolution at small n.
+            # Designs draw candidates without replacement, so cap at n_cand
+            # (same policy as find_optimal_design's search bound, TICKET-039).
+            lo_eff = max(lo, p + 1)
+            hi_eff = min(max(hi, p + 2), n_cand)
+            if hi > n_cand:
+                warnings.warn(
+                    f"'n' axis upper bound {int(hi)} exceeds the candidate "
+                    f"set size ({n_cand}); clipping the axis to n <= {n_cand}. "
+                    "Increase candidate_points for larger n.",
+                    UserWarning,
+                )
+            if lo_eff > hi_eff:
+                raise ValueError(
+                    f"'n' axis range is empty after bounds: needs "
+                    f"p + 1 = {p + 1} <= n <= n_cand = {n_cand}."
+                )
+            return np.unique(
+                np.geomspace(lo_eff, hi_eff, grid_points).astype(int)
+            )
         return np.linspace(lo, hi, grid_points)
 
     axis1 = _make_axis(param1, param1_range)
@@ -644,11 +682,30 @@ def power_surface_2d(
             _x_cache[n_val] = X_cand[sel_idx, :]
         return _x_cache[n_val]
 
-    # For purely analytical sweeps (neither param is 'n'), build one fixed design
+    # For purely analytical sweeps (neither param is 'n'), the surface is
+    # evaluated at one fixed design; that n must be supplied by the caller
+    # because power depends strongly on it (a surface at an arbitrary
+    # internal default is not interpretable).
     fixed_n: Optional[int] = None
     if "n" not in (param1, param2):
-        # Use a reasonable representative n: midpoint of [p+1, max_n]
-        fixed_n = max(p + 1, min(power_cfg.max_n, (p + 1 + power_cfg.max_n) // 2))
+        if n is None:
+            raise ValueError(
+                "power_surface_2d: when neither param1 nor param2 is 'n', "
+                "pass n=<sample size> (typically the n returned by "
+                "find_optimal_design) so the surface is evaluated at a "
+                "disclosed design size."
+            )
+        fixed_n = int(n)
+        if not (p < fixed_n <= n_cand):
+            raise ValueError(
+                f"n={fixed_n} is not evaluable: needs p = {p} < n <= "
+                f"candidate set size = {n_cand}."
+            )
+    elif n is not None:
+        raise ValueError(
+            "power_surface_2d: n was given but one of the swept parameters "
+            "is 'n'; drop the n argument or sweep something else."
+        )
 
     def _compute_power(v1: float, v2: float) -> Tuple[float, float]:
         """Return (power, lam) for a grid cell (v1, v2)."""
@@ -709,8 +766,9 @@ def power_surface_2d(
             param2_label = "n" if param2 == "n" else param2
             ax.set_xlabel(param2_label)
             ax.set_ylabel(param1_label)
+            _at_n = f" at n={fixed_n}" if fixed_n is not None else ""
             ax.set_title(
-                f"Power Surface: {param1_label} × {param2_label}"
+                f"Power Surface: {param1_label} × {param2_label}{_at_n}"
                 f"  (target = {power_cfg.power:.2f}, white contour)"
             )
             plt.tight_layout()
@@ -721,6 +779,7 @@ def power_surface_2d(
         "param1_values": axis1,
         "param2_values": axis2,
         "figure": fig,
+        "fixed_n": fixed_n,
     }
 
 

@@ -171,3 +171,80 @@ class TestSearchCappedMultiResponse:
         assert res["compound_criterion"] is True
         assert res["n"] <= 200
         assert res["achieved_power"] + 1e-3 >= 0.90
+
+
+# ---------------------------------------------------------------------------
+# SR-7: power_surface_2d must not evaluate at a hidden, arbitrary n
+# ---------------------------------------------------------------------------
+
+class TestSR7PowerSurfaceFixedN:
+    """SR-7 regression: analytic sweeps (neither axis is 'n') previously used
+    an undisclosed n ~ (p+1+max_n)/2 ~ 1000 -- crashing on small candidate
+    pools or returning a meaningless ~1.0 surface. An explicit n is now
+    required, validated, and disclosed; 'n' axes are capped at the candidate
+    size (TICKET-039 parity)."""
+
+    def _opts(self, **kw):
+        base = dict(candidate_points=100, starts=1, max_iter=10, random_state=0)
+        base.update(kw)
+        return DesignOptions(**base)
+
+    def test_analytic_sweep_without_n_raises(self):
+        from lattice_doe import power_surface_2d
+        with pytest.raises(ValueError, match="pass n="):
+            power_surface_2d(
+                FORMULA, FACTORS, _cfg(), "effect", (0.5, 2.0),
+                "sigma", (0.5, 2.0), grid_points=3, design_opts=self._opts(),
+            )
+
+    def test_analytic_sweep_with_n_discloses_and_varies(self):
+        from lattice_doe import power_surface_2d
+        res = power_surface_2d(
+            FORMULA, FACTORS, _cfg(), "effect", (0.5, 2.0),
+            "sigma", (0.5, 2.0), grid_points=4, design_opts=self._opts(), n=12,
+        )
+        assert res["fixed_n"] == 12
+        grid = res["power_grid"]
+        # A real sensitivity surface varies; the old hidden n ~ 1000 gave ~1.0
+        # everywhere.
+        assert grid.min() < 0.9 < grid.max() + 0.2
+        assert grid.min() < grid.max()
+
+    @pytest.mark.parametrize("bad_n", [2, 101])
+    def test_n_out_of_range_raises(self, bad_n):
+        from lattice_doe import power_surface_2d
+        with pytest.raises(ValueError, match="not evaluable"):
+            power_surface_2d(
+                FORMULA, FACTORS, _cfg(), "effect", (0.5, 2.0),
+                "sigma", (0.5, 2.0), grid_points=3,
+                design_opts=self._opts(), n=bad_n,
+            )
+
+    def test_n_alongside_n_axis_raises(self):
+        from lattice_doe import power_surface_2d
+        with pytest.raises(ValueError, match="drop the n argument"):
+            power_surface_2d(
+                FORMULA, FACTORS, _cfg(), "n", (5, 20),
+                "effect", (0.5, 2.0), grid_points=3,
+                design_opts=self._opts(), n=12,
+            )
+
+    def test_n_axis_clipped_to_candidate_size_warns(self):
+        from lattice_doe import power_surface_2d
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            res = power_surface_2d(
+                FORMULA, FACTORS, _cfg(), "n", (5, 500),
+                "effect", (0.5, 2.0), grid_points=4, design_opts=self._opts(),
+            )
+        assert res["param1_values"].max() <= 100
+        assert any("clipping" in str(w.message) for w in caught)
+
+    def test_n_axis_sweep_unchanged(self):
+        from lattice_doe import power_surface_2d
+        res = power_surface_2d(
+            FORMULA, FACTORS, _cfg(), "n", (5, 20),
+            "effect", (0.5, 2.0), grid_points=3, design_opts=self._opts(),
+        )
+        assert res["fixed_n"] is None
+        assert res["power_grid"].shape[1] == 3
