@@ -1306,20 +1306,80 @@ class TestSplitPlotPower:
         assert 0.0 <= res.power <= 1.0
 
     # ------------------------------------------------------------------ #
-    # Multi-row L: min-power convention                                    #
+    # Multi-row L: joint Wald F-test (SR-1)                                #
     # ------------------------------------------------------------------ #
 
-    def test_multirow_L_returns_min_power(self):
-        """Multi-row L returns power = min power across rows."""
+    def test_multirow_same_stratum_uses_joint_test(self):
+        """Multi-row L in one stratum matches a hand-computed joint Wald F."""
+        from scipy.stats import f as f_dist, ncf as ncf_dist
+
         X, Z = _make_sp6_design()
-        # Row 0: contrast on A (easier to detect); Row 1: intercept test (harder)
-        L = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
-        delta = np.array([2.0, 0.01])  # large effect on A, tiny on intercept
+        eta, sigma_sp, alpha = 1.0, 1.0, 0.05
+        # No htc_factor_cols → both rows classified SP → single denominator df.
+        L = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        delta = np.array([1.0, 0.5])
+        res = contrast_power_sp(L, delta, X, Z, sigma_sp=sigma_sp, eta=eta, alpha=alpha)
+
+        V_inv = build_split_plot_covariance_inv(Z, eta)
+        M = gls_information_matrix(X, V_inv, jitter=1e-8)
+        V_c = L @ np.linalg.inv(M) @ L.T
+        lam = float(delta @ np.linalg.pinv(V_c) @ delta) / sigma_sp**2
+        is_wp = classify_contrasts(L, [], X.shape[1])
+        df_d = int(split_plot_df_denom(X, Z, is_wp, "auto", None)[0])
+        Fcrit = f_dist.isf(alpha, 2, df_d)
+        expected = float(1.0 - ncf_dist.cdf(Fcrit, 2, df_d, lam))
+
+        assert abs(res.lam - lam) < 1e-8
+        assert abs(res.power - expected) < 1e-10
+
+    def test_multirow_joint_exceeds_min_for_heterogeneous_delta(self):
+        """The joint test retains power when one row's delta is near zero
+        (the old min-per-row convention collapsed to ~alpha here)."""
+        X, Z = _make_sp6_design()
+        L = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        delta = np.array([2.0, 0.01])
         res_joint = contrast_power_sp(L, delta, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05)
-        # Single-row results
         res0 = contrast_power_sp(L[0:1], delta[0:1], X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05)
         res1 = contrast_power_sp(L[1:2], delta[1:2], X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05)
-        assert abs(res_joint.power - min(res0.power, res1.power)) < 1e-10
+        assert res_joint.power > min(res0.power, res1.power)
+
+    def test_multirow_mixed_strata_falls_back_to_min(self):
+        """Rows spanning WP and SP strata under df_method='auto' use the
+        conservative min-per-row bound (no single denominator df exists)."""
+        X, Z = _make_sp6_design()
+        L = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])  # A (HTC), B (ETC)
+        delta = np.array([1.0, 1.0])
+        kw = dict(sigma_sp=1.0, eta=1.0, alpha=0.05,
+                  htc_factor_cols=[1], df_method="auto")
+        res = contrast_power_sp(L, delta, X, Z, **kw)
+        res0 = contrast_power_sp(L[0:1], delta[0:1], X, Z, **kw)
+        res1 = contrast_power_sp(L[1:2], delta[1:2], X, Z, **kw)
+        assert abs(res.power - min(res0.power, res1.power)) < 1e-10
+
+    def test_multirow_lambda_continuous_at_eta_zero(self):
+        """As eta → 0⁺ the joint-test λ converges to the OLS joint λ."""
+        X, Z = _make_sp6_design()
+        L = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        delta = np.array([1.0, 0.5])
+        sp = contrast_power_sp(L, delta, X, Z, sigma_sp=1.0, eta=1e-9, alpha=0.05)
+        ols = contrast_power(L, delta, X, sigma=1.0, alpha=0.05)
+        assert abs(sp.lam - ols.lam) < 1e-5
+
+    # ------------------------------------------------------------------ #
+    # Global R² stratum-blend warning (SR-2)                               #
+    # ------------------------------------------------------------------ #
+
+    def test_global_r2_power_sp_warns_for_positive_eta(self):
+        X, Z = _make_sp6_design()
+        with pytest.warns(UserWarning, match="blended effective sample size"):
+            global_r2_power_sp(0.5, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05)
+
+    def test_global_r2_power_sp_no_warning_at_eta_zero(self):
+        X, Z = _make_sp6_design()
+        import warnings as _warnings
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("error")
+            global_r2_power_sp(0.5, X, Z, sigma_sp=1.0, eta=0.0, alpha=0.05)
 
     # ------------------------------------------------------------------ #
     # lambda_mode for global R²                                            #

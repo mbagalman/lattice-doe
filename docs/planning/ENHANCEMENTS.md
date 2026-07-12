@@ -77,6 +77,21 @@ Actionable defects found while reviewing current `master`. These should be conve
 
 ---
 
+## Statistical Review Findings (2026-07-12)
+
+Findings from an external statistical review of the split-plot (GLS) and GLM power
+extensions, verified and triaged in-repo. Numerical checks confirmed the facts of each
+finding before fixing; severity language in the original review was overstated in places
+(see notes).
+
+| ID | Severity | Finding | Evidence | Status | Owner |
+|---|---|---|---|---|---|
+| ~~SR-1~~ | **P1** | ~~**`contrast_power_sp` used min-of-per-row 1-df powers for multi-row L while claiming OLS parity.** The OLS `contrast_power` computes a joint q-df Wald F-test (λ = δᵀ[L(X'X)⁻¹Lᵀ]⁺δ/σ²); the split-plot version looped over rows and returned the min 1-df power, and its docstring (and the SP-6 spec in `split-plot-ticket-pack.md`) falsely stated this was the "same convention as the OLS version". Also created a semantic discontinuity at η=0 (the shortcut returned joint power, η>0 returned min-per-row). Impact was case-dependent, not universally "drastic": for balanced equal-δ contrasts the two nearly coincide, but with heterogeneous δ (one row near zero) the min collapses toward α while the true omnibus power stays high, distorting the n-search.~~ | `lattice_doe/power.py` (`contrast_power_sp`), `docs/planning/split-plot-ticket-pack.md` SP-6 | ✅ Fixed — joint Wald F-test (df1 = rank(L), λ = δᵀ[LM⁻¹Lᵀ]⁺δ/σ²_sp) is now computed whenever all contrast rows share one denominator df (single-row L, all rows in one stratum, or `df_method` ∈ {"conservative", "sp_only"}). The per-row min is retained **only** for rows spanning both strata under `df_method="auto"`, where no single denominator df exists for a joint F; it is documented as a conservative lower bound. λ is now continuous as η→0⁺. Docstring and ticket-pack spec corrected. New tests: joint-vs-hand-computed match, heterogeneous-δ regression, mixed-strata fallback, η→0 λ continuity. | mbagalman |
+| ~~SR-2~~ | **P2** | ~~**`global_r2_power_sp` used tr((ηZZ'+I)⁻¹) as a blended effective sample size with no disclosure.** The trace interpolates from n (η=0) to n−n_wp (η→∞) and implicitly assumes the R² signal is spread proportionally across strata. When the signal is carried mainly by whole-plot (HTC) factors the estimate is optimistic (anti-conservative → undersized designs). This is an inherent limitation of R²-based effect sizes in mixed models (R² carries no stratum attribution), but unlike the df heuristic in `contrast_power_sp` and the GLM weight approximation, it carried no docstring caveat.~~ | `lattice_doe/power.py` (`global_r2_power_sp`) | ✅ Fixed — added an "Approximation scope" docstring note (direction of error per stratum) and a `UserWarning` emitted whenever η > 0 advising simulation-based validation when whole-plot factors dominate. Exact stratum-aware R² power would require the user to specify the WP/SP signal split; left as a possible future enhancement. | mbagalman |
+| ~~SR-3~~ | **P3** | ~~**`glm_contrast_power` docstring claimed the constant null-based Fisher weight is "conservative when the true mean is close to the baseline."** The constant-weight local approximation itself was already documented and is standard for planning (per-point H1 weights are tracked as GL-10/GL-11), but the conservatism claim is wrong in a common case: for logistic models with baseline p ≈ 0.5, w = p(1−p) is at its maximum, so real effects push probabilities toward lower-information regions and the null-based λ **overestimates** power.~~ | `lattice_doe/power.py` (`glm_contrast_power`) | ✅ Fixed — docstring note rewritten to state the error direction correctly (optimistic for mid-range baselines, conservative for extreme baselines with effects toward 0.5) and to cross-reference GL-10/GL-11. No code change needed; the computation was as designed. | mbagalman |
+
+---
+
 ## Technical Debt / Refactoring
 
 Internal improvements with no user-visible behavior change. Worthwhile for maintainability and testability.

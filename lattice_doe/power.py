@@ -30,6 +30,7 @@ Notes:
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Dict, List, Literal, NamedTuple, Optional, Tuple
 import numpy as np
 
@@ -273,11 +274,17 @@ def glm_contrast_power(
         uniformly across all rows of ``X``.  In the general GLM design
         setting the weight varies per design point (it depends on the
         linear predictor at each point under the true parameter vector).
-        This constant-weight approximation is conservative when the true
-        mean is close to the baseline and becomes less accurate as the
-        slope magnitudes and factor ranges grow.  Use results from this
-        function as a planning approximation and validate via simulation
-        for studies with large effects or wide covariate ranges.
+        The approximation is accurate when the true means stay close to
+        the baseline and degrades as slope magnitudes and factor ranges
+        grow.  The direction of the error depends on where the baseline
+        sits: for a logistic model with baseline probability near 0.5 the
+        null weight w = p(1−p) is at its maximum, so real effects (which
+        push probabilities toward the extremes) make this estimate
+        **optimistic**; for baselines near 0 or 1 with effects toward 0.5
+        it is conservative.  Use results from this function as a planning
+        approximation and validate via simulation for studies with large
+        effects or wide covariate ranges (per-point weights under H1 are
+        tracked as GL-10/GL-11).
 
     Parameters
     ----------
@@ -448,18 +455,31 @@ def contrast_power_sp(
     """Power for a linear contrast in a split-plot design.
 
     Uses GLS information matrix M = X'V⁻¹X where V = σ²_sp (η ZZ' + I).
-    The non-centrality parameter for each contrast row i is:
-        λ_i = δ_i² / (σ²_sp · l_i M⁻¹ l_i')
+
+    **Joint test (default).**  When every contrast row is assigned the same
+    denominator df — always true for single-row L, for multi-row L whose rows
+    all belong to one error stratum, and for ``df_method="conservative"`` or
+    ``"sp_only"`` — the power of the joint Wald F-test is computed, mirroring
+    the OLS ``contrast_power``:
+
+        λ = δᵀ [L M⁻¹ Lᵀ]⁺ δ / σ²_sp,   df1 = rank(L)
+
+    **Stratum-spanning fallback.**  When rows of L span both strata under
+    ``df_method="auto"``, no single denominator df exists for a joint F-test.
+    In that case each row is tested individually (1 numerator df, its own
+    stratum's denominator df) and the *minimum* power across rows is
+    returned.  This is a conservative worst-case-per-row bound, **not** the
+    omnibus power; supply ``df_method="conservative"`` to force a joint test
+    with whole-plot df instead.
 
     Denominator df is assigned per contrast row via df_method:
     - "auto"         : WP df for pure-WP contrasts, SP df for others.
     - "conservative" : always WP df.
     - "sp_only"      : always SP df.
 
-    Overall power = min power across all contrast rows (same convention
-    as the OLS version for multi-row L).
-
-    At eta = 0 the result is identical to ``contrast_power``.
+    At eta = 0 the result is identical to ``contrast_power``.  As eta → 0⁺
+    the joint-test λ converges to the OLS λ (denominator df may differ
+    because it comes from the stratum heuristic below).
 
     .. note:: **Denominator df approximation.**
         df assignment uses a stratum-classification heuristic rather than
@@ -500,7 +520,8 @@ def contrast_power_sp(
     Returns
     -------
     ContrastPowerResult
-        power : min power across contrast rows, lam : corresponding λ.
+        power : joint Wald F-test power (or the min per-row power in the
+        stratum-spanning fallback), lam : the corresponding λ.
     """
     _require_scipy()
 
@@ -549,6 +570,23 @@ def contrast_power_sp(
     is_wp = classify_contrasts(L, htc_cols, p)
     df_denoms = split_plot_df_denom(X, Z, is_wp, df_method, htc_cols or None)
 
+    # Joint Wald F-test whenever a single denominator df applies to every row.
+    if np.all(df_denoms == df_denoms[0]):
+        V_c = _symmetrize(L @ M_inv @ L.T)
+        if np.linalg.matrix_rank(V_c) == 0:
+            return ContrastPowerResult(power=0.0, lam=0.0)
+        df_num = int(np.linalg.matrix_rank(L))
+        lam = max(0.0, float(delta @ np.linalg.pinv(V_c) @ delta) / (sigma_sp ** 2))
+        df_d = int(df_denoms[0])
+        if df_d <= 0:
+            return ContrastPowerResult(power=0.0, lam=lam)
+        Fcrit = f_dist.isf(alpha, df_num, df_d)
+        power = float(np.clip(1.0 - ncf_dist.cdf(Fcrit, df_num, df_d, lam), 0.0, 1.0))
+        return ContrastPowerResult(power=power, lam=lam)
+
+    # Rows span both strata under df_method="auto": no single denominator df
+    # exists for a joint F-test, so bound the omnibus power from below by the
+    # worst per-row 1-df test, each with its own stratum's df.
     powers: List[float] = []
     lams: List[float] = []
     for i in range(q):
@@ -599,6 +637,19 @@ def global_r2_power_sp(
 
     At eta = 0 the result is identical to ``global_r2_power``.
 
+    .. note:: **Approximation scope.**
+        A target R² does not specify how the explained variance splits
+        between the whole-plot and sub-plot strata, so no single
+        noncentrality parameter can be exact.  tr(Ṽ⁻¹) blends the two
+        strata — it equals n at η = 0 and approaches n − n_wp as η → ∞ —
+        which implicitly assumes the signal is spread proportionally across
+        strata.  If the true signal is carried mainly by whole-plot (HTC)
+        factors, this estimate is **optimistic** (whole-plot effects are
+        really estimated from only n_wp plots); if carried mainly by
+        sub-plot factors it is mildly conservative.  A ``UserWarning`` is
+        emitted whenever η > 0; validate by simulation when whole-plot
+        factors dominate the model.
+
     Parameters
     ----------
     r2_target : float
@@ -645,6 +696,16 @@ def global_r2_power_sp(
     # eta=0 shortcut: exact OLS equivalence
     if eta == 0.0:
         return global_r2_power(r2_target, X, alpha, lambda_mode=lambda_mode)
+
+    warnings.warn(
+        "global_r2_power_sp approximates the split-plot noncentrality with a "
+        "blended effective sample size tr((η ZZ' + I)⁻¹), which assumes the R² "
+        "signal is spread proportionally across whole-plot and sub-plot strata. "
+        "If the signal comes mainly from whole-plot (HTC) factors the power "
+        "estimate can be optimistic; validate by simulation.",
+        UserWarning,
+        stacklevel=2,
+    )
 
     n, p = X.shape
     n_wp = Z.shape[1]

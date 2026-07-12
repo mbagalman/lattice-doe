@@ -560,9 +560,15 @@ def contrast_power_sp(
         λ = δ' [L M⁻¹ L']⁻¹ δ / σ²_sp
 
     Denominator df is computed per-contrast according to df_method.
-    The overall power = min power across all contrast rows (same convention
-    as the OLS version for multi-row L).
+    Multi-row L is tested with a joint Wald F-test (df1 = rank(L)), mirroring
+    the OLS ``contrast_power``, whenever all rows share one denominator df.
+    Only when rows span both strata under df_method="auto" does the function
+    fall back to the minimum per-row 1-df power (a conservative bound).
     """
+    # [Corrected 2026-07-12, SR-1: this spec originally said "overall power =
+    #  min power across all contrast rows (same convention as the OLS version)",
+    #  which mischaracterized the OLS behavior — contrast_power computes a joint
+    #  q-df Wald F-test. The implementation now matches the text above.]
 
 
 def global_r2_power_sp(
