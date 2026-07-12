@@ -248,3 +248,80 @@ class TestSR7PowerSurfaceFixedN:
         )
         assert res["fixed_n"] is None
         assert res["power_grid"].shape[1] == 3
+
+
+# ---------------------------------------------------------------------------
+# SR-6: the n-search may exceed the candidate pool when pre-allocation
+# provides replication
+# ---------------------------------------------------------------------------
+
+class TestSR6SearchBeyondCells:
+    """SR-6 regression: pure-categorical spaces capped the n-search at the
+    number of distinct cells, so power-assured replicated designs were
+    unreachable. With preallocate_categorical=True the cap is lifted and
+    allocation counts become replication counts."""
+
+    def test_categorical_search_exceeds_cell_count(self):
+        factors = {"A": ["a1", "a2"], "B": ["b1", "b2"]}  # 4 cells
+        power_cfg = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.75]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=100,
+        )
+        design_opts = DesignOptions(
+            criterion="I", starts=2, max_iter=50, random_state=0,
+            candidate_points=100, preallocate_categorical=True,
+        )
+        result = find_optimal_design(
+            formula="~ A + B", factors=factors,
+            power_cfg=power_cfg, design_opts=design_opts,
+        )
+        rep = result["report"]
+        d = result["design_df"]
+        assert rep["n"] > 4, "search should exceed the 4 distinct cells"
+        assert len(d) == rep["n"], "design must have exactly n rows"
+        assert rep["achieved_power"] + 1e-3 >= 0.8, "target must be achieved"
+        # Replication must be visible: at least one repeated run
+        assert d.groupby(["A", "B"]).size().max() > 1
+
+
+# ---------------------------------------------------------------------------
+# SR-25: an achiever must replace a non-achiever bisection fallback
+# ---------------------------------------------------------------------------
+
+class TestSR25AchieverAfterFailingProbe:
+    """SR-25 regression (found while verifying SR-6): the achiever branch of
+    every bisection loop compared n against the current `best` entry's n
+    without checking whether that entry was an achiever. After a failing
+    first probe (recorded as the best NON-achiever), every later achiever
+    had a larger n and was discarded -- the search then reported
+    'did not converge' with a below-target design even though it had probed
+    achievers. Triggered whenever the required n exceeds the first bisection
+    midpoint (i.e. tight max_n relative to the required n)."""
+
+    def test_achiever_found_after_failing_first_probe(self):
+        factors = {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)}
+        # Calibrated so the first probe at (4+61)//2 = 32 fails (~0.66) and
+        # larger n achieve (~0.85 at 54): required n sits between them.
+        power_cfg = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.52]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=60,
+        )
+        design_opts = DesignOptions(
+            criterion="I", starts=2, max_iter=50, random_state=0,
+            candidate_points=200,
+        )
+        trace = []
+        result = find_optimal_design(
+            formula="~ 1 + x1 + x2", factors=factors,
+            power_cfg=power_cfg, design_opts=design_opts,
+            progress_callback=lambda r: trace.append(
+                (r["n"], r["achieved_power"])
+            ),
+        )
+        rep = result["report"]
+        assert trace[0][1] + 1e-3 < 0.8, "setup: first probe must fail"
+        achievers = [t for t in trace if t[1] + 1e-3 >= 0.8]
+        assert achievers, "setup: at least one probe must achieve"
+        assert rep["achieved_power"] + 1e-3 >= 0.8, (
+            "the search discarded its achievers (SR-25)"
+        )

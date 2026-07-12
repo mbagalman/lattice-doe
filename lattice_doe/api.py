@@ -510,7 +510,12 @@ def find_optimal_design(
                 except Exception as e:
                     warnings.warn(f"Progress callback failed: {e}", RuntimeWarning)
             if ev["report"]["achieved_power"] + tol >= target:
-                if best is None or n_wp <= best["_n_wp"]:
+                # Achiever replaces any non-achiever fallback (SR-25).
+                _best_achieves = (
+                    best is not None
+                    and best["report"]["achieved_power"] + tol >= target
+                )
+                if not _best_achieves or n_wp <= best["_n_wp"]:
                     best = ev
                 hi_wp = n_wp
             else:
@@ -610,8 +615,19 @@ def find_optimal_design(
     # they support up to n_blocks * n_cand total runs; unblocked designs draw
     # all n runs from the pool at once.
     _n_cand = len(cand)
-    _n_ceiling = _n_cand * design_opts.n_blocks if is_blocked else _n_cand
-    _capped_max_n = _capped_search_max_n(power_cfg.max_n, _n_ceiling, lo)
+    _prealloc_replicates = (
+        design_opts.preallocate_categorical
+        and not is_blocked
+        and any(not pd.api.types.is_numeric_dtype(cand[c]) for c in cand.columns)
+    )
+    if _prealloc_replicates:
+        # Pre-allocation treats per-cell allocation counts as replication
+        # counts (SR-6), so the reachable n is not bounded by the candidate
+        # pool — exact optimal designs replicate categorical cells.
+        _capped_max_n = power_cfg.max_n
+    else:
+        _n_ceiling = _n_cand * design_opts.n_blocks if is_blocked else _n_cand
+        _capped_max_n = _capped_search_max_n(power_cfg.max_n, _n_ceiling, lo)
     hi = _capped_max_n + 1  # exclusive sentinel — hi is only updated to evaluated achievers
 
     best: Optional[Dict[str, Any]] = None
@@ -822,7 +838,15 @@ def find_optimal_design(
         # Bisection step: if power achieved, record minimum-n achiever and search lower;
         # otherwise record best non-achiever as fallback and search higher.
         if power + tol >= target:
-            if best is None or int(n) <= int(best["report"]["n"]):
+            # An achiever always replaces a non-achiever fallback (SR-25:
+            # comparing n against a non-achiever's n discarded every achiever
+            # found after an initial failing probe); among achievers, keep
+            # the smallest n.
+            _best_achieves = (
+                best is not None
+                and best["report"]["achieved_power"] + tol >= target
+            )
+            if not _best_achieves or int(n) <= int(best["report"]["n"]):
                 best = {
                     "design_df": design_df,
                     "buckets_df": buckets,
@@ -1274,7 +1298,11 @@ def find_multiresponse_design(
                 lo_wp = n_wp + 1
                 continue
             if ev["_combined"] + tol >= target:
-                if best is None or n_wp <= best["_n_wp"]:
+                # Achiever replaces any non-achiever fallback (SR-25).
+                _best_achieves = (
+                    best is not None and best["_combined"] + tol >= target
+                )
+                if not _best_achieves or n_wp <= best["_n_wp"]:
                     best = ev
                 hi_wp = n_wp
             else:
@@ -1427,7 +1455,11 @@ def find_multiresponse_design(
                 continue
             ev_c["_n"] = n_c
             if ev_c["_combined"] + tol >= target:
-                if best_c is None or n_c <= best_c["_n"]:
+                # Achiever replaces any non-achiever fallback (SR-25).
+                _best_achieves_c = (
+                    best_c is not None and best_c["_combined"] + tol >= target
+                )
+                if not _best_achieves_c or n_c <= best_c["_n"]:
                     best_c = ev_c
                 hi_c = n_c
             else:
@@ -1597,7 +1629,11 @@ def find_multiresponse_design(
             continue
         ev["_n"] = n
         if ev["_combined"] + tol >= target:
-            if best is None or n <= best["_n"]:
+            # Achiever replaces any non-achiever fallback (SR-25).
+            _best_achieves = (
+                best is not None and best["_combined"] + tol >= target
+            )
+            if not _best_achieves or n <= best["_n"]:
                 best = ev
             hi = n
         else:

@@ -696,12 +696,22 @@ def _preallocated_design(
     """Run pre-allocation then per-cell Fedorov exchange.
 
     Identifies categorical columns (non-numeric dtype) in *cand*, calls
-    ``i_optimal_allocation`` on the candidate set to determine integer run
+    the Wynn allocation on the candidate set to determine integer run
     counts per cell, then runs a serial ``_optimal_indices_from_X`` search
     within each non-empty cell stratum.
 
+    Allocation counts are honored exactly (SR-6): when a cell's allocation
+    exceeds its number of distinct candidate rows, the surplus runs are
+    **replicates** — exact optimal designs repeat design points — assigned
+    round-robin across the cell's selected rows (exact for single-row cells,
+    e.g. pure-categorical spaces, and balanced otherwise).  The returned
+    design therefore always has exactly *n* rows, and ``selected_idx`` may
+    contain repeated indices.
+
     Falls back to the standard single-pool search when no categorical columns
-    are present in *cand*.
+    are present in *cand*, or when *n* is too small to give every cell its
+    ``alloc_min_per_cell`` minimum (the plain search then selects a subset of
+    cells, which keeps small-n probes of an n-search feasible).
     """
     # Detect categorical columns (non-numeric dtype)
     cat_cols = [c for c in cand.columns if not pd.api.types.is_numeric_dtype(cand[c])]
@@ -727,6 +737,20 @@ def _preallocated_design(
             f"cat_cells_cap ({cat_cells_cap}). Reduce categorical levels or "
             "raise DesignOptions.cat_cells_cap."
         )
+
+    # Too few runs to give every cell its minimum: allocation is infeasible,
+    # but a design selecting a subset of cells still is. Fall back to the
+    # plain search so small-n probes (e.g. during the n-search bisection)
+    # work instead of raising from the allocation feasibility guard.
+    if n < k * max(1, alloc_min_per_cell) and n <= len(cand):
+        X_cand, p_names = build_model_matrix(formula, cand)
+        selected_idx = _optimal_indices_from_X(
+            X_cand, n,
+            criterion=criterion, algo=algo, n_start=n_start,
+            max_iter=max_iter, random_state=random_state, jitter=jitter,
+        )
+        design_df = cand.iloc[selected_idx].reset_index(drop=True)
+        return design_df, selected_idx, p_names
 
     # Represent each cell by its centroid (midpoint of any continuous columns)
     cont_cols = [c for c in cand.columns if pd.api.types.is_numeric_dtype(cand[c])]
@@ -783,20 +807,30 @@ def _preallocated_design(
         if len(cell_positions) == 0:
             continue
 
-        if n_cell > len(cell_positions):
-            # Allocated more than available — clamp silently
-            n_cell = len(cell_positions)
+        n_avail = len(cell_positions)
+        n_distinct = min(n_cell, n_avail)
 
-        # Extract per-cell model matrix (using positional index slice)
-        X_cell = X_cand_full[cell_positions, :]
+        if n_distinct == n_avail:
+            # Every candidate row in the cell is used — no search needed.
+            local_idx = np.arange(n_avail)
+        else:
+            # Extract per-cell model matrix (using positional index slice)
+            X_cell = X_cand_full[cell_positions, :]
+            local_idx = _optimal_indices_from_X(
+                X_cell, n_distinct,
+                criterion=criterion, algo=algo, n_start=n_start,
+                max_iter=max_iter, random_state=cell_random_state, jitter=jitter,
+            )
 
-        local_idx = _optimal_indices_from_X(
-            X_cell, n_cell,
-            criterion=criterion, algo=algo, n_start=n_start,
-            max_iter=max_iter, random_state=cell_random_state, jitter=jitter,
-        )
-        # Map local indices back to global positional indices in cand
-        all_global_idx.append(cell_positions[local_idx])
+        chosen = cell_positions[local_idx]
+        if n_cell > n_distinct:
+            # The allocation exceeds the cell's distinct candidate rows: the
+            # surplus runs are replicates (exact optimal designs repeat
+            # design points). Round-robin over the selected rows — exact for
+            # single-row cells, balanced otherwise (SR-6; formerly a silent
+            # clamp that returned fewer rows than requested).
+            chosen = np.resize(chosen, n_cell)
+        all_global_idx.append(chosen)
         cell_random_state += 1337  # decorrelate seeds between cells
 
     if not all_global_idx:
@@ -921,11 +955,21 @@ def build_i_opt_design_with_idx(
 
     n_cand = len(cand)
     if n > n_cand:
+        _has_cat = any(
+            not pd.api.types.is_numeric_dtype(cand[c]) for c in cand.columns
+        )
+        _hint = (
+            " For categorical factor spaces, set preallocate_categorical=True "
+            "to allow replicated runs (n may then exceed the number of "
+            "distinct cells)."
+            if _has_cat
+            else ""
+        )
         raise ValueError(
             f"Requested design size n={n} exceeds the candidate set size "
             f"n_cand={n_cand}. Increase candidate_points (or disable "
             "auto_candidate and set a larger value) to generate a bigger "
-            "candidate pool, or reduce the target sample size."
+            f"candidate pool, or reduce the target sample size.{_hint}"
         )
     estimated_bytes = n_cand * p * 8  # 8 bytes per float64
     limit_bytes = memory_limit_gb * (1024**3)

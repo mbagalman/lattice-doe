@@ -582,3 +582,72 @@ class TestSR12CompoundDGain:
         idx = build_compound_design(cands, weights, 10, criterion="I",
                                     n_start=3, random_state=1)
         assert np.asarray(idx).shape == (10,)
+
+
+# ---------------------------------------------------------------------------
+# SR-6: pre-allocation counts are replication counts, never a silent shrink
+# ---------------------------------------------------------------------------
+
+class TestSR6PreallocationReplication:
+    """SR-6 regression: with preallocate_categorical=True, a cell whose
+    allocation exceeded its distinct candidate rows was silently clamped --
+    a pure-categorical 2x2 request for n=12 returned a 4-row design. Surplus
+    allocation is now fulfilled by replicating the cell's selected rows
+    (exact optimal designs replicate design points)."""
+
+    def _cat_cand(self):
+        from lattice_doe.candidate import build_candidate
+        return build_candidate({"A": ["a1", "a2"], "B": ["b1", "b2"]}, 100, seed=0)
+
+    def test_pure_categorical_returns_requested_n(self):
+        from lattice_doe.iopt_search import build_i_opt_design_with_idx
+        cand = self._cat_cand()
+        df, idx, _ = build_i_opt_design_with_idx(
+            cand, "~ A + B", n=12, preallocate_categorical=True, random_state=0,
+        )
+        assert len(df) == 12 and len(idx) == 12
+        counts = df.groupby(["A", "B"]).size()
+        assert counts.sum() == 12
+        # Balanced allocation is I-optimal for a 2x2 main-effects model.
+        assert counts.min() >= 3 and counts.max() <= 3
+
+    def test_small_n_falls_back_to_subset_search(self):
+        """n below cells*min_per_cell must select a subset of cells instead of
+        raising from the allocation feasibility guard (keeps n-search probes
+        at small n working)."""
+        from lattice_doe.iopt_search import build_i_opt_design_with_idx
+        cand = self._cat_cand()
+        df, idx, _ = build_i_opt_design_with_idx(
+            cand, "~ A + B", n=3, preallocate_categorical=True, random_state=0,
+        )
+        assert len(df) == 3
+        assert len(df.drop_duplicates()) == 3  # distinct cells, no replication
+
+    def test_alloc_max_per_cell_respected_under_replication(self):
+        from lattice_doe.iopt_search import build_i_opt_design_with_idx
+        cand = self._cat_cand()
+        df, _, _ = build_i_opt_design_with_idx(
+            cand, "~ A + B", n=12, preallocate_categorical=True,
+            alloc_max_per_cell=4, random_state=0,
+        )
+        assert len(df) == 12
+        assert df.groupby(["A", "B"]).size().max() <= 4
+
+    def test_mixed_design_replicates_beyond_cell_pool(self):
+        """A mixed factor space whose per-cell candidate pools are smaller
+        than the allocation must replicate rather than shrink."""
+        from lattice_doe.candidate import build_candidate
+        from lattice_doe.iopt_search import build_i_opt_design_with_idx
+        cand = build_candidate({"C": ["x", "y", "z"], "t": (0.0, 1.0)}, 9, seed=1)
+        assert len(cand) == 9  # 3 rows per cell
+        df, _, _ = build_i_opt_design_with_idx(
+            cand, "~ C + t", n=15, preallocate_categorical=True, random_state=0,
+        )
+        assert len(df) == 15
+        assert df.groupby("C").size().min() >= 4  # every cell got replicates
+
+    def test_non_prealloc_error_hints_preallocation(self):
+        from lattice_doe.iopt_search import build_i_opt_design_with_idx
+        cand = self._cat_cand()
+        with pytest.raises(ValueError, match="preallocate_categorical=True"):
+            build_i_opt_design_with_idx(cand, "~ A + B", n=12, random_state=0)
