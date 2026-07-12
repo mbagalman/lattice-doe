@@ -52,7 +52,7 @@ share/python-wheels/
 .vscode/
 
 # Claude Code local settings
-.claude/settings.local.json
+.claude/
 CLAUDE.md
 
 # OS
