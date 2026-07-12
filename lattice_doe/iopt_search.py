@@ -1707,7 +1707,14 @@ def _compound_fedorov_single(
 
                 if criterion == "D":
                     v_t_prime_k = pk["lev_non_k"] + w_s_all_k * w_s_all_k / denom_s_k
-                    gains_k = denom_s_k * (1.0 + v_t_prime_k) - 1.0
+                    # Exact per-formula improvement of −logdet is log(det ratio).
+                    # (ratio − 1 is only a first-order surrogate: it is a valid
+                    # monotone transform for a SINGLE formula, but weight-summed
+                    # across formulas it can disagree in sign with the true
+                    # compound delta, accepting score-worsening swaps and
+                    # oscillating forever — SR-12.)
+                    det_ratio_k = denom_s_k * (1.0 + v_t_prime_k)
+                    gains_k = np.log(np.maximum(det_ratio_k, 1e-300))
                 else:  # I
                     Mcand_hs_k = pk["Mcand_k"] @ h_s_k                               # (p_k,)
                     trace_I_minus_k = (

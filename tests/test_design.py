@@ -492,3 +492,93 @@ class TestCR19JitterInParallelWorker:
         )
         assert len(design_df) == 10
         assert len(sel_idx) == 10
+
+
+# ---------------------------------------------------------------------------
+# SR-12: compound-D exchange gain must be exact (log det-ratio, not ratio-1)
+# ---------------------------------------------------------------------------
+
+class TestSR12CompoundDGain:
+    """SR-12 regression: the compound-D exchange summed w_k*(det_ratio_k - 1)
+    while minimizing sum(w_k * -logdet_k). The surrogate can disagree in sign
+    with the true compound delta (2,647 of 25,000 scanned swaps in the audit),
+    so the exchange accepted score-worsening swaps and oscillated between two
+    states forever. The gain is now sum(w_k * log(det_ratio_k)) -- exact."""
+
+    def _fixture(self):
+        rng = np.random.default_rng(0)
+        n_cand = 40
+        base = rng.uniform(-1, 1, (n_cand, 3))
+        X1 = np.column_stack([np.ones(n_cand), base])                       # p=4
+        X2 = np.column_stack([np.ones(n_cand), base[:, :2], base[:, :2]**2])
+        return [X1, X2], [0.6, 0.4], rng
+
+    @staticmethod
+    def _compound_d_score(cands, weights, idx, jitter=1e-8):
+        s = 0.0
+        for Xc, w in zip(cands, weights):
+            M = Xc[idx].T @ Xc[idx] + jitter * np.eye(Xc.shape[1])
+            sign, ld = np.linalg.slogdet(M)
+            s += w * (-ld if sign > 0 else np.inf)
+        return s / sum(weights)
+
+    def test_gains_match_true_compound_deltas(self):
+        """For every possible swap of a random design, the update-formula gain
+        must equal the brute-force compound-score improvement (and therefore
+        agree in sign)."""
+        cands, weights, rng = self._fixture()
+        n = 10
+        jitter = 1e-8
+        w_norm = [w / sum(weights) for w in weights]
+        idx = rng.choice(cands[0].shape[0], size=n, replace=False)
+        non = np.setdiff1d(np.arange(cands[0].shape[0]), idx)
+        base_score = self._compound_d_score(cands, weights, idx)
+        for s_pos, s in enumerate(idx):
+            for t in non:
+                idx2 = idx.copy()
+                idx2[s_pos] = t
+                true_delta = base_score - self._compound_d_score(cands, weights, idx2)
+                gain = 0.0
+                for Xc, w in zip(cands, w_norm):
+                    M = Xc[idx].T @ Xc[idx] + jitter * np.eye(Xc.shape[1])
+                    Mi = np.linalg.inv(M)
+                    xs, xt = Xc[s], Xc[t]
+                    denom = 1.0 - xs @ Mi @ xs
+                    wst = xt @ Mi @ xs
+                    vt = xt @ Mi @ xt + wst**2 / denom
+                    gain += w * np.log(max(denom * (1.0 + vt), 1e-300))
+                assert gain == pytest.approx(true_delta, abs=1e-10)
+
+    def test_convergence_is_max_iter_parity_independent(self):
+        """Before the fix the exchange oscillated between two states and the
+        result depended on max_iter parity."""
+        from lattice_doe.iopt_search import _compound_fedorov_single
+        cands, weights, _ = self._fixture()
+        i_a = _compound_fedorov_single(cands, weights, 10, criterion="D",
+                                       max_iter=200, seed=7)
+        i_b = _compound_fedorov_single(cands, weights, 10, criterion="D",
+                                       max_iter=201, seed=7)
+        assert sorted(i_a.tolist()) == sorted(i_b.tolist())
+
+    def test_compound_d_beats_random_designs(self):
+        from lattice_doe.iopt_search import build_compound_design
+        cands, weights, rng = self._fixture()
+        idx = build_compound_design(cands, weights, 10, criterion="D",
+                                    n_start=3, random_state=1)
+        score = self._compound_d_score(cands, weights, np.asarray(idx))
+        rand_best = min(
+            self._compound_d_score(
+                cands, weights,
+                rng.choice(cands[0].shape[0], size=10, replace=False),
+            )
+            for _ in range(100)
+        )
+        assert score <= rand_best + 1e-9
+
+    def test_compound_i_regression(self):
+        """Compound-I gains were already exact; the path must keep working."""
+        from lattice_doe.iopt_search import build_compound_design
+        cands, weights, _ = self._fixture()
+        idx = build_compound_design(cands, weights, 10, criterion="I",
+                                    n_start=3, random_state=1)
+        assert np.asarray(idx).shape == (10,)
