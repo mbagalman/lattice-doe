@@ -1737,6 +1737,71 @@ class TestSplitPlotAPI:
 
 
 # ===========================================================================
+# TestSR5CrossStratumConstraints — WP × SP combinations respect constraints
+# ===========================================================================
+
+class TestSR5CrossStratumConstraints:
+    """SR-5 regression: cross-stratum constraints (referencing both HTC and
+    ETC factors) must hold in the final design, not just in the initial
+    candidate set. The exchange recombines WP and SP pool values, so every
+    proposed combination has to pass the full-row constraint."""
+
+    def test_cross_stratum_constraint_unit_level(self):
+        """Direct build_split_plot_design call: H + E <= 1 holds in the design."""
+        factors = {"H": (0.0, 1.0), "E": (0.0, 1.0)}
+        cons = lambda row: row["H"] + row["E"] <= 1.0
+        cand = build_split_plot_candidate(
+            factors, htc_factors=["H"], n_whole_plots=4, subplots_per_wp=3,
+            random_state=0, constraint_func=cons,
+        )
+        design_df, X = build_split_plot_design(
+            cand, "~ 1 + H + E", n_wp=4, subplots_per_wp=3,
+            htc_factors=["H"], eta=1.0, factors=factors,
+            starts=2, max_iter=20, random_state=0,
+            n_wp_cand=20, n_sp_cand=20, constraint_func=cons,
+        )
+        viol = int((design_df["H"] + design_df["E"] > 1.0 + 1e-9).sum())
+        assert viol == 0, f"SR-5: {viol} rows violate H + E <= 1"
+        # The feasibility mask must not break the whole-plot nesting invariant
+        for _, grp in design_df.groupby("__wp_id__"):
+            assert grp["H"].nunique() == 1
+
+    def test_cross_stratum_constraint_expr_api_level(self):
+        """find_optimal_design: constraint_expr spanning HTC (A) and ETC (C)."""
+        opts = DesignOptions(
+            split_plot=SplitPlotOptions(
+                htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0,
+            ),
+            starts=2, max_iter=10, random_state=42, candidate_points=200,
+            constraint_expr="A + C <= 0.5",
+        )
+        result = find_optimal_design(
+            _SP7_FORMULA, _SP7_FACTORS, _sp7_contrast_cfg(), design_opts=opts,
+        )
+        df = result["design_df"]
+        worst = (df["A"] + df["C"]).max()
+        assert worst <= 0.5 + 1e-9, (
+            f"SR-5: constraint 'A + C <= 0.5' violated: max A + C = {worst:.4f}"
+        )
+
+    def test_infeasible_constraint_raises(self):
+        """A constraint eliminating every WP × SP combination raises clearly."""
+        factors = {"H": (0.0, 1.0), "E": (0.0, 1.0)}
+        cand = build_split_plot_candidate(
+            factors, htc_factors=["H"], n_whole_plots=3, subplots_per_wp=2,
+            random_state=0,
+        )
+        with pytest.raises(ValueError, match="eliminates every"):
+            build_split_plot_design(
+                cand, "~ 1 + H + E", n_wp=3, subplots_per_wp=2,
+                htc_factors=["H"], eta=1.0, factors=factors,
+                starts=1, max_iter=5, random_state=0,
+                n_wp_cand=10, n_sp_cand=10,
+                constraint_func=lambda row: row["H"] + row["E"] > 5.0,
+            )
+
+
+# ===========================================================================
 # TestCR25HtcColMapping — WP df correctly applied to WP contrasts in auto mode
 # ===========================================================================
 

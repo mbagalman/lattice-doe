@@ -1324,15 +1324,15 @@ def build_split_plot_design(
     # Wrap constraint_func to gracefully skip evaluation when a row is missing
     # columns referenced by the constraint (e.g. a cross-stratum constraint
     # evaluated on an HTC-only or ETC-only pool row).  Missing columns produce
-    # a KeyError inside the user function; we treat those rows as feasible so
-    # the full-row check at build_split_plot_candidate time remains authoritative.
+    # a KeyError inside the user function; we treat those rows as feasible here
+    # because the authoritative gate is the full-row feasibility mask applied
+    # to every WP × SP combination below (SR-5).
     def _pool_constraint(row: "pd.Series") -> bool:
         try:
             return bool(constraint_func(row))
         except (KeyError, TypeError, ValueError, NameError):
             # Cross-stratum constraints reference columns absent from this pool;
-            # treat as feasible — the full-row check in build_split_plot_candidate
-            # is the authoritative gate.
+            # treat as feasible — the combined-row mask below enforces them.
             return True
 
     pool_cfunc = _pool_constraint if constraint_func is not None else None
@@ -1388,9 +1388,36 @@ def build_split_plot_design(
     # Reshape: C-order → X_combo_3d[k, m] == X_combo[k * n_sp_pool + m]
     X_combo_3d = X_combo.reshape(n_wp_pool, n_sp_pool, p)
 
-    # Candidate moment matrix for I-criterion (fixed throughout)
-    Mcand = X_combo.T @ X_combo
-    N_cand_total = n_wp_pool * n_sp_pool
+    # --- Full-row feasibility mask over WP × SP combinations (SR-5) ---
+    # The stratum pools above can only enforce same-stratum constraints; a
+    # cross-stratum constraint (e.g. "H + E <= 1") must be checked on the
+    # combined row. Every combination the exchange can propose is a row of
+    # combo_df, so masking here guarantees the returned design is feasible.
+    if constraint_func is not None:
+        _feas_flat = combo_df.apply(
+            lambda _row: bool(constraint_func(_row)), axis=1
+        ).to_numpy()
+        feasible = _feas_flat.reshape(n_wp_pool, n_sp_pool)
+        wp_feasible = feasible.any(axis=1)  # WP candidates with ≥1 feasible SP
+        if not wp_feasible.any():
+            raise ValueError(
+                "constraint_func eliminates every WP × SP combination in the "
+                "split-plot candidate pools; the constrained design space is "
+                "empty. Relax the constraint or enlarge the candidate pools "
+                "(n_wp_cand / n_sp_cand)."
+            )
+    else:
+        feasible = np.ones((n_wp_pool, n_sp_pool), dtype=bool)
+        wp_feasible = np.ones(n_wp_pool, dtype=bool)
+    feasible_wp_idx = np.flatnonzero(wp_feasible)
+    feasible_sp_for_wp = [np.flatnonzero(feasible[k]) for k in range(n_wp_pool)]
+
+    # Candidate moment matrix for I-criterion: feasible combinations only,
+    # so the I-criterion averages prediction variance over the reachable
+    # design region rather than over infeasible points.
+    _feas_rows = feasible.reshape(-1)
+    Mcand = X_combo[_feas_rows].T @ X_combo[_feas_rows]
+    N_cand_total = int(_feas_rows.sum())
 
     # --- Multi-start two-phase exchange ---
     rng = np.random.default_rng(random_state)
@@ -1399,13 +1426,17 @@ def build_split_plot_design(
     best_X: Optional[np.ndarray] = None
 
     for _start in range(max(1, starts)):
-        # Random initialisation: draw WP and SP pool indices
-        wp_slots = rng.integers(0, n_wp_pool, size=n_wp)
-        sp_runs = (
-            rng.integers(0, n_sp_pool, size=n_total)
-            if has_etc
-            else np.zeros(n_total, dtype=np.intp)
-        )
+        # Random initialisation: draw WP and SP pool indices from the
+        # feasible combinations only (each run's SP index must be feasible
+        # for its whole plot's WP candidate).
+        wp_slots = feasible_wp_idx[
+            rng.integers(0, len(feasible_wp_idx), size=n_wp)
+        ]
+        sp_runs = np.zeros(n_total, dtype=np.intp)
+        if has_etc:
+            for r in range(n_total):
+                _opts = feasible_sp_for_wp[int(wp_slots[wp_slot_of_run[r]])]
+                sp_runs[r] = int(_opts[rng.integers(0, len(_opts))])
 
         # Initial model matrix from pool indices
         X_current = np.vstack([
@@ -1430,6 +1461,10 @@ def build_split_plot_design(
 
                 for k in range(n_wp_pool):
                     if k == wp_slots[i]:
+                        continue
+                    # Feasibility: candidate k must be compatible with every
+                    # current SP assignment in this whole plot.
+                    if not feasible[k, sp_runs[wp_rows]].all():
                         continue
                     # Propose: replace all sub-plots in WP i with WP candidate k
                     X_prop = X_current.copy()
@@ -1458,7 +1493,7 @@ def build_split_plot_design(
                     best_m = int(sp_runs[r])
                     best_m_score = current_score
 
-                    for m in range(n_sp_pool):
+                    for m in feasible_sp_for_wp[int(wp_slots[wp_i])]:
                         if m == sp_runs[r]:
                             continue
                         X_prop = X_current.copy()
