@@ -439,13 +439,24 @@ def find_optimal_design(
                 )
                 df_num_ = int(np.linalg.matrix_rank(power_cfg.L))
             else:
-                pr_ = global_r2_power_sp(
-                    power_cfg.r2_target, X_, Z_, sigma_sp=sigma_sp,
-                    eta=sp_opts.eta, alpha=power_cfg.alpha,
-                    df_method=sp_opts.df_method,
-                    lambda_mode=power_cfg.lambda_mode,
-                    jitter=design_opts.xtx_jitter,
+                _, _p_names = build_model_matrix(formula, design_df_)
+                _all_fcols = [c for c in design_df_.columns if c != "__wp_id__"]
+                _htc_cols = htc_factor_cols_from_names(
+                    _p_names, sp_opts.htc_factors, _all_fcols,
                 )
+                try:
+                    pr_ = global_r2_power_sp(
+                        power_cfg.r2_target, X_, Z_, sigma_sp=sigma_sp,
+                        eta=sp_opts.eta, alpha=power_cfg.alpha,
+                        df_method=sp_opts.df_method,
+                        lambda_mode=power_cfg.lambda_mode,
+                        jitter=design_opts.xtx_jitter,
+                        htc_factor_cols=_htc_cols,
+                    )
+                except ValueError:
+                    # Sub-plot stratum df <= 0 at this n_wp: the design cannot
+                    # support the test — treat as infeasible and search higher.
+                    return None
                 df_num_ = _r2_df_num(X_)
             if np.isnan(pr_.power):
                 return None

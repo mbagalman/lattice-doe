@@ -2841,3 +2841,68 @@ class TestSP10PropertyBased:
             f"n_wp={n_wp}, s={s}, is_wp={is_wp}: "
             f"conservative={df_cons[0]} > sp_only={df_sp[0]}"
         )
+
+
+# ===========================================================================
+# TestSR11SubplotDf — global R² split-plot denominator df
+# ===========================================================================
+
+class TestSR11SubplotDf:
+    """SR-11 regression: global_r2_power_sp used df_denom = n − n_wp,
+    ignoring sub-plot model parameters (anti-conservative), and its max(1,·)
+    clamp made the df guard dead code. The df is now the sub-plot stratum df
+    consistent with split_plot_df_denom, and df ≤ 0 raises."""
+
+    def _audit_design(self):
+        rng = np.random.default_rng(1)
+        n, n_wp, s = 24, 6, 4
+        Z = build_whole_plot_indicator(n, n_wp, s)
+        A = np.repeat(rng.uniform(-1, 1, n_wp), s)
+        E = rng.uniform(-1, 1, (n, 8))
+        X = np.column_stack([np.ones(n), A, E])  # p=10, rank(X_wp)=2
+        return X, Z
+
+    def test_df_consistent_with_split_plot_df_denom(self):
+        """Power must be computed with the same sub-plot df that
+        split_plot_df_denom reports."""
+        from scipy.stats import f as f_dist, ncf as ncf_dist
+        from lattice_doe.power import _r2_df_num
+
+        X, Z = self._audit_design()
+        htc = [0, 1]
+        res = global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05,
+                                 htc_factor_cols=htc)
+        df_sp = int(split_plot_df_denom(
+            X, Z, np.array([False]), "sp_only", htc,
+        )[0])
+        assert df_sp == 10  # n − n_wp − (rank X − rank X_wp) = 24 − 6 − 8
+        df_num = _r2_df_num(X)
+        Fcrit = f_dist.isf(0.05, df_num, df_sp)
+        expected = float(1.0 - ncf_dist.cdf(Fcrit, df_num, df_sp, res.lam))
+        assert res.power == pytest.approx(expected, abs=1e-12)
+        # The audit's corrected value for this configuration
+        assert res.power == pytest.approx(0.2404, abs=5e-4)
+
+    def test_fallback_without_htc_cols_is_conservative(self):
+        X, Z = self._audit_design()
+        with_htc = global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0,
+                                      alpha=0.05, htc_factor_cols=[0, 1])
+        fallback = global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0,
+                                      alpha=0.05)
+        assert fallback.power <= with_htc.power
+
+    def test_degenerate_z_raises_instead_of_clamping(self):
+        """n_wp = n leaves no sub-plot df; previously clamped to df=1 and
+        returned a power value."""
+        X, Z = self._audit_design()
+        Z_deg = np.eye(X.shape[0])
+        with pytest.raises(ValueError, match="Sub-plot denominator df"):
+            global_r2_power_sp(0.3, X, Z_deg, sigma_sp=1.0, eta=1.0,
+                               alpha=0.05, htc_factor_cols=[0, 1])
+
+    def test_split_plot_rank_wp_helper(self):
+        from lattice_doe.split_plot import split_plot_rank_wp
+        X, Z = self._audit_design()
+        assert split_plot_rank_wp(X, Z, [0, 1]) == 2
+        assert split_plot_rank_wp(X, Z, None) == 1
+        assert split_plot_rank_wp(X, Z, []) == 1

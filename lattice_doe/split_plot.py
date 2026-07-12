@@ -271,6 +271,48 @@ def classify_contrasts(
 
 
 # ---------------------------------------------------------------------------
+# Whole-plot model sub-matrix rank
+# ---------------------------------------------------------------------------
+
+def split_plot_rank_wp(
+    X: np.ndarray,
+    Z: np.ndarray,
+    htc_factor_cols: Optional[List[int]] = None,
+) -> int:
+    """Rank of the whole-plot model sub-matrix X_wp.
+
+    X_wp is X restricted to the HTC factor columns, with one representative
+    row per whole plot.  This rank enters both stratum df formulas:
+    ``df_wp = n_wp − rank(X_wp)`` and
+    ``df_sp = n − n_wp − (rank(X) − rank(X_wp))``.
+
+    When *htc_factor_cols* is ``None`` or empty, returns the approximation 1
+    (intercept only) — conservative for sub-plot df, anti-conservative for
+    whole-plot df.
+
+    Parameters
+    ----------
+    X : ndarray, shape (n, p)
+        Full model matrix.
+    Z : ndarray, shape (n, n_wp)
+        Whole-plot indicator matrix.
+    htc_factor_cols : list of int or None
+        Column indices of HTC factors in X (intercept included if desired).
+
+    Returns
+    -------
+    int
+        rank(X_wp), or 1 when no HTC column mapping is available.
+    """
+    if htc_factor_cols is None or len(htc_factor_cols) == 0:
+        return 1
+    n_wp = Z.shape[1]
+    wp_rep_rows = [int(np.where(Z[:, k] > 0)[0][0]) for k in range(n_wp)]
+    X_wp = X[np.ix_(wp_rep_rows, list(htc_factor_cols))]
+    return int(np.linalg.matrix_rank(X_wp))
+
+
+# ---------------------------------------------------------------------------
 # Per-contrast denominator degrees of freedom
 # ---------------------------------------------------------------------------
 
@@ -329,16 +371,7 @@ def split_plot_df_denom(
 
     n_total, n_wp = Z.shape
     rank_X = int(np.linalg.matrix_rank(X))
-
-    # Compute rank(X_wp) — the rank of the WP-factor model sub-matrix.
-    if htc_factor_cols is not None and len(htc_factor_cols) > 0:
-        # One representative row per WP (first row belonging to each WP).
-        wp_rep_rows = [int(np.where(Z[:, k] > 0)[0][0]) for k in range(n_wp)]
-        X_wp = X[np.ix_(wp_rep_rows, list(htc_factor_cols))]
-        rank_X_wp = int(np.linalg.matrix_rank(X_wp))
-    else:
-        # Fallback: approximate rank_X_wp as 1 (intercept only).
-        rank_X_wp = 1
+    rank_X_wp = split_plot_rank_wp(X, Z, htc_factor_cols)
 
     df_wp = max(1, n_wp - rank_X_wp)
     df_sp = max(1, n_total - n_wp - (rank_X - rank_X_wp))
@@ -364,6 +397,7 @@ __all__ = [
     "build_split_plot_covariance_inv",
     "gls_information_matrix",
     "classify_contrasts",
+    "split_plot_rank_wp",
     "split_plot_df_denom",
     "htc_factor_cols_from_names",
 ]

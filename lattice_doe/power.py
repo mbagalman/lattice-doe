@@ -647,6 +647,7 @@ def global_r2_power_sp(
     df_method: str = "auto",
     lambda_mode: Literal["n", "n_minus_p"] = "n",
     jitter: float = 1e-8,
+    htc_factor_cols: Optional[List[int]] = None,
 ) -> GlobalPowerResult:
     """Power for the global R² F-test in a split-plot design.
 
@@ -656,9 +657,22 @@ def global_r2_power_sp(
         λ = f² · max(1, tr(Ṽ⁻¹) − df_num)   (lambda_mode="n_minus_p")
     where Ṽ⁻¹ = (η ZZ' + I)⁻¹ is the scaled inverse covariance.
 
-    Denominator df ≈ n_total − n_wp (SP stratum, used for the global test).
+    Denominator df is the sub-plot stratum df, consistent with
+    ``split_plot_df_denom`` (SR-11):
 
-    At eta = 0 the result is identical to ``global_r2_power``.
+        df_denom = n − n_wp − (rank(X) − rank(X_wp))
+
+    where rank(X_wp) is computed from *htc_factor_cols* when provided and
+    approximated as 1 (intercept only) otherwise — the fallback is
+    conservative (fewer df).  A ``ValueError`` is raised when df_denom ≤ 0
+    (the sub-plot stratum cannot support the test), instead of silently
+    clamping to 1 as earlier versions did.
+
+    At eta = 0 the result is identical to ``global_r2_power``.  Note the
+    denominator df steps at η → 0⁺: the OLS shortcut uses the pooled
+    df = n − rank(X), while any η > 0 uses the sub-plot stratum df above.
+    λ itself is continuous (tr(Ṽ⁻¹) → n); the df step reflects the change
+    from a pooled error estimate to a stratum error estimate.
 
     .. note:: **Approximation scope.**
         A target R² does not specify how the explained variance splits
@@ -690,11 +704,15 @@ def global_r2_power_sp(
         Significance level.
     df_method : str
         Kept for API symmetry with contrast_power_sp; currently unused
-        (the global test always uses SP df = n − n_wp).
+        (the global test always uses the sub-plot stratum df).
     lambda_mode : {"n", "n_minus_p"}
         Whether λ scales by tr(Ṽ⁻¹) or tr(Ṽ⁻¹) − df_num.
     jitter : float
         Ridge for numerical stability.
+    htc_factor_cols : list of int or None
+        Column indices in X of the HTC (whole-plot) factor terms, used to
+        compute rank(X_wp) for the denominator df.  When None, rank(X_wp)
+        is approximated as 1 (conservative).
 
     Returns
     -------
@@ -733,18 +751,24 @@ def global_r2_power_sp(
     n, p = X.shape
     n_wp = Z.shape[1]
 
+    from .split_plot import build_split_plot_covariance_inv, split_plot_rank_wp
+
     df_num = _r2_df_num(X)
     if df_num <= 0:
         raise ValueError(
             f"Numerator df must be positive; got {df_num} (rank(X)={np.linalg.matrix_rank(X)})."
         )
-    df_denom = max(1, n - n_wp)
+    # Sub-plot stratum df, consistent with split_plot_df_denom (SR-11).
+    rank_X = int(np.linalg.matrix_rank(X))
+    rank_X_wp = split_plot_rank_wp(X, Z, htc_factor_cols)
+    df_denom = n - n_wp - (rank_X - rank_X_wp)
     if df_denom <= 0:
         raise ValueError(
-            f"Denominator df (n − n_wp) must be positive; got {df_denom}."
+            f"Sub-plot denominator df must be positive; got {df_denom} "
+            f"(n={n}, n_wp={n_wp}, rank(X)={rank_X}, rank(X_wp)={rank_X_wp}). "
+            "The sub-plot stratum cannot support the global R² test — "
+            "increase subplots per whole plot or reduce the model size."
         )
-
-    from .split_plot import build_split_plot_covariance_inv
 
     V_inv = build_split_plot_covariance_inv(Z, eta)
     eff_n = float(np.trace(V_inv))
@@ -913,11 +937,19 @@ def eval_response_power(
                     "eval_response_power: Z (whole-plot indicator) is required "
                     "when split_plot_opts is provided."
                 )
+            from .split_plot import htc_factor_cols_from_names
+
+            _all_fnames_r2 = all_factor_names if all_factor_names is not None else list(
+                split_plot_opts.htc_factors
+            )
+            _htc_cols_r2 = htc_factor_cols_from_names(
+                p_names, split_plot_opts.htc_factors, _all_fnames_r2
+            )
             result = global_r2_power_sp(
                 cfg.r2_target, X, Z,
                 sigma_sp=cfg.sigma, eta=split_plot_opts.eta, alpha=cfg.alpha,
                 df_method=split_plot_opts.df_method, lambda_mode=cfg.lambda_mode,
-                jitter=jitter,
+                jitter=jitter, htc_factor_cols=_htc_cols_r2,
             )
         else:
             result = global_r2_power(cfg.r2_target, X, cfg.alpha, lambda_mode=cfg.lambda_mode)

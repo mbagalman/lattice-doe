@@ -301,6 +301,7 @@ def power_sensitivity(
                     power_cfg.r2_target, X, Z_sp, sigma_sp=_sigma_sp,
                     eta=float(_eta), alpha=power_cfg.alpha,
                     lambda_mode=power_cfg.lambda_mode, jitter=jitter,
+                    htc_factor_cols=_htc_cols_eta,
                 )
             _eta_rows.append({
                 "eta": float(_eta),
@@ -1519,11 +1520,17 @@ def power_curve_by_wp(
                     htc_factor_cols=_htc_cols_,
                 )
             else:
+                _, _p_names_ = build_model_matrix(formula, design_df_)
+                _all_fcols_ = [c for c in design_df_.columns if c != "__wp_id__"]
+                _htc_cols_ = htc_factor_cols_from_names(
+                    _p_names_, htc_factors, _all_fcols_,
+                )
                 pr = global_r2_power_sp(
                     power_cfg.r2_target, X_, Z_, sigma_sp=sigma_sp,
                     eta=eta, alpha=power_cfg.alpha,
                     lambda_mode=power_cfg.lambda_mode,
                     jitter=design_opts.xtx_jitter,
+                    htc_factor_cols=_htc_cols_,
                 )
             rows.append({
                 "n_wp": n_wp,
