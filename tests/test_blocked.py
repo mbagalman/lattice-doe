@@ -774,3 +774,98 @@ class TestCR18BlockedWithCategoricalTreatment:
         assert "Block" in result["design_df"].columns
         # p_treat: intercept + 1 (A) + 2 (B) = 4
         assert result["report"]["p_treat"] == 4
+
+
+# ---------------------------------------------------------------------------
+# SR-4 / SR-16 / SR-18 — blocked contrast alignment and Phase-2 scan floor
+# ---------------------------------------------------------------------------
+
+class TestSR4BlockedContrastAlignment:
+    """SR-4 regression: blocked contrast power must target the treatment
+    effect, not the block dummy that Patsy orders before numeric columns."""
+
+    def _aligned_L(self, names, target, q=1):
+        L = np.zeros((q, len(names)))
+        L[0, names.index(target)] = 1.0
+        return L
+
+    def test_blocked_contrast_power_targets_treatment_not_block(self):
+        from lattice_doe import build_model_matrix
+        from lattice_doe.power import contrast_power
+
+        factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+        power_cfg = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([1.5]),
+            alpha=0.05, power=0.8, sigma=1.0, max_n=60, max_iter=60,
+        )
+        design_opts = DesignOptions(
+            n_blocks=2, random_state=0, starts=2, candidate_points=200,
+        )
+        result = find_optimal_design(
+            formula="~ 1 + A + B", factors=factors,
+            power_cfg=power_cfg, design_opts=design_opts,
+        )
+        # Rebuild the augmented model matrix from the returned design and
+        # recompute power for the treatment contrast, aligned by column name.
+        aug = blocked_formula("~ 1 + A + B", design_opts.block_factor_name)
+        X_full, names = build_model_matrix(aug, result["design_df"])
+        # Patsy places the block dummy before the numeric columns — the
+        # ordering that made positional right-padding wrong.
+        assert names.index("A") > 1, "expected block dummy before numeric cols"
+        p_A = contrast_power(
+            self._aligned_L(names, "A"), power_cfg.delta, X_full,
+            power_cfg.sigma, power_cfg.alpha,
+        ).power
+        assert result["report"]["achieved_power"] == pytest.approx(p_A, abs=1e-9)
+        # And it must NOT equal the block-dummy contrast the old code tested.
+        blk = [nm for nm in names if "Block" in nm][0]
+        p_blk = contrast_power(
+            self._aligned_L(names, blk), power_cfg.delta, X_full,
+            power_cfg.sigma, power_cfg.alpha,
+        ).power
+        assert abs(result["report"]["achieved_power"] - p_blk) > 1e-6
+
+    def test_blocked_glm_contrast_runs_and_aligns(self):
+        """SR-16 regression: blocked + GLM must not crash and must test the
+        treatment effect through the aligned contrast."""
+        from dataclasses import replace
+        from lattice_doe import build_model_matrix
+        from lattice_doe.config import PowerGLMContrastConfig
+        from lattice_doe.power import glm_contrast_power
+
+        factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+        power_cfg = PowerGLMContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.9]),
+            baseline=0.3, family="binomial", alpha=0.05, power=0.8, max_n=200,
+        )
+        design_opts = DesignOptions(
+            n_blocks=2, random_state=0, starts=2, candidate_points=200,
+        )
+        result = find_optimal_design(
+            formula="~ 1 + A + B", factors=factors,
+            power_cfg=power_cfg, design_opts=design_opts,
+        )
+        aug = blocked_formula("~ 1 + A + B", design_opts.block_factor_name)
+        X_full, names = build_model_matrix(aug, result["design_df"])
+        L_A = self._aligned_L(names, "A")
+        p_A = glm_contrast_power(replace(power_cfg, L=L_A), X_full).power
+        assert result["report"]["achieved_power"] == pytest.approx(p_A, abs=1e-9)
+
+    def test_phase2_scan_does_not_crash_at_p_full(self):
+        """SR-18 regression: with a large effect the Phase-2 scan reaches
+        n = p_full; the floor must stop above it instead of raising on
+        df_denom = 0."""
+        factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+        power_cfg = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([2.5]),
+            alpha=0.05, power=0.8, sigma=1.0, max_n=60, max_iter=60,
+        )
+        design_opts = DesignOptions(
+            n_blocks=2, random_state=0, starts=1, candidate_points=150,
+        )
+        result = find_optimal_design(
+            formula="~ 1 + A + B", factors=factors,
+            power_cfg=power_cfg, design_opts=design_opts,
+        )
+        # p_full = 4 (intercept, block dummy, A, B); n must exceed it.
+        assert result["report"]["n"] >= 5

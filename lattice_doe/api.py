@@ -24,6 +24,7 @@ compare_criteria) live in ``analysis.py`` and are re-exported via
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Dict, List, Optional, Union, Any, Literal, Tuple, Callable
 import math
 import time
@@ -254,7 +255,7 @@ def find_optimal_design(
         constraint_func=design_opts.constraint_func,
         cat_cells_cap=design_opts.cat_cells_cap,
     )
-    X_cand, _ = build_model_matrix(formula, cand)
+    X_cand, _treat_col_names = build_model_matrix(formula, cand)
 
     # Re-check p just in case the full candidate set changed it (e.g., empty levels)
     if X_cand.shape[1] != p:
@@ -293,7 +294,7 @@ def find_optimal_design(
             for i in range(len(_cand_aug_tmp))
         ]
         try:
-            _X_aug_sample, _ = build_model_matrix(aug_formula, _cand_aug_tmp)
+            _X_aug_sample, _aug_col_names = build_model_matrix(aug_formula, _cand_aug_tmp)
             p_full = _X_aug_sample.shape[1]
         except Exception as _e:
             raise ValueError(
@@ -335,13 +336,32 @@ def find_optimal_design(
         q = power_cfg.L.shape[0]
         if power_cfg.delta.shape != (q,):
             raise ValueError(f"delta must be shape ({q},), got {power_cfg.delta.shape}.")
-        # Pad L with zeros for block dummy columns when blocked
+        # Align L to the augmented (blocked) model matrix by column name.
+        # Patsy orders categorical terms (including the block dummies) before
+        # numeric terms, so the block columns are not necessarily trailing and
+        # positional zero-padding would aim contrast rows at the wrong effects.
         if is_blocked and p_block_cols > 0:
-            L_eff = np.hstack([power_cfg.L, np.zeros((q, p_block_cols))])
+            _aug_pos = {name: j for j, name in enumerate(_aug_col_names)}
+            _missing = [nm for nm in _treat_col_names if nm not in _aug_pos]
+            if _missing:
+                raise ValueError(
+                    f"Treatment model columns {_missing} were not found in the "
+                    f"augmented blocked model matrix (columns: {_aug_col_names}); "
+                    "cannot align the contrast matrix L to the blocked design."
+                )
+            L_eff = np.zeros((q, p_full))
+            for _j, _nm in enumerate(_treat_col_names):
+                L_eff[:, _aug_pos[_nm]] = power_cfg.L[:, _j]
         else:
             L_eff = power_cfg.L
     else:
         L_eff = None
+
+    # GLM power reads L from its config object; give it the aligned L when blocked.
+    if mode == "glm" and L_eff is not None and L_eff is not power_cfg.L:
+        glm_cfg_eff = replace(power_cfg, L=L_eff)
+    else:
+        glm_cfg_eff = power_cfg
 
     # =========================================================================
     # Split-plot path — bisection over n_whole_plots, then Phase 2 scan
@@ -657,7 +677,7 @@ def find_optimal_design(
 
         # 2) Compute power
         if mode == "glm":
-            _glm_res = glm_contrast_power(power_cfg, X, jitter=design_opts.xtx_jitter)
+            _glm_res = glm_contrast_power(glm_cfg_eff, X, jitter=design_opts.xtx_jitter)
             power, lam = _glm_res.power, _glm_res.lam
             df_num = int(np.linalg.matrix_rank(power_cfg.L))
         elif mode == "contrast":
@@ -726,7 +746,7 @@ def find_optimal_design(
                 )
                 X = X_cand[selected_idx, :]
                 if mode == "glm":
-                    _glm_res = glm_contrast_power(power_cfg, X, jitter=design_opts.xtx_jitter)
+                    _glm_res = glm_contrast_power(glm_cfg_eff, X, jitter=design_opts.xtx_jitter)
                     power, lam = _glm_res.power, _glm_res.lam
                     df_num = int(np.linalg.matrix_rank(power_cfg.L))
                 elif mode == "contrast":
@@ -823,7 +843,15 @@ def find_optimal_design(
         n_star = int(best["report"]["n"])
         verify_window = min(max(5, n_star // 10), max(0, power_cfg.max_iter - it))
         _verify_window = verify_window  # record for final report
-        for n_check in range(n_star - 1, max(p, n_star - verify_window - 1), -1):
+        # Floor mirrors Phase 1's lower bound: n must exceed p_full (else
+        # df_denom = 0 in blocked mode) and be at least n_blocks. The range
+        # stop is exclusive, so the smallest scanned n is _scan_floor + 1.
+        _scan_floor = max(
+            p_full,
+            (design_opts.n_blocks - 1) if is_blocked else 0,
+            n_star - verify_window - 1,
+        )
+        for n_check in range(n_star - 1, _scan_floor, -1):
             if it >= power_cfg.max_iter:
                 break
             _ran_phase2 = True
@@ -837,7 +865,7 @@ def find_optimal_design(
                 )
                 X_v = X_cand[sel_idx_v, :]
             if mode == "glm":
-                _glm_res_v = glm_contrast_power(power_cfg, X_v, jitter=design_opts.xtx_jitter)
+                _glm_res_v = glm_contrast_power(glm_cfg_eff, X_v, jitter=design_opts.xtx_jitter)
                 power_v, lam_v = _glm_res_v.power, _glm_res_v.lam
                 df_num_v = int(np.linalg.matrix_rank(power_cfg.L))
             elif mode == "contrast":
