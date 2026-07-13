@@ -169,7 +169,7 @@ def export_diagnostics(
                     <table>
                         <tr><th>Metric</th><th>Value</th><th>Status</th></tr>
                         <tr>
-                            <td>Condition Number</td>
+                            <td>Condition Number κ(X)</td>
                             <td class="metric-value">{metrics['condition_number']:.2f}</td>
                             <td class="{'error' if metrics['condition_number'] > 1000 else 'warning' if metrics['condition_number'] > 30 else ''}">
                                 {'Poor' if metrics['condition_number'] > 1000 else 'Moderate' if metrics['condition_number'] > 30 else 'Good'}

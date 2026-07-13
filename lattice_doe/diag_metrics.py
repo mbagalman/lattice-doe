@@ -136,7 +136,8 @@ def compute_design_metrics(
     -------
     dict
         {
-          'condition_number' : float,
+          'condition_number' : float — κ(X), 2-norm condition number of X
+                               (Belsley scale: < 30 good, > 1000 poor),
           'd_efficiency'     : float,
           'leverage_mean'    : float,
           'leverage_max'     : float,
@@ -157,7 +158,13 @@ def compute_design_metrics(
         }
 
     XtX = _xtx(X)
-    cond = float(np.linalg.cond(XtX))
+    # Condition number of X itself (2-norm), the convention the classic
+    # Belsley interpretation thresholds assume (< 30 well-conditioned,
+    # > 1000 ill-conditioned). Previously this was cond(X'X) = cond(X)²,
+    # which the display layers then judged against κ(X) thresholds — a
+    # perfectly fine design with κ(X)=10 was reported as 100 → "Moderate"
+    # (SR-21).
+    cond = float(np.linalg.cond(X))
 
     # D-efficiency — normalised to [0, 1] via (det(X'X) / n^p)^(1/p).
     # Clamped to 1.0: values above 1 can arise from the continuous

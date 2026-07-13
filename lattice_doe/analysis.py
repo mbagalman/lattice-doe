@@ -805,7 +805,7 @@ def compare_criteria(
         ``n``               Minimum sample size that achieved target power
         ``achieved_power``  Statistical power of the returned design
         ``elapsed_sec``     Wall-clock seconds for that criterion's run
-        ``condition_number``Condition number of X'X (from diagnostics)
+        ``condition_number``Condition number κ(X) of the model matrix (from diagnostics)
         ``d_efficiency``    D-efficiency relative to D-optimal reference
         ==================  =================================================
 

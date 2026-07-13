@@ -761,7 +761,7 @@ def find_optimal_design(
             design_opts.allow_candidate_growth
             and not is_blocked
             and not grew_candidates_once
-            and diags.get("condition_number", np.inf) > 1e6
+            and diags.get("condition_number", np.inf) > 1e3  # κ(X) scale (SR-21)
         ):
             grew_candidates_once = True
             _grown_points = min(

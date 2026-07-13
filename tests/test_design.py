@@ -723,3 +723,37 @@ class TestSR13CellCoverage:
         cand = build_candidate({"x": (0.0, 1.0), "y": (-1.0, 1.0)},
                                candidate_points=50, seed=0)
         assert len(cand) == 50
+
+
+# ---------------------------------------------------------------------------
+# SR-21: condition number convention must match its interpretation thresholds
+# ---------------------------------------------------------------------------
+
+class TestSR21ConditionNumberConvention:
+    """SR-21 regression: compute_design_metrics returned cond(X'X) = k(X)^2
+    while the export/report layers applied Belsley thresholds stated for
+    k(X) ("<30 well-conditioned / >1000 ill-conditioned") -- a fine design
+    with k(X)=10 was reported as 100 -> 'Moderate'. The metric is now k(X)."""
+
+    def test_condition_number_is_kappa_of_X(self):
+        from lattice_doe.diag_metrics import compute_design_metrics
+        rng = np.random.default_rng(0)
+        X = np.column_stack([np.ones(20), rng.uniform(-1, 1, 20),
+                             rng.uniform(-1, 1, 20)])
+        m = compute_design_metrics(X)
+        assert m["condition_number"] == pytest.approx(
+            float(np.linalg.cond(X)), rel=1e-10
+        )
+        # And explicitly NOT the squared convention.
+        assert m["condition_number"] != pytest.approx(
+            float(np.linalg.cond(X.T @ X)), rel=1e-3
+        )
+
+    def test_orthonormal_design_reports_kappa_one(self):
+        """A perfectly conditioned design must sit deep in the 'Good' band
+        of the Belsley thresholds the display layers apply."""
+        from lattice_doe.diag_metrics import compute_design_metrics
+        n = 16
+        X = np.linalg.qr(np.random.default_rng(1).standard_normal((n, 3)))[0]
+        m = compute_design_metrics(X)
+        assert m["condition_number"] == pytest.approx(1.0, abs=1e-8)

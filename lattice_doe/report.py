@@ -217,12 +217,13 @@ def _build_diagnostics_ctx(report: dict) -> dict | None:
     if not diag:
         return None
 
-    # Condition number badge
+    # Condition number badge — κ(X), Belsley scale (SR-21):
+    # < 30 well-conditioned, 30–1000 moderate, > 1000 ill-conditioned.
     cond_raw = diag.get("condition_number")
     if cond_raw is not None:
         cond_val = float(cond_raw)
         cond_str = f"{cond_val:.2f}"
-        if cond_val < 100:
+        if cond_val < 30:
             cond_badge = "pass"
         elif cond_val < 1000:
             cond_badge = "warn"
