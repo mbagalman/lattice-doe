@@ -194,6 +194,15 @@ def htc_factor_cols_from_names(
     ETC (sub-plot) factor name as a word token.  The ``"Intercept"`` column is
     always classified as WP.
 
+    Bracketed level suffixes are stripped before tokenizing (SR-14): Patsy
+    labels categorical dummies as ``Factor[T.level]``, so the treatment-coding
+    marker ``T`` and the level strings would otherwise collide with factor
+    names — an ETC factor named ``T`` (or sharing a name with an HTC level)
+    silently flipped pure-WP dummy columns to SP, corrupting the stratum df.
+    Tokens therefore come only from factor and transform names; note that a
+    factor named after a transform function used in the formula (e.g. ``log``
+    with ``np.log(...)`` terms) can still collide.
+
     Parameters
     ----------
     p_names : list of str
@@ -220,8 +229,11 @@ def htc_factor_cols_from_names(
         if name == "Intercept":
             result.append(i)
             continue
-        # Extract all Python-identifier tokens from the column label.
-        tokens = set(re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", name))
+        # Strip bracketed level suffixes ("Machine[T.m2]" → "Machine") so
+        # neither the treatment-coding token "T" nor level strings can match
+        # a factor name, then extract identifier tokens from what remains.
+        stripped = re.sub(r"\[[^\]]*\]", "", name)
+        tokens = set(re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", stripped))
         # A column is WP-pure when none of its tokens match an ETC factor name.
         if not tokens.intersection(etc_set):
             result.append(i)

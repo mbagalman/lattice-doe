@@ -12,6 +12,7 @@ from lattice_doe.split_plot import (
     gls_information_matrix,
     classify_contrasts,
     split_plot_df_denom,
+    htc_factor_cols_from_names,
 )
 from lattice_doe.candidate import build_split_plot_candidate
 from lattice_doe.api import find_optimal_design
@@ -2906,3 +2907,69 @@ class TestSR11SubplotDf:
         assert split_plot_rank_wp(X, Z, [0, 1]) == 2
         assert split_plot_rank_wp(X, Z, None) == 1
         assert split_plot_rank_wp(X, Z, []) == 1
+
+
+# ===========================================================================
+# TestSR14TokenCollision — HTC column classification vs Patsy label tokens
+# ===========================================================================
+
+class TestSR14TokenCollision:
+    """SR-14 regression: htc_factor_cols_from_names tokenized full Patsy
+    labels, so the treatment-coding marker in 'Machine[T.m2]' collided with
+    an ETC factor named 'T' (and level strings collided with factor names),
+    silently flipping pure-WP dummies to SP — anti-conservative df and a
+    corrupted rank(X_wp). Bracketed suffixes are now stripped before
+    tokenizing."""
+
+    def test_etc_factor_named_T_does_not_flip_wp_dummies(self):
+        import pandas as pd
+        from lattice_doe.model_matrix import build_model_matrix
+        df = pd.DataFrame({"Machine": ["m1", "m2", "m1", "m2"],
+                           "T": [0.1, 0.5, 0.9, 0.3]})
+        _, names = build_model_matrix("~ Machine + T", df)
+        cols = htc_factor_cols_from_names(names, ["Machine"], ["Machine", "T"])
+        assert names.index("Machine[T.m2]") in cols
+        assert names.index("T") not in cols
+
+    def test_etc_factor_matching_htc_level_string(self):
+        import pandas as pd
+        from lattice_doe.model_matrix import build_model_matrix
+        df = pd.DataFrame({"G": ["high", "low", "high", "low"],
+                           "high": [0.1, 0.5, 0.9, 0.3]})
+        _, names = build_model_matrix("~ G + high", df)
+        cols = htc_factor_cols_from_names(names, ["G"], ["G", "high"])
+        g_dummy = next(nm for nm in names if nm.startswith("G["))
+        assert names.index(g_dummy) in cols
+        assert names.index("high") not in cols
+
+    def test_exact_token_matching_and_interactions_preserved(self):
+        """Pre-existing correct behavior: 'A' must not match inside 'A2', and
+        HTC×ETC interaction columns stay SP."""
+        cols = htc_factor_cols_from_names(
+            ["Intercept", "A", "A2", "A:A2"], ["A"], ["A", "A2"],
+        )
+        assert cols == [0, 1]
+        cols2 = htc_factor_cols_from_names(
+            ["Intercept", "Machine[T.m2]", "T", "Machine[T.m2]:T"],
+            ["Machine"], ["Machine", "T"],
+        )
+        assert cols2 == [0, 1]
+
+    def test_downstream_df_uses_wp_stratum(self):
+        """The audit's consequence: with the collision, a pure-WP contrast got
+        the larger SP df (anti-conservative). It must get WP df."""
+        import pandas as pd
+        from lattice_doe.model_matrix import build_model_matrix
+        n_wp, s = 4, 3
+        mach = np.repeat(["m1", "m2", "m1", "m2"], s)
+        tvals = np.tile([0.2, 0.5, 0.8], n_wp)
+        df = pd.DataFrame({"Machine": mach, "T": tvals})
+        X, names = build_model_matrix("~ Machine + T", df)
+        Z = build_whole_plot_indicator(n_wp * s, n_wp, s)
+        htc_cols = htc_factor_cols_from_names(names, ["Machine"], ["Machine", "T"])
+        L = np.zeros((1, len(names)))
+        L[0, names.index("Machine[T.m2]")] = 1.0
+        is_wp = classify_contrasts(L, htc_cols, len(names))
+        dfs = split_plot_df_denom(X, Z, is_wp, "auto", htc_cols)
+        assert bool(is_wp[0])
+        assert int(dfs[0]) == 2  # n_wp − rank(X_wp) = 4 − 2
