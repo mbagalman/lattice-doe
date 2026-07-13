@@ -40,8 +40,7 @@ from .model_matrix import build_model_matrix
 from .iopt_search import build_i_opt_design_with_idx, build_split_plot_design, build_compound_design
 from .split_plot import (
     build_whole_plot_indicator, htc_factor_cols_from_names,
-    classify_contrasts, split_plot_df_denom, split_plot_rank_wp,
-    split_plot_r2_df_denom,
+    classify_contrasts, split_plot_df_denom, split_plot_r2_df_denom,
 )
 from .diag_metrics import compute_design_metrics
 from .diag_export import export_diagnostics
@@ -1632,6 +1631,14 @@ def find_multiresponse_design(
     # =========================================================================
     # OLS path (shared formula)
     # =========================================================================
+    # Spec-derived categorical names, not dtype inference (SR-28/SR-30):
+    # numeric-coded categories like {"g": [0, 1, 2]} have numeric dtype but
+    # are categorical factors.
+    from .candidate import _is_continuous_spec as _is_cont_spec_mr
+
+    _spec_cat_cols_mr = [
+        k for k, v in factors.items() if not _is_cont_spec_mr(v)
+    ]
     _search_kwargs: Dict[str, Any] = dict(
         cand=cand,
         formula=formula,
@@ -1649,15 +1656,45 @@ def find_multiresponse_design(
         alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
         alloc_wynn_tol=design_opts.alloc_wynn_tol,
         cat_cells_cap=design_opts.cat_cells_cap,
+        cat_cols=_spec_cat_cols_mr,
     )
 
     # Hotelling T² pre-computation: extract shared L and joint Delta
     if _use_hotelling:
-        _L_common = np.asarray(multi_cfg.responses[0].power_cfg.L)
+        _L_common = np.asarray(multi_cfg.responses[0].power_cfg.L, dtype=float)
+        if _L_common.ndim == 1:
+            _L_common = _L_common.reshape(1, -1)
         _Delta_joint = np.column_stack(
             [np.asarray(r.power_cfg.delta) for r in multi_cfg.responses]
         )
-        _sigma_joint_arr = np.asarray(multi_cfg.sigma_joint)
+        _sigma_joint_arr = np.asarray(multi_cfg.sigma_joint, dtype=float)
+
+        # Pre-flight structural validation (SR-29): every n-independent
+        # failure mode of hotelling_t2_power is checked HERE, before any
+        # bisection state exists. This lets the evaluator call it without an
+        # exception handler — a mid-search fallback to the scalar rule would
+        # silently switch the search objective while keeping bounds derived
+        # from the joint objective (reviewer fault-injection returned a
+        # marginal-only n=4 that way). Any exception surviving this
+        # validation is a genuine bug and now propagates.
+        if not np.allclose(_sigma_joint_arr, _sigma_joint_arr.T, atol=1e-8):
+            raise ValueError(
+                "sigma_joint must be symmetric; max asymmetry = "
+                f"{float(np.max(np.abs(_sigma_joint_arr - _sigma_joint_arr.T))):.3e}."
+            )
+        _sign_sj, _ = np.linalg.slogdet(_sigma_joint_arr)
+        if _sign_sj <= 0:
+            raise ValueError(
+                "sigma_joint is singular or not positive definite. The "
+                "inter-response covariance must be positive definite for "
+                "Hotelling T² joint power."
+            )
+        # Delta-consistency for rank-deficient L is X-independent for the
+        # full-rank designs the search evaluates: check against range(L Lᵀ).
+        from .power import _check_delta_consistency as _check_dc
+
+        _V0 = _L_common @ _L_common.T
+        _check_dc(_V0, np.linalg.pinv(_V0), _Delta_joint)
     else:
         _L_common = _Delta_joint = _sigma_joint_arr = None  # type: ignore[assignment]
 
@@ -1670,9 +1707,13 @@ def find_multiresponse_design(
         _k_resp = len(multi_cfg.responses)
         lo = max(lo, p + _k_resp)
     # The shared candidate pool bounds the largest reachable n (see
-    # _capped_search_max_n).
+    # _capped_search_max_n) — unless pre-allocation makes replication
+    # available for categorical factor spaces (SR-6/SR-30).
     _n_cand_mr = len(cand)
-    _capped_max_n_mr = _capped_search_max_n(max_n, _n_cand_mr, lo)
+    if design_opts.preallocate_categorical and _spec_cat_cols_mr:
+        _capped_max_n_mr = max_n
+    else:
+        _capped_max_n_mr = _capped_search_max_n(max_n, _n_cand_mr, lo)
     hi = _capped_max_n_mr + 1
     best = None
     it = 0
@@ -1683,11 +1724,6 @@ def find_multiresponse_design(
     _ran_phase2 = False
     _verify_window = 0
     t_start = time.perf_counter()
-    # Sticky Hotelling-fallback state (SR-20c): once the joint T² computation
-    # fails, ALL later evaluations use the scalar combination rule, so the
-    # search objective stays consistent across n instead of silently mixing
-    # two power definitions within one bisection.
-    _ht2_state = {"failed": False}
 
     def _ols_eval_mr(n_: int) -> Optional[Dict[str, Any]]:
         df_, idx_, _ = build_i_opt_design_with_idx(n=n_, **_search_kwargs)
@@ -1696,36 +1732,24 @@ def find_multiresponse_design(
             eval_response_power(r, X_, p_names_global, jitter=design_opts.xtx_jitter)
             for r in multi_cfg.responses
         ]
-        if _use_hotelling and not _ht2_state["failed"]:
+        if _use_hotelling:
             # df-infeasibility at THIS n is not a reason to abandon the
             # joint objective (SR-26): treat the size as infeasible and let
             # the search move higher, exactly like a NaN power.
             _k_resp_eval = _Delta_joint.shape[1]
             if n_ - int(np.linalg.matrix_rank(X_)) - _k_resp_eval + 1 <= 0:
                 return None
-            try:
-                ht2_ = hotelling_t2_power(
-                    _L_common, _Delta_joint, X_, _sigma_joint_arr,
-                    alpha=multi_cfg.responses[0].power_cfg.alpha,
-                    jitter=design_opts.xtx_jitter,
-                )
-                combined_ = ht2_.power
-                _ht2_result = ht2_
-            except Exception as _e:
-                _ht2_state["failed"] = True
-                _msg = (
-                    f"Hotelling T² joint power failed at n={n_} "
-                    f"({type(_e).__name__}: {_e}). Falling back to the "
-                    f"'{rule}' scalar combination for the REMAINDER of this "
-                    "search so the objective stays consistent; evaluations "
-                    "before this point used the joint T² power. The joint "
-                    "target is retained, which is conservative for the "
-                    "scalar objective."
-                )
-                warnings.warn(_msg, RuntimeWarning)
-                _run_warnings.append(_msg)
-                combined_ = combine_powers([d["power"] for d in per_r_], weights, rule)
-                _ht2_result = None
+            # No exception handler here (SR-29): all n-independent failure
+            # modes were validated before the search started, so anything
+            # raised now is a real error and must propagate rather than
+            # silently switch the search objective mid-bisection.
+            ht2_ = hotelling_t2_power(
+                _L_common, _Delta_joint, X_, _sigma_joint_arr,
+                alpha=multi_cfg.responses[0].power_cfg.alpha,
+                jitter=design_opts.xtx_jitter,
+            )
+            combined_ = ht2_.power
+            _ht2_result = ht2_
         else:
             combined_ = combine_powers([d["power"] for d in per_r_], weights, rule)
             _ht2_result = None

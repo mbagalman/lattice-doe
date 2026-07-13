@@ -349,3 +349,41 @@ class TestSR28NumericCategoriesApi:
         assert rep["n"] > 3, "search must exceed the 3 numeric-coded cells"
         assert len(result["design_df"]) == rep["n"]
         assert rep["achieved_power"] + 1e-3 >= 0.8
+
+
+# ---------------------------------------------------------------------------
+# SR-31: power_surface_2d guards must account for preallocation replication
+# ---------------------------------------------------------------------------
+
+class TestSR31SurfacePreallocationGuards:
+    """SR-31 regression (review round 4): power_surface_2d rejected a
+    three-cell, three-parameter categorical design (n_cand <= p) and capped
+    the n axis at n_cand, even though preallocation replicates such designs
+    to any n > p."""
+
+    def _cfg(self):
+        return PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([1.2]),
+            sigma=1.0, alpha=0.05, power=0.8,
+        )
+
+    def test_surface_runs_with_replication(self):
+        from lattice_doe import power_surface_2d
+        res = power_surface_2d(
+            "~ C(g)", {"g": [0, 1, 2]}, self._cfg(), "n", (4, 20),
+            "effect", (0.5, 2.0), grid_points=4,
+            design_opts=DesignOptions(random_state=0, starts=1,
+                                      candidate_points=50,
+                                      preallocate_categorical=True),
+        )
+        assert res["param1_values"].max() > 3  # axis exceeds the cell count
+
+    def test_without_preallocation_still_rejected(self):
+        from lattice_doe import power_surface_2d
+        with pytest.raises(ValueError, match="no evaluable design"):
+            power_surface_2d(
+                "~ C(g)", {"g": [0, 1, 2]}, self._cfg(), "n", (4, 20),
+                "effect", (0.5, 2.0), grid_points=4,
+                design_opts=DesignOptions(random_state=0, starts=1,
+                                          candidate_points=50),
+            )

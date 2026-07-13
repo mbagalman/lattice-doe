@@ -3196,23 +3196,20 @@ class TestSR20HotellingSearchSemantics:
         assert any("does not apply" in str(c.message) for c in caught)
         assert any("does not apply" in s for s in out["warnings"])
 
-    def test_failed_t2_falls_back_loudly_and_stickily(self):
-        import warnings as _w
+    def test_singular_sigma_joint_rejected_before_search(self):
+        """SR-29 (supersedes the SR-20c sticky fallback): structural
+        Hotelling failures are validated before the search starts, so a
+        joint-power request never silently answers with marginal-power
+        semantics — an invalid sigma_joint fails fast instead."""
         mc = MultiResponseOptions(
             responses=self._responses(), power_combination="min",
             sigma_joint=np.array([[1.0, 1.0], [1.0, 1.0]]),  # singular
         )
-        with _w.catch_warnings(record=True) as caught:
-            _w.simplefilter("always")
-            out = find_multiresponse_design(
+        with pytest.raises(ValueError, match="positive definite"):
+            find_multiresponse_design(
                 "~ 1 + x1 + x2", self._FACTORS, mc,
                 design_opts=DesignOptions(**self._OPTS),
             )
-        fb = [c for c in caught if "Falling back" in str(c.message)]
-        assert len(fb) == 1, "fallback must warn exactly once (sticky)"
-        assert any("Falling back" in s for s in out["warnings"])
-        assert "joint_power" not in out
-        assert out["achieved_power"] + 1e-3 >= 0.8
 
 
 # ---------------------------------------------------------------------------
@@ -3253,3 +3250,75 @@ class TestSR26HotellingFeasibilityFloor:
         # p = 3 params, k = 2 responses: joint test needs n >= 5
         assert out["n"] >= 5
         assert not any("Falling back" in str(c.message) for c in caught)
+
+
+# ---------------------------------------------------------------------------
+# SR-29/SR-30: no mid-search objective switch; MR numeric categoricals
+# ---------------------------------------------------------------------------
+
+class TestSR29NoMidSearchObjectiveSwitch:
+    """SR-29 regression (review round 4): after the SR-26 df guard, any OTHER
+    exception during a joint evaluation still tripped the sticky scalar
+    fallback mid-search, keeping bounds derived from the joint objective
+    (fault injection on the second evaluation returned a marginal-only
+    result). Structural conditions are now validated before the search and
+    the evaluator has no exception handler: unexpected failures propagate."""
+
+    def _mc(self, sigma_joint):
+        L = np.array([[0.0, 1.0, 0.0]])
+        resp = [ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([1.0]), sigma=1.0, alpha=0.05,
+                    power=0.8, max_n=80)) for nm in ("y1", "y2")]
+        return MultiResponseOptions(responses=resp, power_combination="min",
+                                    sigma_joint=sigma_joint)
+
+    def test_injected_midsearch_fault_propagates(self, monkeypatch):
+        import lattice_doe.api as api_mod
+        orig = api_mod.hotelling_t2_power
+        calls = {"n": 0}
+
+        def flaky(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("injected fault")
+            return orig(*a, **k)
+
+        monkeypatch.setattr(api_mod, "hotelling_t2_power", flaky)
+        with pytest.raises(RuntimeError, match="injected fault"):
+            find_multiresponse_design(
+                "~ 1 + x1 + x2", {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
+                self._mc(np.array([[1.0, 0.3], [0.3, 1.0]])),
+                design_opts=DesignOptions(random_state=0, starts=1,
+                                          candidate_points=100),
+            )
+
+    def test_asymmetric_sigma_joint_preflight(self):
+        with pytest.raises(ValueError, match="symmetric"):
+            find_multiresponse_design(
+                "~ 1 + x1 + x2", {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
+                self._mc(np.array([[1.0, 0.5], [0.1, 1.0]])),
+                design_opts=DesignOptions(random_state=0, starts=1,
+                                          candidate_points=100),
+            )
+
+
+class TestSR30MultiResponseNumericCategoricals:
+    """SR-30 regression (review round 4): the multi-response search kwargs
+    lacked cat_cols and its n-cap assumed sampling without replacement, so
+    numeric-coded categoricals failed through find_multiresponse_design even
+    after SR-28 fixed the single-response path."""
+
+    def test_mr_numeric_categories_replicate(self):
+        L = np.array([[0.0, 1.0, 0.0]])
+        resp = [ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([1.2]), sigma=1.0, alpha=0.05,
+                    power=0.8, max_n=60)) for nm in ("y1", "y2")]
+        mc = MultiResponseOptions(responses=resp, power_combination="min")
+        out = find_multiresponse_design(
+            "~ C(g)", {"g": [0, 1, 2]}, mc,
+            design_opts=DesignOptions(random_state=0, starts=1,
+                                      candidate_points=50,
+                                      preallocate_categorical=True),
+        )
+        assert out["n"] > 3, "search must exceed the 3 numeric-coded cells"
+        assert out["achieved_power"] + 1e-3 >= 0.8

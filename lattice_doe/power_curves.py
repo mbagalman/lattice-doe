@@ -616,7 +616,15 @@ def power_surface_2d(
     X_cand, _ = build_model_matrix(formula, cand)
     p = X_cand.shape[1]
     n_cand = len(cand)
-    if n_cand <= p:
+    # Pre-allocation replication (SR-6/SR-31): categorical designs can be
+    # replicated beyond the distinct-candidate count, so the pool does not
+    # bound n and a pure-categorical set with n_cand == p is still evaluable
+    # (replicated exact designs at n > p are estimable when X_cand has full
+    # column rank).
+    _prealloc_repl = design_opts.preallocate_categorical and any(
+        not _is_continuous_spec(v) for v in factors.values()
+    )
+    if n_cand <= p and not _prealloc_repl:
         raise ValueError(
             f"Candidate set has {n_cand} rows but the model has p={p} "
             "parameters; no evaluable design exists. Increase "
@@ -629,16 +637,20 @@ def power_surface_2d(
         if param == "n":
             # Integer grid, log-spaced for better resolution at small n.
             # Designs draw candidates without replacement, so cap at n_cand
-            # (same policy as find_optimal_design's search bound, TICKET-039).
+            # (same policy as find_optimal_design's search bound, TICKET-039)
+            # — unless pre-allocation replication lifts the bound (SR-31).
             lo_eff = max(lo, p + 1)
-            hi_eff = min(max(hi, p + 2), n_cand)
-            if hi > n_cand:
-                warnings.warn(
-                    f"'n' axis upper bound {int(hi)} exceeds the candidate "
-                    f"set size ({n_cand}); clipping the axis to n <= {n_cand}. "
-                    "Increase candidate_points for larger n.",
-                    UserWarning,
-                )
+            if _prealloc_repl:
+                hi_eff = max(hi, p + 2)
+            else:
+                hi_eff = min(max(hi, p + 2), n_cand)
+                if hi > n_cand:
+                    warnings.warn(
+                        f"'n' axis upper bound {int(hi)} exceeds the candidate "
+                        f"set size ({n_cand}); clipping the axis to n <= {n_cand}. "
+                        "Increase candidate_points for larger n.",
+                        UserWarning,
+                    )
             if lo_eff > hi_eff:
                 raise ValueError(
                     f"'n' axis range is empty after bounds: needs "
@@ -705,10 +717,15 @@ def power_surface_2d(
                 "disclosed design size."
             )
         fixed_n = int(n)
-        if not (p < fixed_n <= n_cand):
+        if fixed_n <= p or (fixed_n > n_cand and not _prealloc_repl):
             raise ValueError(
-                f"n={fixed_n} is not evaluable: needs p = {p} < n <= "
-                f"candidate set size = {n_cand}."
+                f"n={fixed_n} is not evaluable: needs p = {p} < n"
+                + (
+                    ""
+                    if _prealloc_repl
+                    else f" <= candidate set size = {n_cand}"
+                )
+                + "."
             )
     elif n is not None:
         raise ValueError(
