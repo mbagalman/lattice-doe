@@ -341,11 +341,14 @@ def split_plot_df_denom(
 
     * **WP df** — ``df_wp = n_wp − rank(X_wp)`` where X_wp is the submatrix of
       X restricted to HTC-factor columns, with one representative row per WP.
-      If *htc_factor_cols* is ``None``, the approximation ``n_wp − 1`` is used.
 
     * **SP df** — ``df_sp = n_total − n_wp − (rank(X) − rank(X_wp))``.
-      If *htc_factor_cols* is ``None``, the approximation ``n_total − n_wp − 1``
-      is used.
+
+    When *htc_factor_cols* is ``None``, ``rank(X_wp)`` is approximated as 1
+    (intercept only), giving ``df_wp = n_wp − 1`` and
+    ``df_sp = n_total − n_wp − (rank(X) − 1)`` (SR-24d: this fallback is
+    conservative for sub-plot contrasts and anti-conservative for whole-plot
+    contrasts — supply *htc_factor_cols* whenever possible).
 
     Parameters
     ----------

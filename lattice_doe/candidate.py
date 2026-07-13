@@ -129,8 +129,11 @@ def estimate_candidate_size(
 
     # Case 2: Purely categorical design
     if not cont:
-        # Need enough points to cover cells, but not excessive
-        # per_cell_alpha > 1 provides some replication for numerical stability
+        # Need enough points to cover cells, but not excessive. Note that
+        # per_cell_alpha only inflates the size *estimate* here: for pure
+        # categorical spaces build_candidate enumerates the distinct cells,
+        # so no replicated candidate rows materialise (replication of runs
+        # is handled at design time via preallocate_categorical, SR-6).
         candidate_points_raw = int(cat_cells * per_cell_alpha)
         candidate_points = min(max(candidate_points_raw, cand_min), cand_max)
 
@@ -232,6 +235,11 @@ def build_candidate(
 
     The constraint_func is applied after generation, so the returned
     DataFrame may have fewer rows than requested if constraints are tight.
+
+    Continuous candidates come from a Latin hypercube, whose stratified
+    samples exclude the exact region vertices (expected shortfall
+    ~1/(2·candidate_points) per side), so selected designs sit very slightly
+    inside the factor ranges. Negligible at default sizes (SR-24f).
     """
     # Separate factor types
     cont = {k: v for k, v in factors.items() if _is_continuous_spec(v)}

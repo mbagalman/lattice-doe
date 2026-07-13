@@ -873,7 +873,10 @@ def combine_powers(
     Raises
     ------
     ValueError
-        If *powers* is empty or *rule* is not one of the three valid values.
+        If *powers* is empty, *rule* is not one of the three valid values,
+        or (for ``"weighted_mean"``) *weights* has a different length than
+        *powers* or a non-positive sum (SR-24a: a length mismatch previously
+        truncated silently via ``zip``, dropping responses from the mean).
     """
     if len(powers) == 0:
         raise ValueError("combine_powers: powers list must not be empty.")
@@ -886,7 +889,18 @@ def combine_powers(
         return float(result)
     elif rule == "weighted_mean":
         w = weights if weights is not None else [1.0] * len(powers)
-        total_w = sum(w)
+        if len(w) != len(powers):
+            raise ValueError(
+                f"combine_powers: weights has length {len(w)} but powers has "
+                f"length {len(powers)}; they must match (a mismatch would "
+                "silently drop responses from the weighted mean)."
+            )
+        total_w = float(sum(w))
+        if total_w <= 0.0:
+            raise ValueError(
+                f"combine_powers: weights must have a positive sum; got "
+                f"{total_w}."
+            )
         return float(sum(pv * wv for pv, wv in zip(powers, w)) / total_w)
     raise ValueError(
         f"combine_powers: unknown combination rule {rule!r}. "
@@ -969,6 +983,22 @@ def eval_response_power(
                 df_method=split_plot_opts.df_method, htc_factor_cols=htc_cols,
                 jitter=jitter,
             )
+            # Report the stratum df actually used (SR-22); the eta = 0
+            # shortcut delegates to OLS, where the pooled df2 is correct.
+            if split_plot_opts.eta > 0.0:
+                from .split_plot import classify_contrasts, split_plot_df_denom
+
+                _is_wp_e = classify_contrasts(
+                    np.atleast_2d(np.asarray(cfg.L, dtype=float)),
+                    htc_cols, X.shape[1],
+                )
+                _dfs_e = split_plot_df_denom(
+                    X, Z, _is_wp_e, split_plot_opts.df_method, htc_cols or None
+                )
+                df2 = (
+                    int(_dfs_e[0]) if np.all(_dfs_e == _dfs_e[0])
+                    else int(_dfs_e.min())
+                )
         else:
             result = contrast_power(cfg.L, cfg.delta, X, cfg.sigma, cfg.alpha, jitter=jitter)
         return {
@@ -999,6 +1029,13 @@ def eval_response_power(
                 df_method=split_plot_opts.df_method, lambda_mode=cfg.lambda_mode,
                 jitter=jitter, htc_factor_cols=_htc_cols_r2,
             )
+            # Report the sub-plot stratum df actually used (SR-22).
+            if split_plot_opts.eta > 0.0:
+                from .split_plot import split_plot_rank_wp
+
+                _rank_X_e = int(np.linalg.matrix_rank(X))
+                _rank_wp_e = split_plot_rank_wp(X, Z, _htc_cols_r2 or None)
+                df2 = int(X.shape[0] - Z.shape[1] - (_rank_X_e - _rank_wp_e))
         else:
             result = global_r2_power(cfg.r2_target, X, cfg.alpha, lambda_mode=cfg.lambda_mode)
         return {

@@ -330,7 +330,11 @@ def power_curve_by_effect(
         {
           'data': DataFrame with columns [effect_size, power, lambda],
           'figure': matplotlib Figure if plot=True and available, else None,
-          'min_detectable_effect': float at 80% power
+          'min_detectable_effect': first swept effect whose power reaches
+              power_cfg.power — a grid-resolution upper bound on the true
+              MDE (use analysis.min_detectable_effect for a precise
+              inversion); equals the sweep floor when even the smallest
+              swept effect already meets the target
         }
     """
     # --- Reviewer Feedback: Validation ---
@@ -404,7 +408,7 @@ def power_curve_by_effect(
                 "actual_delta_norm": float(np.linalg.norm(scaled_delta)),
             })
 
-            if min_detectable is None and _res.power >= 0.80:
+            if min_detectable is None and _res.power >= float(power_cfg.power):
                 min_detectable = float(mult)
 
     elif isinstance(power_cfg, PowerContrastConfig):
@@ -432,7 +436,7 @@ def power_curve_by_effect(
                 'actual_delta_norm': float(np.linalg.norm(scaled_delta)),
             })
 
-            if min_detectable is None and power >= 0.80:
+            if min_detectable is None and power >= float(power_cfg.power):
                 min_detectable = float(mult)
 
     else:  # R² mode
@@ -455,7 +459,7 @@ def power_curve_by_effect(
                 'lambda': float(lam),
             })
             
-            if min_detectable is None and power >= 0.80:
+            if min_detectable is None and power >= float(power_cfg.power):
                 min_detectable = float(r2)
     
     df = pd.DataFrame(results)

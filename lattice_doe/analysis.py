@@ -806,7 +806,10 @@ def compare_criteria(
         ``achieved_power``  Statistical power of the returned design
         ``elapsed_sec``     Wall-clock seconds for that criterion's run
         ``condition_number``Condition number κ(X) of the model matrix (from diagnostics)
-        ``d_efficiency``    D-efficiency relative to D-optimal reference
+        ``d_efficiency``    Absolute D-efficiency, (det(X'X)/n^p)^(1/p) clamped
+                            to [0, 1] — normalised against an idealised
+                            orthogonal baseline, NOT relative to the D-optimal
+                            design at that n
         ==================  =================================================
 
     ``results`` : dict
@@ -827,7 +830,7 @@ def compare_criteria(
     >>> print(comparison["summary"])
     #   criterion   n   achieved_power  elapsed_sec  condition_number  d_efficiency
     #   I          24        0.814          1.23          12.5             0.81
-    #   D          22        0.823          1.17          10.2             1.00
+    #   D          22        0.823          1.17          10.2             0.84
     #   A          23        0.811          1.19          11.8             0.94
     >>> comparison["results"]["I"]["design_df"]   # full I-optimal design DataFrame
     """
@@ -1073,7 +1076,10 @@ def robustness_report(
         ``power_target``, ``pct_scenarios_passing``.
     ``thresholds``
         dict — ``max_sigma_for_target`` (contrast only, else ``None``),
-        ``min_effect_for_target``, ``min_alpha_for_target``.
+        ``min_effect_for_target``, ``min_alpha_for_target``, plus a
+        ``*_truncated`` boolean companion for each: ``True`` means every
+        swept scenario met the target, so the reported value is the sweep
+        boundary (a bound on the true threshold), not a genuine crossing.
     ``figure``
         matplotlib Figure if *plot* is True, else ``None``.
 
@@ -1294,10 +1300,24 @@ def robustness_report(
             increasing=False,
         )
 
-    thresholds: Dict[str, Optional[float]] = {
+    # Truncation flags (SR-23b): when every swept scenario passes, the
+    # crossing helper returns the sweep boundary — which is NOT the true
+    # threshold, only a bound. Flag those so a boundary value is
+    # distinguishable from a genuine crossing.
+    thresholds: Dict[str, Optional[Union[float, bool]]] = {
         "max_sigma_for_target": max_sigma,
         "min_effect_for_target": min_effect,
         "min_alpha_for_target": min_alpha,
+        "max_sigma_for_target_truncated": (
+            bool((sigma_sweep_df["power"].values >= power_target).all())
+            if sigma_sweep_df is not None else False
+        ),
+        "min_effect_for_target_truncated": bool(
+            (effect_sweep_df["power"].values >= power_target).all()
+        ),
+        "min_alpha_for_target_truncated": bool(
+            (alpha_sweep_df["power"].values >= power_target).all()
+        ),
     }
 
     # ------------------------------------------------------------------ #

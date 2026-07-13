@@ -1144,3 +1144,84 @@ class TestSR20HotellingDf:
         res = hotelling_t2_power(L, Delta, X, Sig, 0.05)
         assert res.df1 == 4          # rank(L)*k = 2*2
         assert res.df2 == 16 - 3 - 2 + 1
+
+
+# ---------------------------------------------------------------------------
+# SR-22/23/24: P3 cleanups — df metadata, annotations, validation hygiene
+# ---------------------------------------------------------------------------
+
+class TestSR24CombinePowersValidation:
+    """SR-24a regression: weighted_mean silently zip-truncated on a
+    weights/powers length mismatch (dropping responses from the mean) and
+    raised a bare ZeroDivisionError on zero-sum weights."""
+
+    def test_length_mismatch_raises(self):
+        from lattice_doe.power import combine_powers
+        with pytest.raises(ValueError, match="length"):
+            combine_powers([0.9, 0.5, 0.2], [1.0, 1.0], "weighted_mean")
+
+    def test_zero_sum_weights_raise(self):
+        from lattice_doe.power import combine_powers
+        with pytest.raises(ValueError, match="positive sum"):
+            combine_powers([0.9, 0.5], [0.0, 0.0], "weighted_mean")
+
+    def test_valid_weighted_mean_unchanged(self):
+        from lattice_doe.power import combine_powers
+        assert combine_powers([0.9, 0.5], [1.0, 3.0], "weighted_mean") == \
+            pytest.approx((0.9 + 1.5) / 4.0)
+
+
+class TestSR24ZeroDeltaComponents:
+    """SR-24b regression: config validation rejected any near-zero delta
+    component, forbidding legitimate joint alternatives like (1.0, 0.0).
+    Only an entirely-zero delta (the null itself) is invalid."""
+
+    def test_zero_component_accepted_and_powers(self):
+        from lattice_doe.config import PowerContrastConfig
+        cfg = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+            delta=np.array([1.0, 0.0]),
+        )
+        rng = np.random.default_rng(0)
+        X = np.column_stack([np.ones(20), rng.uniform(-1, 1, 20),
+                             rng.uniform(-1, 1, 20)])
+        res = contrast_power(cfg.L, cfg.delta, X, sigma=1.0, alpha=0.05)
+        assert res.power > 0.10  # genuinely nonzero joint power
+
+    def test_all_zero_delta_still_rejected(self):
+        from lattice_doe.config import PowerContrastConfig
+        with pytest.raises(ValueError, match="entirely zero"):
+            PowerContrastConfig(L=np.array([[0.0, 1.0], [1.0, 0.0]]),
+                                delta=np.array([0.0, 0.0]))
+
+    def test_glm_zero_component_accepted(self):
+        from lattice_doe.config import PowerGLMContrastConfig
+        PowerGLMContrastConfig(L=np.array([[0.0, 1.0], [1.0, 0.0]]),
+                               delta=np.array([0.9, 0.0]), baseline=0.3)
+
+
+class TestSR22SplitPlotReportedDf:
+    """SR-22 regression: eval_response_power reported the pooled OLS
+    df2 = n − rank(X) in split-plot mode even though the power was computed
+    with stratum df."""
+
+    def test_eval_response_power_reports_stratum_df(self):
+        from lattice_doe.power import eval_response_power
+        from lattice_doe.split_plot import build_whole_plot_indicator
+        from lattice_doe.config import (PowerContrastConfig, ResponseSpec,
+                                        SplitPlotOptions)
+        n_wp, s = 4, 3
+        n = n_wp * s
+        A = np.repeat([-1.0, -1.0, 1.0, 1.0], s)
+        B = np.tile([-1.0, 0.0, 1.0], n_wp)
+        X = np.column_stack([np.ones(n), A, B])
+        Z = build_whole_plot_indicator(n, n_wp, s)
+        spec = ResponseSpec(name="y", power_cfg=PowerContrastConfig(
+            L=np.array([[0.0, 0.0, 1.0]]), delta=np.array([1.0]), sigma=1.0))
+        sp = SplitPlotOptions(htc_factors=["A"], n_whole_plots=n_wp, eta=1.0)
+        out = eval_response_power(spec, X, ["Intercept", "A", "B"],
+                                  split_plot_opts=sp, Z=Z,
+                                  all_factor_names=["A", "B"])
+        # SP stratum df = n − n_wp − (rank X − rank X_wp) = 12 − 4 − 1 = 7,
+        # not the pooled OLS df2 = n − rank(X) = 9.
+        assert out["df2"] == 7

@@ -35,9 +35,20 @@ Given k categorical cells represented by their model-matrix rows x_1, …, x_k:
 
 References
 ----------
-* Wynn (1970) "The Sequential Generation of D-Optimum Experimental Designs."
+* Torsney (1977 onwards) / Fellman (1974) / Silvey, Titterington & Torsney
+  (1978) — the multiplicative weight-update algorithm implemented here
+  (``w_i ← w_i · φ_i / φ̄``). Historically nicknamed a "Wynn" step in parts
+  of this codebase, but Wynn (1970) is the sequential vertex-direction
+  algorithm for D-optimality, a different method (SR-24c).
 * Atkinson, Donev & Tobias (2007) "Optimum Experimental Designs, with SAS."
   Chapter 9 on I-optimal and continuous design measures.
+
+Note: the pre-allocation pipeline built on this module is a per-cell
+heuristic — allocation weights are computed from cell representatives with
+continuous factors at their midpoints, and each cell's rows are then chosen
+by a cell-local search. It closely approximates, but does not exactly
+optimise, the joint I-criterion of the full design (measured ≈0.6% gap in
+the audit).
 """
 from __future__ import annotations
 

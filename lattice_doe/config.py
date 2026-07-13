@@ -259,10 +259,16 @@ class PowerContrastConfig:
 
         if np.any(np.all(self.L == 0, axis=1)):
             raise ValueError("L matrix contains at least one all-zero row.")
-        if np.any(np.isclose(self.delta, 0)):
+        # Only an entirely-zero delta is invalid (that is the null, not an
+        # alternative). Individual zero components are legitimate joint
+        # alternatives — e.g. delta = (1.0, 0.0) states "effect on row 1,
+        # none on row 2" and yields correct nonzero joint power (SR-24b:
+        # previously any near-zero component was rejected).
+        if np.allclose(self.delta, 0):
             raise ValueError(
-                "delta vector contains zero or near-zero values. "
-                "The 'sesoi' (delta) must be non-zero."
+                "delta vector is entirely zero — that is the null "
+                "hypothesis, not an alternative. At least one component "
+                "must be non-zero."
             )
 
     def __str__(self) -> str:
@@ -879,9 +885,12 @@ class PowerGLMContrastConfig:
         # --- Contrast content validation ---
         if np.any(np.all(self.L == 0, axis=1)):
             raise ValueError("L matrix contains at least one all-zero row.")
-        if np.any(np.isclose(self.delta, 0)):
+        # Only an entirely-zero delta is invalid (SR-24b): individual zero
+        # components are legitimate joint alternatives on the LP scale.
+        if np.allclose(self.delta, 0):
             raise ValueError(
-                "delta vector contains zero or near-zero values on the LP scale."
+                "delta vector is entirely zero on the LP scale — that is "
+                "the null hypothesis, not an alternative."
             )
 
     def __str__(self) -> str:

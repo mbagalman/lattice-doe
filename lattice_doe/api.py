@@ -38,7 +38,10 @@ from .config import glm_fisher_weight
 from .candidate import estimate_candidate_size, build_candidate, build_split_plot_candidate
 from .model_matrix import build_model_matrix
 from .iopt_search import build_i_opt_design_with_idx, build_split_plot_design, build_compound_design
-from .split_plot import build_whole_plot_indicator, htc_factor_cols_from_names
+from .split_plot import (
+    build_whole_plot_indicator, htc_factor_cols_from_names,
+    classify_contrasts, split_plot_df_denom, split_plot_rank_wp,
+)
 from .diag_metrics import compute_design_metrics
 from .diag_export import export_diagnostics
 from .power import (
@@ -467,6 +470,30 @@ def find_optimal_design(
                 df_num_ = _r2_df_num(X_)
             if np.isnan(pr_.power):
                 return None
+            # Report the df actually used by the power computation (SR-22):
+            # stratum df for eta > 0, pooled OLS df at the eta = 0 shortcut
+            # (which delegates to the OLS power functions).
+            if sp_opts.eta == 0.0:
+                df_denom_ = int(n_total_ - np.linalg.matrix_rank(X_))
+            elif mode == "contrast":
+                _is_wp_r = classify_contrasts(
+                    np.atleast_2d(np.asarray(L_eff, dtype=float)),
+                    _htc_cols, X_.shape[1],
+                )
+                _dfs_r = split_plot_df_denom(
+                    X_, Z_, _is_wp_r, sp_opts.df_method, _htc_cols or None
+                )
+                if np.all(_dfs_r == _dfs_r[0]):
+                    df_denom_ = int(_dfs_r[0])
+                else:
+                    # Stratum-spanning per-row fallback: 1-df tests; report
+                    # the conservative (smallest) denominator df.
+                    df_denom_ = int(_dfs_r.min())
+                    df_num_ = 1
+            else:
+                _rank_X_r = int(np.linalg.matrix_rank(X_))
+                _rank_wp_r = split_plot_rank_wp(X_, Z_, _htc_cols or None)
+                df_denom_ = int(n_total_ - n_wp_ - (_rank_X_r - _rank_wp_r))
             return {
                 "design_df": design_df_,
                 "buckets_df": _buckets_df(design_df_),
@@ -476,7 +503,7 @@ def find_optimal_design(
                     "n": int(n_total_),
                     "p": int(p),
                     "df_num": int(df_num_),
-                    "df_denom": int(n_total_ - n_wp_),
+                    "df_denom": int(df_denom_),
                     "alpha": float(power_cfg.alpha),
                     "target_power": float(target),
                     "achieved_power": float(pr_.power),
