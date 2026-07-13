@@ -1676,10 +1676,8 @@ def power_curve_by_n_multiresponse(
             X_cand_k, p_names_k = build_model_matrix(f_k, cand)
             candidates_list.append(X_cand_k)
             p_names_list.append(list(p_names_k))
-        n_cand = candidates_list[0].shape[0]
     else:
         X_cand, p_names_global = build_model_matrix(formula, cand)
-        n_cand = X_cand.shape[0]
 
     _search_kwargs: Dict[str, Any] = dict(
         cand=cand,
