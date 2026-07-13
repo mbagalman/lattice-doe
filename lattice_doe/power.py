@@ -1017,7 +1017,7 @@ def hotelling_t2_power(
     alpha: float = 0.05,
     jitter: float = 1e-8,
 ) -> HotellingT2Result:
-    """Joint power for k simultaneous linear contrasts via Hotelling T² / Pillai trace.
+    """Joint power for k simultaneous linear contrasts (Hotelling-Lawley trace).
 
     Computes the multivariate power for testing H0: CΒ = 0 vs H1: CΒ = Δ,
     where all k responses share the common contrast matrix L and the inter-response
@@ -1027,13 +1027,25 @@ def hotelling_t2_power(
     --------------------
     Ω = Δ' [L(X'X)⁻¹L']⁻¹ Δ Σ⁻¹          (k × k)
 
-    Pillai-Bartlett F approximation
-    --------------------------------
-    λ   = trace(Ω)                           (noncentrality parameter)
-    df1 = q · k
+    T²-style F approximation
+    ------------------------
+    λ   = trace(Ω)              (the Hotelling-Lawley noncentrality)
+    df1 = rank(L) · k
     df2 = n − rank(X) − k + 1
     F_crit = F_{1−α}(df1, df2)
     Power  = 1 − ncF(F_crit; df1, df2, λ)
+
+    .. note:: **Approximation scope (SR-20b).**
+        These df are the Hotelling T² form, exact when
+        s = min(rank(L), k) = 1 (single contrast row, or single response) —
+        MC-verified. For s ≥ 2 the approximation is slightly
+        **conservative**: Monte-Carlo calibration against the true
+        Hotelling-Lawley trace test measured power understated by
+        ≲ 0.015 at small n (e.g. 0.538 vs 0.550 at n=16, q=k=2) and
+        converging with n. The textbook one-moment HL df2
+        (s·(ve − k − 1) + 2) with unscaled λ was tested and rejected: it is
+        systematically anti-conservative (e.g. 0.619 vs 0.550 in the same
+        configuration).
 
     This reduces exactly to ``contrast_power`` when k = 1 and
     ``sigma_joint = [[σ²]]``.
@@ -1114,11 +1126,15 @@ def hotelling_t2_power(
         )
 
     rank_X = int(np.linalg.matrix_rank(X))
-    df1 = q * k
+    # df1 counts independent hypothesis constraints: rank(L), not L's row
+    # count — duplicated contrast rows leave λ unchanged (pinv projects) but
+    # would otherwise inflate df1 and understate power (SR-20a).
+    q_eff = int(np.linalg.matrix_rank(L))
+    df1 = q_eff * k
     df2 = n - rank_X - k + 1
 
     if df1 <= 0:
-        raise ValueError(f"df1 = q*k = {df1} ≤ 0; L or Delta has zero rank.")
+        raise ValueError(f"df1 = rank(L)*k = {df1} ≤ 0; L or Delta has zero rank.")
     if df2 <= 0:
         raise ValueError(
             f"Hotelling T² df2 = n − rank(X) − k + 1 = {df2} ≤ 0. "

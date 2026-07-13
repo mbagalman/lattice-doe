@@ -1093,3 +1093,54 @@ class TestSR9DeltaConsistency:
         L = np.array([[0.0, 1.0], [1.0, 0.0]])
         res = contrast_power(L, np.array([1.0, 0.5]), X, sigma=1.0, alpha=0.05)
         assert 0.0 < res.power < 1.0
+
+
+# ---------------------------------------------------------------------------
+# SR-20 (a, b): Hotelling T² df1 and approximation label
+# ---------------------------------------------------------------------------
+
+class TestSR20HotellingDf:
+    """SR-20a regression: df1 used L's row count, so duplicated contrast rows
+    left lambda unchanged (pinv) but doubled df1, understating power
+    (0.815 -> 0.655 in the audit). df1 is now rank(L) * k. SR-20b: the df2
+    formula was MC-calibrated and retained (conservative, exact at s=1); the
+    textbook HL df2 with unscaled lambda was rejected as anti-conservative."""
+
+    def _fixture(self):
+        rng = np.random.default_rng(0)
+        n = 16
+        x = rng.uniform(-1, 1, n)
+        X = np.column_stack([np.ones(n), x])
+        return X, np.array([[0.0, 1.0]]), np.array([[1.0, 0.3], [0.3, 2.0]])
+
+    def test_duplicated_rows_use_rank_based_df1(self):
+        from lattice_doe.power import hotelling_t2_power
+        X, l, Sig = self._fixture()
+        L2 = np.vstack([l, l])
+        single = hotelling_t2_power(l, np.array([[1.0, 0.5]]), X, Sig, 0.05)
+        dup = hotelling_t2_power(L2, np.array([[1.0, 0.5], [1.0, 0.5]]),
+                                 X, Sig, 0.05)
+        assert dup.df1 == single.df1 == 2  # rank(L)*k = 1*2
+        assert dup.power == pytest.approx(single.power, abs=1e-10)
+
+    def test_k1_reduction_still_exact(self):
+        from lattice_doe.power import hotelling_t2_power
+        X, l, _ = self._fixture()
+        ht = hotelling_t2_power(l, np.array([[1.2]]), X, np.array([[1.0]]), 0.05)
+        cp = contrast_power(l, np.array([1.2]), X, sigma=1.0, alpha=0.05)
+        assert ht.power == pytest.approx(cp.power, abs=1e-12)
+
+    def test_s2_df2_is_t2_form(self):
+        """Pin the MC-calibrated df2 = n - rank(X) - k + 1 so an accidental
+        swap to the (anti-conservative) HL one-moment form fails loudly."""
+        from lattice_doe.power import hotelling_t2_power
+        rng = np.random.default_rng(1)
+        n = 16
+        X = np.column_stack([np.ones(n), rng.uniform(-1, 1, n),
+                             rng.uniform(-1, 1, n)])
+        L = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        Delta = np.array([[0.8, 0.5], [0.6, 0.7]])
+        Sig = np.array([[1.0, 0.5], [0.5, 2.0]])
+        res = hotelling_t2_power(L, Delta, X, Sig, 0.05)
+        assert res.df1 == 4          # rank(L)*k = 2*2
+        assert res.df2 == 16 - 3 - 2 + 1

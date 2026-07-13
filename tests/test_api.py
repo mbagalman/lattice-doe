@@ -3150,3 +3150,66 @@ class TestGLMMDE:
             )
         assert "criterion" in result["summary"].columns
         assert "family" not in result["summary"].columns
+
+
+# ---------------------------------------------------------------------------
+# SR-20 (c, d): Hotelling search semantics — target and fallback
+# ---------------------------------------------------------------------------
+
+class TestSR20HotellingSearchSemantics:
+    """SR-20c/d regressions: (d) with rule='product' the joint-T² search was
+    held to the independence-product target (0.64 for two 0.8 targets) even
+    though the objective is one joint statistic — it now targets the
+    strictest per-response power, with a recorded warning. (c) a failing T²
+    computation silently fell back to the scalar rule per-evaluation, mixing
+    two objectives within one bisection — the fallback is now loud, recorded,
+    and sticky for the remainder of the search."""
+
+    def _responses(self):
+        L = np.array([[0.0, 1.0, 0.0]])
+        return [
+            ResponseSpec(name="y1", power_cfg=PowerContrastConfig(
+                L=L, delta=np.array([1.0]), sigma=1.0, alpha=0.05,
+                power=0.8, max_n=80)),
+            ResponseSpec(name="y2", power_cfg=PowerContrastConfig(
+                L=L, delta=np.array([0.8]), sigma=1.0, alpha=0.05,
+                power=0.8, max_n=80)),
+        ]
+
+    _FACTORS = {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)}
+    _OPTS = dict(random_state=0, starts=2, candidate_points=150)
+
+    def test_product_rule_targets_strictest_power(self):
+        import warnings as _w
+        mc = MultiResponseOptions(
+            responses=self._responses(), power_combination="product",
+            sigma_joint=np.array([[1.0, 0.3], [0.3, 1.0]]),
+        )
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            out = find_multiresponse_design(
+                "~ 1 + x1 + x2", self._FACTORS, mc,
+                design_opts=DesignOptions(**self._OPTS),
+            )
+        # Joint test held to 0.8, not prod(0.8, 0.8) = 0.64
+        assert out["joint_power"] + 1e-3 >= 0.8
+        assert any("does not apply" in str(c.message) for c in caught)
+        assert any("does not apply" in s for s in out["warnings"])
+
+    def test_failed_t2_falls_back_loudly_and_stickily(self):
+        import warnings as _w
+        mc = MultiResponseOptions(
+            responses=self._responses(), power_combination="min",
+            sigma_joint=np.array([[1.0, 1.0], [1.0, 1.0]]),  # singular
+        )
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            out = find_multiresponse_design(
+                "~ 1 + x1 + x2", self._FACTORS, mc,
+                design_opts=DesignOptions(**self._OPTS),
+            )
+        fb = [c for c in caught if "Falling back" in str(c.message)]
+        assert len(fb) == 1, "fallback must warn exactly once (sticky)"
+        assert any("Falling back" in s for s in out["warnings"])
+        assert "joint_power" not in out
+        assert out["achieved_power"] + 1e-3 >= 0.8

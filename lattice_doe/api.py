@@ -1232,6 +1232,24 @@ def find_multiresponse_design(
                     f"shape {_Lr.shape} or different values from response "
                     f"'{multi_cfg.responses[0].name}'."
                 )
+        # Joint-objective target (SR-20d): in Hotelling mode the bisection
+        # objective is the power of ONE joint test statistic, so a combined
+        # target like prod(0.8, 0.8) = 0.64 (an independence product) would
+        # hold the joint test to a lower bar than any response's own target.
+        # Target the strictest per-response power instead; the combination
+        # rule then only governs the scalar fallback objective (see the
+        # fallback warning) and the reported per-response powers.
+        _ht2_target_note: Optional[str] = None
+        if rule != "min":
+            _old_target = target
+            target = max(r.power_cfg.power for r in multi_cfg.responses)
+            _ht2_target_note = (
+                f"sigma_joint (Hotelling T²) uses a single joint test "
+                f"statistic; the '{rule}' combined target ({_old_target:.4f}) "
+                f"does not apply to it. Targeting the strictest per-response "
+                f"power ({target:.4f}) for the joint test instead."
+            )
+            warnings.warn(_ht2_target_note, UserWarning)
 
     # =========================================================================
     # Split-plot path
@@ -1616,10 +1634,17 @@ def find_multiresponse_design(
     best = None
     it = 0
     _run_warnings = []
+    if _use_hotelling and _ht2_target_note is not None:
+        _run_warnings.append(_ht2_target_note)
     _strategy_parts = ["bisection"]
     _ran_phase2 = False
     _verify_window = 0
     t_start = time.perf_counter()
+    # Sticky Hotelling-fallback state (SR-20c): once the joint T² computation
+    # fails, ALL later evaluations use the scalar combination rule, so the
+    # search objective stays consistent across n instead of silently mixing
+    # two power definitions within one bisection.
+    _ht2_state = {"failed": False}
 
     def _ols_eval_mr(n_: int) -> Optional[Dict[str, Any]]:
         df_, idx_, _ = build_i_opt_design_with_idx(n=n_, **_search_kwargs)
@@ -1628,7 +1653,7 @@ def find_multiresponse_design(
             eval_response_power(r, X_, p_names_global, jitter=design_opts.xtx_jitter)
             for r in multi_cfg.responses
         ]
-        if _use_hotelling:
+        if _use_hotelling and not _ht2_state["failed"]:
             try:
                 ht2_ = hotelling_t2_power(
                     _L_common, _Delta_joint, X_, _sigma_joint_arr,
@@ -1637,7 +1662,19 @@ def find_multiresponse_design(
                 )
                 combined_ = ht2_.power
                 _ht2_result = ht2_
-            except Exception:
+            except Exception as _e:
+                _ht2_state["failed"] = True
+                _msg = (
+                    f"Hotelling T² joint power failed at n={n_} "
+                    f"({type(_e).__name__}: {_e}). Falling back to the "
+                    f"'{rule}' scalar combination for the REMAINDER of this "
+                    "search so the objective stays consistent; evaluations "
+                    "before this point used the joint T² power. The joint "
+                    "target is retained, which is conservative for the "
+                    "scalar objective."
+                )
+                warnings.warn(_msg, RuntimeWarning)
+                _run_warnings.append(_msg)
                 combined_ = combine_powers([d["power"] for d in per_r_], weights, rule)
                 _ht2_result = None
         else:
