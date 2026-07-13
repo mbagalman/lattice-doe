@@ -154,6 +154,33 @@ def _capped_search_max_n(max_n: int, n_ceiling: int, lo: int) -> int:
     return min(max_n, n_ceiling)
 
 
+def _termination_fields(
+    target_met: bool,
+    capped: bool,
+    it_count: int,
+    max_iter: int,
+) -> Dict[str, Any]:
+    """Machine-readable search-outcome fields (UX-7).
+
+    A search that exhausts its limits used to be distinguishable from a
+    successful one only by parsing warning strings; UIs and automation need
+    structured ``status`` / ``target_met`` / ``termination_reason`` instead.
+    """
+    if target_met:
+        reason = "target_reached"
+    elif capped:
+        reason = "candidate_cap"
+    elif it_count >= max_iter:
+        reason = "max_iter"
+    else:
+        reason = "max_n"
+    return {
+        "status": "complete" if target_met else "partial",
+        "target_met": bool(target_met),
+        "termination_reason": reason,
+    }
+
+
 def _candidate_cap_warning(max_n: int, capped_max_n: int, n_cand: int) -> str:
     """Warning text for when the candidate-set cap truncated a failed search."""
     return (
@@ -614,6 +641,12 @@ def find_optimal_design(
             "verify_window": int(_verify_window),
             "random_state": int(design_opts.random_state) if design_opts.random_state is not None else None,
             "warnings": list(_run_warnings),
+            **_termination_fields(
+                target_met=final_power + power_cfg.tol_power >= target,
+                capped=False,
+                it_count=it,
+                max_iter=power_cfg.max_iter,
+            ),
         })
 
         if export_diagnostics_to:
@@ -1092,6 +1125,12 @@ def find_optimal_design(
         "verify_window": int(_verify_window),
         "random_state": int(design_opts.random_state) if design_opts.random_state is not None else None,
         "warnings": list(_run_warnings),
+        **_termination_fields(
+            target_met=final_power + power_cfg.tol_power >= target_power,
+            capped=_capped_max_n < power_cfg.max_n,
+            it_count=it,
+            max_iter=power_cfg.max_iter,
+        ),
     })
 
     # 6. Optional export
@@ -1469,6 +1508,12 @@ def find_multiresponse_design(
             "p": int(p),
             "iteration": int(it),
             "warnings": list(_run_warnings),
+            **_termination_fields(
+                target_met=combined_final + tol >= target,
+                capped=False,
+                it_count=it,
+                max_iter=max_iter,
+            ),
         }
 
     # =========================================================================
@@ -1626,6 +1671,12 @@ def find_multiresponse_design(
             "p": int(p_compound),
             "iteration": int(it_c),
             "warnings": list(_run_warnings_c),
+            **_termination_fields(
+                target_met=combined_final_c + tol >= target,
+                capped=_capped_max_n_c < max_n,
+                it_count=it_c,
+                max_iter=max_iter,
+            ),
         }
 
     # =========================================================================
@@ -1869,6 +1920,12 @@ def find_multiresponse_design(
         "p": int(p),
         "iteration": int(it),
         "warnings": list(_run_warnings),
+        **_termination_fields(
+            target_met=combined_final + tol >= target,
+            capped=_capped_max_n_mr < max_n,
+            it_count=it,
+            max_iter=max_iter,
+        ),
     }
     if _use_hotelling and _ht2_final is not None:
         _out["joint_power"] = float(_ht2_final.power)

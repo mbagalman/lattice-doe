@@ -101,25 +101,27 @@ elif not _HAS_IOPT:
     )
 else:
     try:
-        # Build a minimal 1-row candidate DataFrame: midpoint for continuous,
-        # first level for categorical.
-        row: dict = {}
+        # Representative preview over the full cross of categorical levels
+        # (UX-1): a one-row frame with only the first level made Patsy drop
+        # the remaining dummy columns, so p was undercounted for
+        # categorical models and interactions.
+        from lattice_doe.utils import model_matrix_preview
+
+        spec: dict = {}
         for f in factors:
             if not f["name"].strip():
                 raise ValueError("One or more factors have an empty name.")
             if f["type"] == "Continuous":
-                row[f["name"]] = [(f["low"] + f["high"]) / 2.0]
+                spec[f["name"]] = (f["low"], f["high"])
             else:
                 if not f["levels"]:
                     raise ValueError(
                         f"Factor '{f['name']}' has no levels — "
                         "enter at least one level (e.g. 'low, high')."
                     )
-                row[f["name"]] = [f["levels"][0]]
+                spec[f["name"]] = list(f["levels"])
 
-        candidate_df = pd.DataFrame(row)
-        X, col_names = build_model_matrix(formula, candidate_df)
-        p = X.shape[1]
+        p, col_names = model_matrix_preview(formula, spec)
 
         st.success(f"Valid formula — **p = {p}** model parameter{'s' if p != 1 else ''}.")
         with st.expander(f"Model matrix columns ({p} total)"):

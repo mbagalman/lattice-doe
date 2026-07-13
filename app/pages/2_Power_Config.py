@@ -53,18 +53,19 @@ def _factors_to_spec(factors: list[dict]) -> dict:
 
 
 def _get_p(factors: list[dict], formula: str) -> int | None:
-    """Return model parameter count p, or None if unavailable."""
+    """Return model parameter count p, or None if unavailable.
+
+    Uses the full categorical-level cross (UX-1): a single-row example with
+    only the first level made Patsy drop the remaining dummy columns, so p
+    was undercounted for categorical models.
+    """
     if not factors or not formula.strip() or not _HAS_IOPT:
         return None
     try:
-        row: dict = {}
-        for f in factors:
-            if f["type"] == "Continuous":
-                row[f["name"]] = [(f["low"] + f["high"]) / 2.0]
-            else:
-                row[f["name"]] = [f["levels"][0]] if f["levels"] else ["?"]
-        _, col_names = build_model_matrix(formula, pd.DataFrame(row))
-        return len(col_names)
+        from lattice_doe.utils import model_matrix_preview
+
+        p, _ = model_matrix_preview(formula, _factors_to_spec(factors))
+        return p
     except Exception:
         return None
 

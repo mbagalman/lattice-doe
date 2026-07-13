@@ -102,4 +102,81 @@ def initial_n_guess(p: int, mode: Literal["contrast", "r2"]) -> int:
     return max(base, p + 1, 16)
 
 
-__all__ = ["validate_factors", "initial_n_guess"]
+def model_matrix_preview(
+    formula: str,
+    factors: Dict[str, Union[Tuple[float, float], List]],
+    max_preview_rows: int = 10_000,
+) -> Tuple[int, List[str]]:
+    """Return (p, column_names) for *formula* over a representative frame.
+
+    Builds the preview frame from the full Cartesian cross of every
+    categorical factor's levels, with continuous factors at their range
+    midpoints (UX-1). A single-row frame containing only the first level of
+    each categorical would make Patsy silently drop the remaining dummy
+    columns and every categorical interaction column, so the reported model
+    size p would undercount — e.g. a three-level ``C(g)`` model shown as
+    p = 1 instead of p = 3 — misleading users constructing contrast
+    matrices against the displayed columns.
+
+    Parameters
+    ----------
+    formula : str
+        Patsy model formula.
+    factors : dict
+        Factor spec — continuous factors as 2-tuples/lists of numbers,
+        categorical factors as lists of levels (package convention).
+    max_preview_rows : int, default 10 000
+        Guard against categorical-level explosions; raises ValueError when
+        the level cross exceeds this.
+
+    Returns
+    -------
+    (p, column_names)
+        Model-matrix column count and Patsy column labels.
+    """
+    import itertools
+
+    import pandas as pd
+
+    from .model_matrix import build_model_matrix
+
+    def _is_cont(spec) -> bool:
+        return (
+            isinstance(spec, (tuple, list))
+            and len(spec) == 2
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool)
+                    for x in spec)
+        )
+
+    cat = {k: list(v) for k, v in factors.items() if not _is_cont(v)}
+    cont = {k: v for k, v in factors.items() if _is_cont(v)}
+
+    n_rows = 1
+    for levels in cat.values():
+        if not levels:
+            raise ValueError(
+                "Every categorical factor needs at least one level for the "
+                "model preview."
+            )
+        n_rows *= len(levels)
+    if n_rows > max_preview_rows:
+        raise ValueError(
+            f"Categorical level cross has {n_rows} combinations, exceeding "
+            f"the preview cap of {max_preview_rows}."
+        )
+
+    if cat:
+        combos = list(itertools.product(*cat.values()))
+        frame = {name: [c[i] for c in combos]
+                 for i, name in enumerate(cat.keys())}
+    else:
+        combos = [()]
+        frame = {}
+    for name, (lo, hi) in cont.items():
+        frame[name] = [(float(lo) + float(hi)) / 2.0] * len(combos)
+
+    X, col_names = build_model_matrix(formula, pd.DataFrame(frame))
+    return X.shape[1], list(col_names)
+
+
+__all__ = ["validate_factors", "initial_n_guess", "model_matrix_preview"]

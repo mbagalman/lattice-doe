@@ -219,6 +219,10 @@ def serialize_multiresponse_result(result: dict) -> dict:
         "elapsed_sec": sanitize_float(result.get("elapsed_sec")),
         "buckets": df_to_records(buckets_df) if isinstance(buckets_df, pd.DataFrame) else [],
         "warnings": list(result.get("warnings", [])),
+        # Machine-readable search outcome (UX-7)
+        "status": result.get("status"),
+        "target_met": result.get("target_met"),
+        "termination_reason": result.get("termination_reason"),
         # Search diagnostics
         "search_strategy": result.get("search_strategy"),
         "p": int(result["p"]) if result.get("p") is not None else None,

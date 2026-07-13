@@ -767,6 +767,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             "No additional dependencies required."
         ),
     )
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        default=False,
+        help=(
+            "Exit 0 even when the search finishes without reaching the target "
+            "power. By default a partial result (report status 'partial') "
+            "exits with code 3 so automation can detect it."
+        ),
+    )
     # GLM flags (override YAML family / link / baseline keys)
     parser.add_argument(
         "--family",
@@ -1039,6 +1049,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "search_strategy": _mr_result.get("search_strategy"),
                 "warnings": _mr_result.get("warnings", []),
                 "compound_criterion": _mr_result.get("compound_criterion", False),
+                # Machine-readable search outcome (UX-7)
+                "status": _mr_result.get("status"),
+                "target_met": _mr_result.get("target_met"),
+                "termination_reason": _mr_result.get("termination_reason"),
             }
             # Add per-response power keys for the summary printout
             for _rd in _mr_result.get("responses", []):
@@ -1196,7 +1210,18 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"{'':>17}! {_w}")
         else:
             print(f"{'warnings':>15}: none")
-        
+
+        # UX-7: partial completion is a distinct exit code so automation can
+        # detect it without parsing warning strings.
+        if report.get("status") == "partial":
+            logger.error(
+                "Search finished WITHOUT reaching the target power "
+                f"(termination_reason={report.get('termination_reason')}). "
+                "Outputs were written; exiting 3. Use --allow-partial to "
+                "exit 0 instead."
+            )
+            if not args.allow_partial:
+                return 3
         return 0
 
     # --- Specific Error Handling ---

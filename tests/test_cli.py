@@ -246,3 +246,38 @@ class TestGLMCLI:
         out = capsys.readouterr().out
         assert "identity" not in out
         assert "sqrt" not in out
+
+
+class TestUX7CliExitCode:
+    """UX-7 regression: the CLI exited 0 on a search that missed its target.
+    A partial result now exits 3 unless --allow-partial is given."""
+
+    _CFG = """
+formula: "~ 1 + x1 + x2"
+factors:
+  x1: [-1.0, 1.0]
+  x2: [-1.0, 1.0]
+contrast:
+  L: [[0.0, 1.0, 0.0]]
+  delta: [0.3]
+alpha: 0.05
+power: 0.80
+sigma: 1.0
+max_n: 30
+design:
+  auto_candidate: false
+  candidate_points: 100
+  starts: 1
+  random_state: 0
+"""
+
+    def _run(self, tmp_path, extra):
+        cfg = tmp_path / "cfg.yml"
+        cfg.write_text(self._CFG, encoding="utf-8")
+        return main(["--config", str(cfg), "--out", str(tmp_path)] + extra)
+
+    def test_partial_exits_3(self, tmp_path):
+        assert self._run(tmp_path, []) == 3
+
+    def test_allow_partial_exits_0(self, tmp_path):
+        assert self._run(tmp_path, ["--allow-partial"]) == 0

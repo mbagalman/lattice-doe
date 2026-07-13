@@ -6,10 +6,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
+from .common import StrictRequestModel
+
 from api_server.models.common import DesignOptionsModel, FactorSpec, PowerCfgModel
 
 
-class PowerCurveByNRequest(BaseModel):
+class PowerCurveByNRequest(StrictRequestModel):
     """Request body for POST /power_curve/by_n."""
 
     formula: str
@@ -32,7 +34,7 @@ class PowerCurveByNRequest(BaseModel):
     }}
 
 
-class PowerCurveByEffectRequest(BaseModel):
+class PowerCurveByEffectRequest(StrictRequestModel):
     """Request body for POST /power_curve/by_effect."""
 
     formula: str

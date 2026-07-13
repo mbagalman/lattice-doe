@@ -784,9 +784,25 @@ class DesignWidget:
                 design_opts=design_opts,
             )
             self._result = result
-            self._status_html.value = (
-                "<span style='color:green'>✓ Design generated successfully.</span>"
-            )
+            _report = result.get("report", {})
+            # UX-7: a search that missed its target must not display an
+            # unqualified success message.
+            if _report.get("target_met") is False:
+                _warn_lines = "".join(
+                    f"<br>• {w}" for w in _report.get("warnings", [])
+                )
+                self._status_html.value = (
+                    "<span style='color:#b45309'><b>⚠ Target power not "
+                    "reached</b> (achieved "
+                    f"{_report.get('achieved_power', float('nan')):.4f} of "
+                    f"{_report.get('target_power', float('nan')):.4f}; "
+                    f"reason: {_report.get('termination_reason', 'unknown')})."
+                    f"{_warn_lines}</span>"
+                )
+            else:
+                self._status_html.value = (
+                    "<span style='color:green'>✓ Design generated successfully.</span>"
+                )
             self._render_results(result, state)
 
         except Exception as exc:

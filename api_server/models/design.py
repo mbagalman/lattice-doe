@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from .common import StrictRequestModel
+
 from api_server.models.common import (
     DesignOptionsModel,
     FactorSpec,
@@ -14,7 +16,7 @@ from api_server.models.common import (
 )
 
 
-class DesignRequest(BaseModel):
+class DesignRequest(StrictRequestModel):
     """Request body for POST /design."""
 
     formula: str = Field(
@@ -65,6 +67,10 @@ class ReportModel(BaseModel):
     elapsed_sec: Optional[float] = None
     search_strategy: Optional[str] = None
     warnings: List[str] = []
+    # Machine-readable search outcome (UX-7)
+    status: Optional[str] = None            # "complete" | "partial"
+    target_met: Optional[bool] = None
+    termination_reason: Optional[str] = None  # target_reached | max_n | max_iter | candidate_cap
     diagnostics: Optional[DiagnosticsModel] = None
     # GLM fields (present when power_cfg.type == "glm_contrast")
     test_type: Optional[str] = None       # "f" | "wald_chi2"
@@ -93,7 +99,7 @@ class DesignResponse(BaseModel):
 # Multi-response design endpoint models
 # ---------------------------------------------------------------------------
 
-class MultiResponseDesignRequest(BaseModel):
+class MultiResponseDesignRequest(StrictRequestModel):
     """Request body for POST /multiresponse_design."""
 
     formula: str = Field(
@@ -135,6 +141,11 @@ class MultiResponseDesignRequest(BaseModel):
 
 class MultiResponseDesignResponse(BaseModel):
     """Response body for POST /multiresponse_design."""
+
+    # Machine-readable search outcome (UX-7)
+    status: Optional[str] = None
+    target_met: Optional[bool] = None
+    termination_reason: Optional[str] = None
 
     design: List[Dict[str, Any]] = Field(
         ..., description="Design matrix rows as records."

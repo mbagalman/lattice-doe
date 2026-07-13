@@ -787,3 +787,49 @@ class TestSR28NumericCodedCategoricals:
             cand, "~ g", n=6, preallocate_categorical=True, random_state=0,
         )
         assert len(df) == 6
+
+
+# ---------------------------------------------------------------------------
+# UX-1: model preview must include every categorical level
+# ---------------------------------------------------------------------------
+
+class TestUX1ModelMatrixPreview:
+    """UX-1 regression: the Streamlit pages derived p from a one-row example
+    containing only the first categorical level, so Patsy dropped the other
+    dummy columns -- a 3-level C(g) model displayed p=1 and categorical
+    interactions were undercounted, guiding users toward invalid L matrices.
+    The shared helper builds the full level cross."""
+
+    def test_categorical_main_effect(self):
+        from lattice_doe.utils import model_matrix_preview
+        p, names = model_matrix_preview("~ C(g)", {"g": ["a", "b", "c"]})
+        assert p == 3
+        assert sum(nm.startswith("C(g)") for nm in names) == 2
+
+    def test_categorical_interaction(self):
+        from lattice_doe.utils import model_matrix_preview
+        p, _ = model_matrix_preview("~ a * b",
+                                    {"a": ["x", "y"], "b": ["u", "v", "w"]})
+        assert p == 6  # 1 + 1 + 2 + 2
+
+    def test_mixed_numeric_coded(self):
+        from lattice_doe.utils import model_matrix_preview
+        p, names = model_matrix_preview("~ C(g) + t",
+                                        {"g": [0, 1, 2], "t": (0.0, 1.0)})
+        assert p == 4
+        assert "t" in names
+
+    def test_continuous_only(self):
+        from lattice_doe.utils import model_matrix_preview
+        p, _ = model_matrix_preview("~ x1 + x2",
+                                    {"x1": (-1.0, 1.0), "x2": (0.0, 5.0)})
+        assert p == 3
+
+    def test_level_cross_cap(self):
+        from lattice_doe.utils import model_matrix_preview
+        with pytest.raises(ValueError, match="preview cap"):
+            model_matrix_preview(
+                "~ a + b",
+                {"a": list(range(200)), "b": list(range(200))},
+                max_preview_rows=10_000,
+            )

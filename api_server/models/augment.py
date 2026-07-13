@@ -6,10 +6,12 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from .common import StrictRequestModel
+
 from api_server.models.common import DesignOptionsModel, FactorSpec
 
 
-class AugmentRequest(BaseModel):
+class AugmentRequest(StrictRequestModel):
     """Request body for POST /augment."""
 
     design_df: List[Dict[str, Any]] = Field(

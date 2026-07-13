@@ -37,7 +37,19 @@ FactorSpec = Union[FactorContinuous, FactorCategorical]
 # Power configuration models
 # ---------------------------------------------------------------------------
 
-class PowerContrastConfigModel(BaseModel):
+class StrictRequestModel(BaseModel):
+    """Base for all REST request models (UX-4).
+
+    ``extra="forbid"`` turns unknown fields — misspellings like ``strats``
+    or unsupported options — into a 422 naming the offending key, instead
+    of Pydantic's permissive default silently discarding them. Response
+    models stay permissive for forward compatibility.
+    """
+
+    model_config = {"extra": "forbid"}
+
+
+class PowerContrastConfigModel(StrictRequestModel):
     """Power configuration for contrast-based (L·β = δ) tests."""
 
     type: Literal["contrast"] = "contrast"
@@ -59,7 +71,7 @@ class PowerContrastConfigModel(BaseModel):
     max_n: int = Field(2000, gt=0, description="Hard cap on sample size.")
 
 
-class PowerGLMContrastModel(BaseModel):
+class PowerGLMContrastModel(StrictRequestModel):
     """Power configuration for GLM (logistic/Poisson) Wald chi-square contrast tests."""
 
     type: Literal["glm_contrast"] = "glm_contrast"
@@ -102,7 +114,7 @@ class PowerGLMContrastModel(BaseModel):
         return v
 
 
-class PowerR2ConfigModel(BaseModel):
+class PowerR2ConfigModel(StrictRequestModel):
     """Power configuration for global R² (full-model F-test) tests."""
 
     type: Literal["r2"] = "r2"
@@ -137,7 +149,7 @@ PowerCfgModel = Annotated[
 # Split-plot options model
 # ---------------------------------------------------------------------------
 
-class SplitPlotOptionsModel(BaseModel):
+class SplitPlotOptionsModel(StrictRequestModel):
     """Options for split-plot (hard-to-change factor) designs.
 
     Mirrors ``lattice_doe.config.SplitPlotOptions``.  Set this field
@@ -184,7 +196,7 @@ class SplitPlotOptionsModel(BaseModel):
 # Design options model
 # ---------------------------------------------------------------------------
 
-class DesignOptionsModel(BaseModel):
+class DesignOptionsModel(StrictRequestModel):
     """Options controlling design generation.
 
     Notes
@@ -207,6 +219,24 @@ class DesignOptionsModel(BaseModel):
     criterion: Literal["I", "D", "A"] = "I"
     algo: Literal["fedorov", "coordinate"] = "fedorov"
     starts: int = Field(5, gt=0)
+    workers: Optional[int] = Field(
+        None,
+        description=(
+            "Parallel random starts are not supported inside the ASGI "
+            "server; only null or 1 (serial) are accepted (UX-4). Use "
+            "Uvicorn's --workers flag for horizontal scaling."
+        ),
+    )
+
+    @field_validator("workers")
+    @classmethod
+    def _workers_serial_only(cls, v):
+        if v is not None and v > 1:
+            raise ValueError(
+                "workers > 1 is not supported inside the ASGI server; use "
+                "Uvicorn's --workers flag for horizontal scaling."
+            )
+        return v
     max_iter: int = Field(1000, gt=0)
     xtx_jitter: float = Field(1e-8, gt=0.0)
     # Blocked design
@@ -251,7 +281,7 @@ class DesignOptionsModel(BaseModel):
 # Multi-response models
 # ---------------------------------------------------------------------------
 
-class ResponseSpecModel(BaseModel):
+class ResponseSpecModel(StrictRequestModel):
     """One response variable's power requirements for a multi-response design."""
 
     name: str = Field(..., min_length=1, description="Label for this response.")
@@ -273,7 +303,7 @@ class ResponseSpecModel(BaseModel):
     )
 
 
-class MultiResponseOptionsModel(BaseModel):
+class MultiResponseOptionsModel(StrictRequestModel):
     """Options for multi-response powered designs."""
 
     responses: List[ResponseSpecModel] = Field(

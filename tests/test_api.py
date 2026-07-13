@@ -2133,7 +2133,10 @@ class TestMultiResponseCLI:
         cfg_path = tmp_path / "mr_config.yml"
         cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
         out = str(tmp_path / "out")
-        rc = main(["--config", str(cfg_path), "--out", out])
+        # max_n=30 caps the search below target for this config, so the run
+        # is partial; UX-7 makes that exit 3 by default. This test asserts
+        # output files are written, so opt into --allow-partial.
+        rc = main(["--config", str(cfg_path), "--out", out, "--allow-partial"])
         assert rc == 0
         assert (tmp_path / "out_design.csv").exists()
         assert (tmp_path / "out_report.json").exists()
@@ -3393,3 +3396,55 @@ class TestSR33MultiResponseAnalysisReplication:
         assert len(df) > 0
         floats = df.select_dtypes(float)
         assert not np.isnan(floats.to_numpy()).any()
+
+
+# ---------------------------------------------------------------------------
+# UX-7: machine-readable search outcome
+# ---------------------------------------------------------------------------
+
+class TestUX7TerminationStatus:
+    """UX-7 regression: a search that exhausted its limits returned a
+    normal-looking result distinguishable from success only via warning
+    strings. All result paths now carry status / target_met /
+    termination_reason."""
+
+    _FACTORS = {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)}
+    _OPTS = dict(random_state=0, starts=1, candidate_points=100)
+
+    def test_complete_search_fields(self):
+        pc = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([1.5]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=60,
+        )
+        rep = find_optimal_design("~ 1 + x1 + x2", self._FACTORS, pc,
+                                  DesignOptions(**self._OPTS))["report"]
+        assert rep["status"] == "complete"
+        assert rep["target_met"] is True
+        assert rep["termination_reason"] == "target_reached"
+
+    def test_partial_search_fields(self):
+        pc = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.3]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=30,
+        )
+        rep = find_optimal_design("~ 1 + x1 + x2", self._FACTORS, pc,
+                                  DesignOptions(**self._OPTS))["report"]
+        assert rep["status"] == "partial"
+        assert rep["target_met"] is False
+        assert rep["termination_reason"] in ("max_n", "max_iter",
+                                             "candidate_cap")
+
+    def test_multiresponse_partial_fields(self):
+        resp = [ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
+                    L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.3]),
+                    sigma=1.0, alpha=0.05, power=0.8, max_n=30))
+                for nm in ("y1", "y2")]
+        out = find_multiresponse_design(
+            "~ 1 + x1 + x2", self._FACTORS,
+            MultiResponseOptions(responses=resp, power_combination="min"),
+            design_opts=DesignOptions(**self._OPTS),
+        )
+        assert out["status"] == "partial"
+        assert out["target_met"] is False
+        assert out["termination_reason"] in ("max_n", "max_iter",
+                                             "candidate_cap")

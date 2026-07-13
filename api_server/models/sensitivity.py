@@ -6,10 +6,12 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
+from .common import StrictRequestModel
+
 from api_server.models.common import DesignOptionsModel, FactorSpec, PowerCfgModel
 
 
-class SensitivityRequest(BaseModel):
+class SensitivityRequest(StrictRequestModel):
     """Request body for POST /sensitivity."""
 
     formula: str
@@ -41,7 +43,7 @@ class SensitivityResponse(BaseModel):
     columns: List[str]
 
 
-class MdeRequest(BaseModel):
+class MdeRequest(StrictRequestModel):
     """Request body for POST /mde."""
 
     design_df: List[Dict[str, Any]] = Field(

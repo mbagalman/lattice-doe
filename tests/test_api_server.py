@@ -1246,3 +1246,76 @@ class TestGLMDesignIntegration:
         })
         assert r.status_code == 200
         assert 0 < r.json()["report"]["achieved_power"] <= 1.0
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
+class TestUX4StrictRequestModels:
+    """UX-4 regression: request models silently discarded unknown fields
+    (misspellings like 'strats') and the documented 'workers' option was not
+    modeled at all. Request models now forbid extras and model workers
+    explicitly."""
+
+    _BODY = {
+        "formula": "~ 1 + A + B",
+        "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+        "power_cfg": {"type": "contrast", "L": [[0.0, 1.0, 0.0]],
+                      "delta": [1.5], "sigma": 1.0, "alpha": 0.05,
+                      "power": 0.8, "max_n": 40},
+        "design_opts": {"random_state": 0, "starts": 1,
+                        "candidate_points": 100},
+    }
+
+    async def test_misspelled_option_422(self, client):
+        import copy
+        body = copy.deepcopy(self._BODY)
+        body["design_opts"]["strats"] = 3
+        r = await client.post("/design", json=body)
+        assert r.status_code == 422
+        assert "strats" in str(r.json())
+
+    async def test_unknown_top_level_422(self, client):
+        import copy
+        body = copy.deepcopy(self._BODY)
+        body["bogus"] = True
+        r = await client.post("/design", json=body)
+        assert r.status_code == 422
+
+    async def test_workers_gt1_422_with_guidance(self, client):
+        import copy
+        body = copy.deepcopy(self._BODY)
+        body["design_opts"]["workers"] = 4
+        r = await client.post("/design", json=body)
+        assert r.status_code == 422
+        assert "--workers" in str(r.json())
+
+    async def test_workers_serial_accepted(self, client):
+        import copy
+        body = copy.deepcopy(self._BODY)
+        body["design_opts"]["workers"] = 1
+        r = await client.post("/design", json=body)
+        assert r.status_code == 200
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
+class TestUX7RestStatusFields:
+    """UX-7: the REST report must expose the structured search outcome."""
+
+    async def test_partial_status_in_report(self, client):
+        body = {
+            "formula": "~ 1 + A + B",
+            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+            "power_cfg": {"type": "contrast", "L": [[0.0, 1.0, 0.0]],
+                          "delta": [0.3], "sigma": 1.0, "alpha": 0.05,
+                          "power": 0.8, "max_n": 30},
+            "design_opts": {"random_state": 0, "starts": 1,
+                            "candidate_points": 100},
+        }
+        r = await client.post("/design", json=body)
+        assert r.status_code == 200
+        rep = r.json()["report"]
+        assert rep["status"] == "partial"
+        assert rep["target_met"] is False
+        assert rep["termination_reason"] in ("max_n", "max_iter",
+                                             "candidate_cap")

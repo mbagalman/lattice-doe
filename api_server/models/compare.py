@@ -6,11 +6,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .common import StrictRequestModel
+
 from api_server.models.common import DesignOptionsModel, FactorSpec, PowerCfgModel
 from api_server.models.design import DesignResponse
 
 
-class CompareCriteriaRequest(BaseModel):
+class CompareCriteriaRequest(StrictRequestModel):
     """Request body for POST /compare_criteria."""
 
     formula: str
