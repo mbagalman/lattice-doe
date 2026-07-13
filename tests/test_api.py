@@ -3322,3 +3322,74 @@ class TestSR30MultiResponseNumericCategoricals:
         )
         assert out["n"] > 3, "search must exceed the 3 numeric-coded cells"
         assert out["achieved_power"] + 1e-3 >= 0.8
+
+
+# ---------------------------------------------------------------------------
+# SR-32 (api pre-flight): indefinite sigma_joint rejected before the search
+# ---------------------------------------------------------------------------
+
+class TestSR32ApiPreflightIndefinite:
+    def test_indefinite_sigma_joint_rejected(self):
+        rng = np.random.default_rng(0)
+        Q, _ = np.linalg.qr(rng.standard_normal((4, 4)))
+        S = Q @ np.diag([-1.0, -1.0, 3.0, 3.0]) @ Q.T
+        S = 0.5 * (S + S.T)
+        L = np.array([[0.0, 1.0, 0.0]])
+        resp = [ResponseSpec(name=f"y{i}", power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([1.0]), sigma=1.0, alpha=0.05,
+                    power=0.8, max_n=80)) for i in range(4)]
+        mc = MultiResponseOptions(responses=resp, power_combination="min",
+                                  sigma_joint=S)
+        with pytest.raises(ValueError, match="positive definite"):
+            find_multiresponse_design(
+                "~ 1 + x1 + x2", {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
+                mc, design_opts=DesignOptions(random_state=0, starts=1,
+                                              candidate_points=100),
+            )
+
+
+# ---------------------------------------------------------------------------
+# SR-33: MR analysis paths must support numeric-categorical replication
+# ---------------------------------------------------------------------------
+
+class TestSR33MultiResponseAnalysisReplication:
+    """SR-33 regression (review round 5): power_curve_by_n_multiresponse
+    clipped requested n to the distinct-candidate count and lacked cat_cols,
+    so an n=4..8 curve over 3 numeric-coded cells returned all-NaN rows;
+    multiresponse_sensitivity had the same gap."""
+
+    def _mc(self):
+        from lattice_doe.config import (PowerContrastConfig, ResponseSpec,
+                                        MultiResponseOptions)
+        L = np.array([[0.0, 1.0, 0.0]])
+        resp = [ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([1.2]), sigma=1.0, alpha=0.05,
+                    power=0.8, max_n=60)) for nm in ("y1", "y2")]
+        return MultiResponseOptions(responses=resp, power_combination="min")
+
+    def _opts(self):
+        from lattice_doe.config import DesignOptions
+        return DesignOptions(random_state=0, starts=1, candidate_points=50,
+                             preallocate_categorical=True)
+
+    def test_curve_replicates_numeric_categories(self):
+        from lattice_doe.analysis import power_curve_by_n_multiresponse
+        res = power_curve_by_n_multiresponse(
+            "~ C(g)", {"g": [0, 1, 2]}, self._mc(),
+            n_range=(4, 8), n_points=3, design_opts=self._opts(),
+        )
+        df = res["data"] if isinstance(res, dict) else res
+        assert not df["combined_power"].isna().any(), "NaN rows remain"
+        # Power grows with n across the replicated sizes.
+        assert df["combined_power"].iloc[-1] > df["combined_power"].iloc[0]
+
+    def test_sensitivity_replicates_numeric_categories(self):
+        from lattice_doe.analysis import multiresponse_sensitivity
+        res = multiresponse_sensitivity(
+            "~ C(g)", {"g": [0, 1, 2]}, self._mc(), fixed_n=8,
+            design_opts=self._opts(),
+        )
+        df = res["data"] if isinstance(res, dict) else res
+        assert len(df) > 0
+        floats = df.select_dtypes(float)
+        assert not np.isnan(floats.to_numpy()).any()

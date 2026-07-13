@@ -1287,3 +1287,43 @@ class TestSR27WholePlotOnlyR2:
         with pytest.raises(ValueError, match="Whole-plot denominator df"):
             global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05,
                                htc_factor_cols=[0, 1])
+
+
+# ---------------------------------------------------------------------------
+# SR-32: positive determinant does not establish positive definiteness
+# ---------------------------------------------------------------------------
+
+class TestSR32IndefiniteSigmaJoint:
+    """SR-32 regression (review round 5): the PD check used the sign of the
+    determinant, which a symmetric indefinite matrix passes when it has an
+    even number of negative eigenvalues (eigs [-1,-1,3,3], det=9). Such a
+    matrix produced joint power 0.915 despite being an invalid covariance.
+    Both hotelling_t2_power and the api pre-flight now use Cholesky."""
+
+    @staticmethod
+    def _indefinite_sigma():
+        rng = np.random.default_rng(0)
+        Q, _ = np.linalg.qr(rng.standard_normal((4, 4)))
+        S = Q @ np.diag([-1.0, -1.0, 3.0, 3.0]) @ Q.T
+        return 0.5 * (S + S.T)
+
+    def test_hotelling_rejects_indefinite_sigma(self):
+        from lattice_doe.power import hotelling_t2_power
+        rng = np.random.default_rng(0)
+        X = np.column_stack([np.ones(20), rng.uniform(-1, 1, 20)])
+        L = np.array([[0.0, 1.0]])
+        Delta = rng.uniform(0.5, 1.0, (1, 4))
+        assert np.linalg.det(self._indefinite_sigma()) > 0  # slogdet passes it
+        with pytest.raises(ValueError, match="positive definite"):
+            hotelling_t2_power(L, Delta, X, self._indefinite_sigma(), 0.05)
+
+    def test_pd_sigma_still_accepted(self):
+        from lattice_doe.power import hotelling_t2_power
+        rng = np.random.default_rng(0)
+        Q, _ = np.linalg.qr(rng.standard_normal((4, 4)))
+        S = Q @ np.diag([1.0, 1.0, 3.0, 3.0]) @ Q.T
+        S = 0.5 * (S + S.T)
+        X = np.column_stack([np.ones(20), rng.uniform(-1, 1, 20)])
+        res = hotelling_t2_power(np.array([[0.0, 1.0]]),
+                                 rng.uniform(0.5, 1.0, (1, 4)), X, S, 0.05)
+        assert 0.0 < res.power < 1.0

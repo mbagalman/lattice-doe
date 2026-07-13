@@ -1180,13 +1180,16 @@ def hotelling_t2_power(
             f"max asymmetry = {float(np.max(np.abs(sigma_joint - sigma_joint.T))):.3e}."
         )
 
-    # Positive-definiteness: check via slogdet
-    sign, _ = np.linalg.slogdet(sigma_joint)
-    if sign <= 0:
+    # Positive-definiteness: Cholesky is the definitive test (SR-32) — a
+    # determinant-sign check passes indefinite matrices with an even number
+    # of negative eigenvalues.
+    try:
+        np.linalg.cholesky(sigma_joint)
+    except np.linalg.LinAlgError:
         raise ValueError(
-            "sigma_joint is singular (non-positive determinant). "
+            "sigma_joint is singular or not positive definite. "
             "The inter-response covariance must be positive definite."
-        )
+        ) from None
 
     rank_X = int(np.linalg.matrix_rank(X))
     # df1 counts independent hypothesis constraints: rank(L), not L's row

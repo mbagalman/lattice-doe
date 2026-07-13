@@ -1682,13 +1682,17 @@ def find_multiresponse_design(
                 "sigma_joint must be symmetric; max asymmetry = "
                 f"{float(np.max(np.abs(_sigma_joint_arr - _sigma_joint_arr.T))):.3e}."
             )
-        _sign_sj, _ = np.linalg.slogdet(_sigma_joint_arr)
-        if _sign_sj <= 0:
+        # Cholesky is the definitive PD test (SR-32): a determinant-sign
+        # check passes indefinite matrices with an even number of negative
+        # eigenvalues.
+        try:
+            np.linalg.cholesky(_sigma_joint_arr)
+        except np.linalg.LinAlgError:
             raise ValueError(
                 "sigma_joint is singular or not positive definite. The "
                 "inter-response covariance must be positive definite for "
                 "Hotelling T² joint power."
-            )
+            ) from None
         # Delta-consistency for rank-deficient L is X-independent for the
         # full-rank designs the search evaluates: check against range(L Lᵀ).
         from .power import _check_delta_consistency as _check_dc
