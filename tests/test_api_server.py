@@ -1319,3 +1319,139 @@ class TestUX7RestStatusFields:
         assert rep["target_met"] is False
         assert rep["termination_reason"] in ("max_n", "max_iter",
                                              "candidate_cap")
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
+class TestUX2JobsRouter:
+    """UX-2: asynchronous design jobs — submit/poll/cancel/capacity/SSE."""
+
+    _BODY = {
+        "formula": "~ 1 + A + B",
+        "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+        "power_cfg": {"type": "contrast", "L": [[0.0, 1.0, 0.0]],
+                      "delta": [1.2], "sigma": 1.0, "alpha": 0.05,
+                      "power": 0.8, "max_n": 60},
+        "design_opts": {"random_state": 0, "starts": 1,
+                        "candidate_points": 120},
+    }
+
+    async def _poll(self, client, jid, timeout=15.0):
+        import time as _time
+
+        import anyio
+        deadline = _time.monotonic() + timeout
+        terminal = {"done", "failed", "cancelled"}
+        while _time.monotonic() < deadline:
+            snap = (await client.get(f"/jobs/{jid}")).json()
+            if snap["state"] in terminal:
+                return snap
+            await anyio.sleep(0.1)
+        return (await client.get(f"/jobs/{jid}")).json()
+
+    async def test_submit_poll_done(self, client):
+        r = await client.post("/jobs/design", json=self._BODY)
+        assert r.status_code == 202
+        assert r.headers.get("Location") == f"/jobs/{r.json()['job_id']}"
+        jid = r.json()["job_id"]
+        snap = await self._poll(client, jid)
+        assert snap["state"] == "done", snap.get("error")
+        assert snap["result"]["report"]["n"] > 0
+        assert snap["progress"]["phase"] == "done"
+
+    async def test_multiresponse_submit_done(self, client):
+        body = {
+            "formula": "~ 1 + A + B",
+            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+            "multi_cfg": {
+                "responses": [
+                    {"name": "Y1", "power_cfg": {"type": "contrast",
+                     "L": [[0.0, 1.0, 0.0]], "delta": [1.2], "sigma": 1.0,
+                     "alpha": 0.05, "power": 0.8, "max_n": 60}},
+                    {"name": "Y2", "power_cfg": {"type": "contrast",
+                     "L": [[0.0, 1.0, 0.0]], "delta": [1.0], "sigma": 1.0,
+                     "alpha": 0.05, "power": 0.8, "max_n": 60}},
+                ],
+                "power_combination": "min",
+            },
+            "design_opts": {"random_state": 0, "starts": 1,
+                            "candidate_points": 120},
+        }
+        r = await client.post("/jobs/multiresponse_design", json=body)
+        assert r.status_code == 202
+        snap = await self._poll(client, r.json()["job_id"])
+        assert snap["state"] == "done", snap.get("error")
+        assert snap["result"]["n"] > 0
+
+    async def test_unknown_job_404(self, client):
+        assert (await client.get("/jobs/nope")).status_code == 404
+        assert (await client.delete("/jobs/nope")).status_code == 404
+
+    async def test_capacity_returns_503_with_retry_after(self, client, app):
+        from api_server.jobs import JobsAtCapacity
+
+        class _Full:
+            max_concurrent = 2
+            def submit(self, kind, runner):
+                raise JobsAtCapacity(retry_after=9)
+
+        original = app.state.job_manager
+        app.state.job_manager = _Full()
+        try:
+            r = await client.post("/jobs/design", json=self._BODY)
+            assert r.status_code == 503
+            assert r.headers.get("Retry-After") == "9"
+        finally:
+            app.state.job_manager = original
+
+    async def test_cancel_running_job(self, client):
+        # A hard target with more work so the job stays running long enough
+        # to be cancelled.
+        body = dict(self._BODY)
+        body["power_cfg"] = dict(self._BODY["power_cfg"], delta=[0.12],
+                                 max_n=400)
+        body["design_opts"] = dict(self._BODY["design_opts"],
+                                   candidate_points=500, starts=3, max_iter=40)
+        r = await client.post("/jobs/design", json=body)
+        jid = r.json()["job_id"]
+        # Wait until it is actually running.
+        import anyio
+        for _ in range(50):
+            s = (await client.get(f"/jobs/{jid}")).json()
+            if s["state"] == "running":
+                break
+            await anyio.sleep(0.05)
+        assert (await client.delete(f"/jobs/{jid}")).status_code == 200
+        snap = await self._poll(client, jid, timeout=20.0)
+        assert snap["state"] == "cancelled", snap
+
+
+@pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
+def test_ux2_sse_stream_reaches_terminal():
+    """UX-2: GET /jobs/{id}/events streams SSE frames to a terminal state."""
+    import json as _json
+
+    from fastapi.testclient import TestClient
+    from api_server.main import create_app
+
+    client = TestClient(create_app())
+    body = {
+        "formula": "~ 1 + A + B",
+        "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+        "power_cfg": {"type": "contrast", "L": [[0.0, 1.0, 0.0]],
+                      "delta": [1.2], "sigma": 1.0, "alpha": 0.05,
+                      "power": 0.8, "max_n": 60},
+        "design_opts": {"random_state": 0, "starts": 1,
+                        "candidate_points": 120},
+    }
+    jid = client.post("/jobs/design", json=body).json()["job_id"]
+    frames = []
+    with client.stream("GET", f"/jobs/{jid}/events") as r:
+        assert "text/event-stream" in r.headers.get("content-type", "")
+        for line in r.iter_lines():
+            if line and line.startswith("data:"):
+                frames.append(_json.loads(line[len("data: "):]))
+            if len(frames) > 100:
+                break
+    assert frames
+    assert frames[-1]["state"] in ("done", "failed", "cancelled")

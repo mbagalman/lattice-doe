@@ -52,6 +52,7 @@ from .power import (
 )
 from .utils import validate_factors, initial_n_guess
 from .blocked import blocked_formula, build_blocked_design
+from .progress import Phase, ProgressEvent, ProgressReporter, _coerce_reporter
 
 
 def _buckets_df(design_df: pd.DataFrame) -> pd.DataFrame:
@@ -201,6 +202,7 @@ def find_optimal_design(
     export_diagnostics_to: Optional[str] = None,
     export_report_to: Optional[str] = None,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,  # ADDED
+    on_progress: "Optional[Callable[[ProgressEvent], None] | ProgressReporter]" = None,
 ) -> Dict[str, Any]:
     """
     Build an I-optimal design and ensure (or approach) the requested power.
@@ -226,7 +228,15 @@ def find_optimal_design(
         **not** prevent the design result from being returned.
     progress_callback : callable, optional
         Function to call after each iteration, passing the current 'report' dict.
-        Useful for logging or progress bars.
+        Useful for logging or progress bars. (Legacy; prefer ``on_progress``.)
+    on_progress : callable or ProgressReporter, optional
+        Unified progress sink (UX-3). Receives :class:`~lattice_doe.progress.
+        ProgressEvent` objects describing phase transitions and each bisection
+        iteration. Pass a :class:`~lattice_doe.progress.ProgressReporter` to
+        control throttling or supply a cancellation predicate; a bare callable
+        is wrapped in a default reporter. Raising
+        :class:`~lattice_doe.progress.SearchCancelled` (via the reporter's
+        cancellation predicate) aborts the search.
 
     Returns
     -------
@@ -238,7 +248,11 @@ def find_optimal_design(
     if design_opts is None:
         design_opts = DesignOptions()
 
+    _reporter = _coerce_reporter(on_progress)
+
     # --- 1. Validate factors and inputs (early exit) ---
+    if _reporter is not None:
+        _reporter.emit(Phase.VALIDATING, message="Validating inputs", force=True)
     validate_factors(factors)
     p = _validate_api_inputs(formula, factors, power_cfg)
 
@@ -278,6 +292,13 @@ def find_optimal_design(
         candidate_points = int(design_opts.candidate_points)
 
     # --- 3. Build candidate set & cached model matrix ---
+    if _reporter is not None:
+        _reporter.emit(
+            Phase.GENERATING_CANDIDATES,
+            message=f"Generating {candidate_points} candidate points",
+            target_power=power_cfg.power,
+            force=True,
+        )
     cand = build_candidate(
         factors=factors,
         candidate_points=candidate_points,
@@ -555,16 +576,44 @@ def find_optimal_design(
                 },
             }
 
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.OPTIMIZING,
+                message="Searching over whole-plot count for target power",
+                target_power=target,
+                force=True,
+            )
+
         # Phase 1 — bisection over n_whole_plots
         while lo_wp < hi_wp and it < power_cfg.max_iter:
             n_wp = (lo_wp + hi_wp) // 2
             it += 1
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.OPTIMIZING,
+                    message=f"Building split-plot design at n_wp={n_wp}",
+                    iteration=it,
+                    trial_n=int(n_wp * subplots_per_wp),
+                    target_power=target,
+                )
             ev = _sp_eval(n_wp)
             if ev is None:
                 _run_warnings.append(f"Power is NaN at n_wp={n_wp}. Searching higher.")
                 lo_wp = n_wp + 1
                 continue
             ev["report"]["iteration"] = it
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.OPTIMIZING,
+                    message=(
+                        f"n_wp={n_wp}: power="
+                        f"{ev['report']['achieved_power']:.4f} (target {target:.4f})"
+                    ),
+                    iteration=it,
+                    trial_n=int(ev["report"]["n"]),
+                    current_power=float(ev["report"]["achieved_power"]),
+                    target_power=target,
+                )
             if progress_callback:
                 try:
                     progress_callback(ev["report"])
@@ -672,6 +721,21 @@ def find_optimal_design(
             except Exception as e:
                 best["report"]["report_path_error"] = str(e)
 
+        if _reporter is not None:
+            _rep = best["report"]
+            _reporter.emit(
+                Phase.DONE,
+                message=(
+                    f"Done: n={_rep.get('n')}, power="
+                    f"{_rep.get('achieved_power', float('nan')):.4f} "
+                    f"({_rep.get('status', 'complete')})"
+                ),
+                trial_n=_rep.get("n"),
+                current_power=_rep.get("achieved_power"),
+                target_power=target,
+                force=True,
+            )
+
         best.pop("_n_wp", None)
         best.pop("_X", None)
         return best
@@ -770,12 +834,32 @@ def find_optimal_design(
         cat_cells_cap=design_opts.cat_cells_cap,
     ) if is_blocked else {}
 
+    if _reporter is not None:
+        _reporter.emit(
+            Phase.OPTIMIZING,
+            message="Searching for the minimum n meeting target power",
+            target_power=target,
+            force=True,
+        )
+
     while lo < hi and it < power_cfg.max_iter:
         n = (lo + hi) // 2
         if n > power_cfg.max_n:
             lo = hi  # out of range; exit
             break
         it += 1
+
+        # Pre-build event (UX-3): fires before the potentially long design
+        # build so pollers see "building n=…" immediately, bounding the
+        # silent interval to one build cycle.
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.OPTIMIZING,
+                message=f"Building design at n={n}",
+                iteration=it,
+                trial_n=int(n),
+                target_power=target,
+            )
 
         # 1) Build I-optimal design at n
         if is_blocked:
@@ -925,6 +1009,16 @@ def find_optimal_design(
             except Exception as e:
                 warnings.warn(f"Progress callback failed: {e}", RuntimeWarning)
 
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.OPTIMIZING,
+                message=f"n={n}: power={power:.4f} (target {target:.4f})",
+                iteration=it,
+                trial_n=int(n),
+                current_power=float(power),
+                target_power=target,
+            )
+
         # Bisection step: if power achieved, record minimum-n achiever and search lower;
         # otherwise record best non-achiever as fallback and search higher.
         if power + tol >= target:
@@ -966,6 +1060,14 @@ def find_optimal_design(
     # max(p+1, n*-verify_window) to find any smaller n that also achieves target.
     if best is not None and best["report"]["achieved_power"] + tol >= target:
         n_star = int(best["report"]["n"])
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.VERIFYING,
+                message=f"Verifying no smaller n below n={n_star} achieves target",
+                trial_n=n_star,
+                target_power=target,
+                force=True,
+            )
         verify_window = min(max(5, n_star // 10), max(0, power_cfg.max_iter - it))
         _verify_window = verify_window  # record for final report
         # Floor mirrors Phase 1's lower bound: n must exceed p_full (else
@@ -1134,6 +1236,11 @@ def find_optimal_design(
     })
 
     # 6. Optional export
+    if (export_diagnostics_to or export_report_to) and _reporter is not None:
+        _reporter.emit(
+            Phase.WRITING_OUTPUT, message="Writing exports", force=True
+        )
+
     if export_diagnostics_to:
         try:
             export_paths = export_diagnostics(
@@ -1170,6 +1277,20 @@ def find_optimal_design(
     # Strip internal cache
     best.pop("_selected_idx", None)
     best.pop("_X_cand", None)
+
+    if _reporter is not None:
+        _rep = best["report"]
+        _reporter.emit(
+            Phase.DONE,
+            message=(
+                f"Done: n={_rep.get('n')}, power={_rep.get('achieved_power', float('nan')):.4f}"
+                f" ({_rep.get('status', 'complete')})"
+            ),
+            trial_n=_rep.get("n"),
+            current_power=_rep.get("achieved_power"),
+            target_power=target_power,
+            force=True,
+        )
     return best
 
 
@@ -1178,6 +1299,7 @@ def find_multiresponse_design(
     factors: Dict[str, Any],
     multi_cfg: MultiResponseOptions,
     design_opts: Optional[DesignOptions] = None,
+    on_progress: "Optional[Callable[[ProgressEvent], None] | ProgressReporter]" = None,
 ) -> Dict[str, Any]:
     """Find the minimum-n I-optimal design achieving target power for all responses.
 
@@ -1211,6 +1333,10 @@ def find_multiresponse_design(
     if design_opts is None:
         design_opts = DesignOptions()
 
+    _reporter = _coerce_reporter(on_progress)
+    if _reporter is not None:
+        _reporter.emit(Phase.VALIDATING, message="Validating inputs", force=True)
+
     validate_factors(factors)
     is_sp = _is_split_plot(design_opts)
 
@@ -1228,6 +1354,12 @@ def find_multiresponse_design(
     else:
         candidate_points = int(design_opts.candidate_points)
 
+    if _reporter is not None:
+        _reporter.emit(
+            Phase.GENERATING_CANDIDATES,
+            message=f"Generating {candidate_points} candidate points",
+            force=True,
+        )
     cand = build_candidate(
         factors=factors, candidate_points=candidate_points,
         seed=design_opts.random_state,
@@ -1490,6 +1622,15 @@ def find_multiresponse_design(
                     "A smaller n may suffice for this response alone."
                 )
 
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.DONE,
+                message=f"Done: n={int(n_final)}, combined power={float(combined_final):.4f}",
+                trial_n=int(n_final),
+                current_power=float(combined_final),
+                target_power=target,
+                force=True,
+            )
         return {
             "design": best["_design_df"],
             "n": int(n_final),
@@ -1655,6 +1796,15 @@ def find_multiresponse_design(
                     "A smaller n may suffice for this response alone."
                 )
 
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.DONE,
+                message=f"Done: n={int(n_final_c)}, combined power={float(combined_final_c):.4f}",
+                trial_n=int(n_final_c),
+                current_power=float(combined_final_c),
+                target_power=target,
+                force=True,
+            )
         return {
             "design": best_c["_design_df"],
             "n": int(n_final_c),
@@ -1815,6 +1965,14 @@ def find_multiresponse_design(
             "_per_r": per_r_, "_combined": combined_, "_ht2": _ht2_result,
         }
 
+    if _reporter is not None:
+        _reporter.emit(
+            Phase.OPTIMIZING,
+            message="Searching for the minimum n meeting combined target",
+            target_power=target,
+            force=True,
+        )
+
     # Phase 1 — bisection
     while lo < hi and it < max_iter:
         n = (lo + hi) // 2
@@ -1822,6 +1980,14 @@ def find_multiresponse_design(
             lo = hi
             break
         it += 1
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.OPTIMIZING,
+                message=f"Building multi-response design at n={n}",
+                iteration=it,
+                trial_n=int(n),
+                target_power=target,
+            )
         ev = _ols_eval_mr(n)
         if ev is None:
             _msg = f"Combined power is NaN at n={n}. Searching higher."
@@ -1830,6 +1996,15 @@ def find_multiresponse_design(
             lo = n + 1
             continue
         ev["_n"] = n
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.OPTIMIZING,
+                message=f"n={n}: combined power={ev['_combined']:.4f} (target {target:.4f})",
+                iteration=it,
+                trial_n=int(n),
+                current_power=float(ev["_combined"]),
+                target_power=target,
+            )
         if ev["_combined"] + tol >= target:
             # Achiever replaces any non-achiever fallback (SR-25).
             _best_achieves = (
@@ -1932,6 +2107,18 @@ def find_multiresponse_design(
         _out["joint_lam"] = float(_ht2_final.lam)
         _out["joint_df1"] = int(_ht2_final.df1)
         _out["joint_df2"] = int(_ht2_final.df2)
+    if _reporter is not None:
+        _reporter.emit(
+            Phase.DONE,
+            message=(
+                f"Done: n={_out['n']}, combined power={_out['achieved_power']:.4f} "
+                f"({_out.get('status', 'complete')})"
+            ),
+            trial_n=_out["n"],
+            current_power=_out["achieved_power"],
+            target_power=target,
+            force=True,
+        )
     return _out
 
 

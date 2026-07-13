@@ -281,3 +281,44 @@ design:
 
     def test_allow_partial_exits_0(self, tmp_path):
         assert self._run(tmp_path, ["--allow-partial"]) == 0
+
+
+class TestUX3CliProgress:
+    """UX-3: --progress streams live search progress to stderr."""
+
+    _CFG = """
+formula: "~ 1 + x1 + x2"
+factors:
+  x1: [-1.0, 1.0]
+  x2: [-1.0, 1.0]
+contrast:
+  L: [[0.0, 1.0, 0.0]]
+  delta: [1.2]
+alpha: 0.05
+power: 0.80
+sigma: 1.0
+max_n: 60
+design:
+  auto_candidate: false
+  candidate_points: 100
+  starts: 1
+  random_state: 0
+"""
+
+    def test_progress_flag_writes_phase_lines_to_stderr(self, tmp_path, capsys):
+        cfg = tmp_path / "cfg.yml"
+        cfg.write_text(self._CFG, encoding="utf-8")
+        rc = main(["--config", str(cfg), "--out", str(tmp_path), "--progress"])
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "validating" in err
+        assert "optimizing" in err
+        assert "done" in err
+
+    def test_no_progress_flag_stays_quiet(self, tmp_path, capsys):
+        cfg = tmp_path / "cfg.yml"
+        cfg.write_text(self._CFG, encoding="utf-8")
+        main(["--config", str(cfg), "--out", str(tmp_path)])
+        err = capsys.readouterr().err
+        # Phase lines only appear with --progress (or --verbose).
+        assert "optimizing" not in err

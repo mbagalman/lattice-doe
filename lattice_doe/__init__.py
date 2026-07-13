@@ -42,6 +42,7 @@ from .analysis import (  # noqa: F401
 )
 from .power import contrast_power_sp, global_r2_power_sp, eval_response_power, combine_powers, hotelling_t2_power, glm_contrast_power  # noqa: F401
 from .allocation import i_optimal_allocation  # noqa: F401
+from .progress import Phase, ProgressEvent, ProgressReporter, SearchCancelled  # noqa: F401
 from .candidate import build_candidate, build_split_plot_candidate  # noqa: F401
 from .model_matrix import build_model_matrix  # noqa: F401
 from .iopt_search import augment_design, build_split_plot_design  # noqa: F401
@@ -89,6 +90,10 @@ __all__ = [
     "power_surface_2d",
     # Low-level utilities
     "i_optimal_allocation",
+    "Phase",
+    "ProgressEvent",
+    "ProgressReporter",
+    "SearchCancelled",
     "build_candidate",
     "build_split_plot_candidate",
     "build_model_matrix",

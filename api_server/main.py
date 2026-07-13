@@ -26,7 +26,8 @@ from fastapi import FastAPI
 
 from api_server import __version__
 from api_server.errors import register_exception_handlers
-from api_server.routers import augment, compare, design, power_curve, sensitivity
+from api_server.jobs import build_job_manager
+from api_server.routers import augment, compare, design, jobs, power_curve, sensitivity
 
 logging.basicConfig(
     level=logging.INFO,
@@ -67,17 +68,26 @@ def create_app() -> FastAPI:
             "cannot travel over HTTP. Allowed functions: ``abs``, ``min``, "
             "``max``, ``round``, ``sqrt``, ``log``, ``exp``, ``floor``, ``ceil``.\n\n"
             "## Parallel starts\n"
-            "The ``workers`` field in ``design_opts`` is accepted but ignored "
-            "inside the ASGI server (ProcessPoolExecutor conflicts with Uvicorn "
-            "event-loop state). Use Uvicorn's own ``--workers`` flag instead."
+            "The ``workers`` field in ``design_opts`` must be null or 1 inside "
+            "the ASGI server (ProcessPoolExecutor conflicts with Uvicorn "
+            "event-loop state); ``workers > 1`` is rejected with a 422. Use "
+            "Uvicorn's own ``--workers`` flag for horizontal scaling.\n\n"
+            "## Async jobs\n"
+            "For long searches, submit to ``POST /jobs/design`` (202 + job id) "
+            "and poll ``GET /jobs/{id}`` or stream ``GET /jobs/{id}/events`` "
+            "for live progress; ``DELETE /jobs/{id}`` cancels."
         ),
         lifespan=lifespan,
         docs_url="/docs",
         redoc_url="/redoc",
     )
 
+    # --- Job manager (async searches, UX-2) ---
+    app.state.job_manager = build_job_manager()
+
     # --- Routers ---
     app.include_router(design.router, tags=["Design"])
+    app.include_router(jobs.router, tags=["Async Jobs"])
     app.include_router(power_curve.router, tags=["Power Curve"])
     app.include_router(sensitivity.router, tags=["Sensitivity & MDE"])
     app.include_router(compare.router, tags=["Criteria Comparison"])

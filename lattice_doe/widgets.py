@@ -777,11 +777,24 @@ class DesignWidget:
             power_cfg = _build_power_cfg_from_state(state)
             design_opts = _build_design_opts_from_state(state, self._extra_do_kwargs)
 
+            # Live progress in the status line (UX-3).
+            from .progress import ProgressReporter
+
+            def _on_ev(ev) -> None:
+                _p = (f" — power {ev.current_power:.4f}"
+                      if ev.current_power is not None else "")
+                _n = f" n={ev.trial_n}" if ev.trial_n is not None else ""
+                self._status_html.value = (
+                    f"<i style='color:gray'>[{ev.elapsed_sec:.1f}s] "
+                    f"{ev.phase}{_n}{_p}…</i>"
+                )
+
             result = find_optimal_design(
                 formula=formula,
                 factors=factors,
                 power_cfg=power_cfg,
                 design_opts=design_opts,
+                on_progress=ProgressReporter(_on_ev, min_interval=0.2),
             )
             self._result = result
             _report = result.get("report", {})

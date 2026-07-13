@@ -702,6 +702,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Enable verbose logging output (DEBUG level)"
     )
     parser.add_argument(
+        "--progress",
+        action="store_true",
+        default=False,
+        help=(
+            "Stream live search progress (phase, iteration, n, power, elapsed) "
+            "to stderr while the design search runs."
+        ),
+    )
+    parser.add_argument(
         "--sheets",
         metavar="URL_OR_ID",
         default=None,
@@ -1026,12 +1035,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         # --- End Validation, Start Main Task ---
         logger.info("Config validated. Running powered design generation...")
 
+        # Live progress to stderr (UX-3), enabled by --progress or verbose.
+        _on_progress = None
+        if args.progress or args.verbose:
+            from lattice_doe.progress import ProgressReporter
+
+            def _render_progress(ev) -> None:
+                _bits = [f"[{ev.elapsed_sec:6.1f}s] {ev.phase}"]
+                if ev.trial_n is not None:
+                    _bits.append(f"n={ev.trial_n}")
+                if ev.current_power is not None:
+                    _bits.append(f"power={ev.current_power:.4f}")
+                if ev.message:
+                    _bits.append(f"— {ev.message}")
+                print("  ".join(_bits), file=sys.stderr, flush=True)
+
+            _on_progress = ProgressReporter(_render_progress, min_interval=0.3)
+
         if _is_multiresponse:
             _mr_result = find_multiresponse_design(
                 formula=formula,
                 factors=factors,
                 multi_cfg=multi_cfg,
                 design_opts=design_opts,
+                on_progress=_on_progress,
             )
             # Normalize multi-response result to the CLI's standard format
             design_df = _mr_result["design"]
@@ -1067,6 +1094,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 factors,
                 power_cfg,
                 design_opts,
+                on_progress=_on_progress,
             )
             design_df = result["design_df"]
             buckets_df = result["buckets_df"]
