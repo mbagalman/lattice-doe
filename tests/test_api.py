@@ -3213,3 +3213,43 @@ class TestSR20HotellingSearchSemantics:
         assert any("Falling back" in s for s in out["warnings"])
         assert "joint_power" not in out
         assert out["achieved_power"] + 1e-3 >= 0.8
+
+
+# ---------------------------------------------------------------------------
+# SR-26: Hotelling df-infeasible n must be infeasible, not a semantics switch
+# ---------------------------------------------------------------------------
+
+class TestSR26HotellingFeasibilityFloor:
+    """SR-26 regression (review of SR-20c): probing an n with joint df2 =
+    n - rank(X) - k + 1 <= 0 made hotelling_t2_power raise, which tripped the
+    sticky scalar fallback -- the whole search silently switched to
+    marginal-power semantics and could return designs the joint test cannot
+    even be run on. Such n are now infeasible (search floor p + k; probes
+    below joint feasibility return None), and the fallback is reserved for
+    structural failures."""
+
+    def test_strong_effects_keep_joint_objective(self):
+        import warnings as _w
+        L = np.array([[0.0, 1.0, 0.0]])
+        resp = [
+            ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
+                L=L, delta=np.array([5.0]), sigma=1.0, alpha=0.05,
+                power=0.8, max_n=80))
+            for nm in ("y1", "y2")
+        ]
+        mc = MultiResponseOptions(
+            responses=resp, power_combination="min",
+            sigma_joint=np.array([[1.0, 0.3], [0.3, 1.0]]),
+        )
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            out = find_multiresponse_design(
+                "~ 1 + x1 + x2", {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
+                mc, design_opts=DesignOptions(random_state=0, starts=1,
+                                              candidate_points=100),
+            )
+        assert "joint_power" in out, "joint objective was abandoned"
+        assert out["joint_power"] + 1e-3 >= 0.8
+        # p = 3 params, k = 2 responses: joint test needs n >= 5
+        assert out["n"] >= 5
+        assert not any("Falling back" in str(c.message) for c in caught)

@@ -692,6 +692,7 @@ def _preallocated_design(
     alloc_wynn_max_iter: int,
     alloc_wynn_tol: float,
     cat_cells_cap: int,
+    cat_cols: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, np.ndarray, List[str]]:
     """Run pre-allocation then per-cell Fedorov exchange.
 
@@ -713,8 +714,17 @@ def _preallocated_design(
     ``alloc_min_per_cell`` minimum (the plain search then selects a subset of
     cells, which keeps small-n probes of an n-search feasible).
     """
-    # Detect categorical columns (non-numeric dtype)
-    cat_cols = [c for c in cand.columns if not pd.api.types.is_numeric_dtype(cand[c])]
+    # Categorical columns: prefer the caller-supplied factor-spec metadata —
+    # dtype inference misclassifies numeric-coded categories such as
+    # {"g": [0, 1, 2]} as continuous, bypassing allocation/replication
+    # entirely (SR-28). Fall back to dtype detection for direct callers.
+    if cat_cols is not None:
+        cat_cols = [c for c in cat_cols if c in cand.columns]
+    else:
+        cat_cols = [
+            c for c in cand.columns
+            if not pd.api.types.is_numeric_dtype(cand[c])
+        ]
 
     if not cat_cols:
         # No categorical columns — fall back to normal search
@@ -863,6 +873,7 @@ def build_i_opt_design_with_idx(
     alloc_wynn_max_iter: int = 500,
     alloc_wynn_tol: float = 1e-6,
     cat_cells_cap: int = 10_000,
+    cat_cols: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, np.ndarray, List[str]]:
     """Build an I-optimal design and also return selected row indices.
 
@@ -917,6 +928,11 @@ def build_i_opt_design_with_idx(
         Convergence tolerance for the Wynn algorithm.
     cat_cells_cap : int, default 10 000
         Maximum number of categorical cells; raises if exceeded.
+    cat_cols : list of str, optional
+        Names of the categorical factor columns, taken from the original
+        factor specification (SR-28). When omitted, categorical columns are
+        inferred from non-numeric dtypes — which misclassifies numeric-coded
+        categories such as ``[0, 1, 2]`` levels as continuous.
 
     Returns
     -------
@@ -939,6 +955,7 @@ def build_i_opt_design_with_idx(
             alloc_wynn_max_iter=alloc_wynn_max_iter,
             alloc_wynn_tol=alloc_wynn_tol,
             cat_cells_cap=cat_cells_cap,
+            cat_cols=cat_cols,
         )
 
     p_names: List[str] = []
@@ -955,7 +972,7 @@ def build_i_opt_design_with_idx(
 
     n_cand = len(cand)
     if n > n_cand:
-        _has_cat = any(
+        _has_cat = bool(cat_cols) or any(
             not pd.api.types.is_numeric_dtype(cand[c]) for c in cand.columns
         )
         _hint = (

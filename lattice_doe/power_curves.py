@@ -29,7 +29,7 @@ import warnings
 
 from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions
 from .config import glm_fisher_weight
-from .candidate import build_candidate, estimate_candidate_size
+from .candidate import build_candidate, estimate_candidate_size, _is_continuous_spec
 from .model_matrix import build_model_matrix
 from .iopt_search import build_i_opt_design, build_i_opt_design_with_idx
 from .power import contrast_power, global_r2_power, glm_contrast_power
@@ -682,6 +682,11 @@ def power_surface_2d(
                 alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
                 alloc_wynn_tol=design_opts.alloc_wynn_tol,
                 cat_cells_cap=design_opts.cat_cells_cap,
+                # Spec-derived categorical names, not dtype inference (SR-28)
+                cat_cols=[
+                    k for k, v in factors.items()
+                    if not _is_continuous_spec(v)
+                ],
             )
             _x_cache[n_val] = X_cand[sel_idx, :]
         return _x_cache[n_val]

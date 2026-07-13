@@ -41,6 +41,7 @@ from .iopt_search import build_i_opt_design_with_idx, build_split_plot_design, b
 from .split_plot import (
     build_whole_plot_indicator, htc_factor_cols_from_names,
     classify_contrasts, split_plot_df_denom, split_plot_rank_wp,
+    split_plot_r2_df_denom,
 )
 from .diag_metrics import compute_design_metrics
 from .diag_export import export_diagnostics
@@ -491,9 +492,9 @@ def find_optimal_design(
                     df_denom_ = int(_dfs_r.min())
                     df_num_ = 1
             else:
-                _rank_X_r = int(np.linalg.matrix_rank(X_))
-                _rank_wp_r = split_plot_rank_wp(X_, Z_, _htc_cols or None)
-                df_denom_ = int(n_total_ - n_wp_ - (_rank_X_r - _rank_wp_r))
+                df_denom_ = int(
+                    split_plot_r2_df_denom(X_, Z_, _htc_cols or None)
+                )
             return {
                 "design_df": design_df_,
                 "buckets_df": _buckets_df(design_df_),
@@ -658,11 +659,18 @@ def find_optimal_design(
         _r2_df_num(X_cand) if (is_blocked and mode == "r2") else None
     )
 
+    # Categorical columns from the factor SPEC, not dtype inference (SR-28):
+    # numeric-coded categories like {"g": [0, 1, 2]} have numeric dtype but
+    # are categorical factors.
+    from .candidate import _is_continuous_spec as _is_cont_spec
+
+    _spec_cat_cols = [k for k, v in factors.items() if not _is_cont_spec(v)]
+
     _n_cand = len(cand)
     _prealloc_replicates = (
         design_opts.preallocate_categorical
         and not is_blocked
-        and any(not pd.api.types.is_numeric_dtype(cand[c]) for c in cand.columns)
+        and bool(_spec_cat_cols)
     )
     if _prealloc_replicates:
         # Pre-allocation treats per-cell allocation counts as replication
@@ -703,6 +711,7 @@ def find_optimal_design(
         alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
         alloc_wynn_tol=design_opts.alloc_wynn_tol,
         cat_cells_cap=design_opts.cat_cells_cap,
+        cat_cols=_spec_cat_cols,
     )
 
     # Kwargs for build_blocked_design (blocked mode only)
@@ -1653,6 +1662,13 @@ def find_multiresponse_design(
         _L_common = _Delta_joint = _sigma_joint_arr = None  # type: ignore[assignment]
 
     lo = p + 1
+    if _use_hotelling:
+        # Joint T² feasibility floor (SR-26): the multivariate error df is
+        # n − rank(X) − k + 1, so the joint test needs n ≥ p + k. Without
+        # this floor, small probes made the T² computation raise and the
+        # search silently switched to marginal-power semantics.
+        _k_resp = len(multi_cfg.responses)
+        lo = max(lo, p + _k_resp)
     # The shared candidate pool bounds the largest reachable n (see
     # _capped_search_max_n).
     _n_cand_mr = len(cand)
@@ -1681,6 +1697,12 @@ def find_multiresponse_design(
             for r in multi_cfg.responses
         ]
         if _use_hotelling and not _ht2_state["failed"]:
+            # df-infeasibility at THIS n is not a reason to abandon the
+            # joint objective (SR-26): treat the size as infeasible and let
+            # the search move higher, exactly like a NaN power.
+            _k_resp_eval = _Delta_joint.shape[1]
+            if n_ - int(np.linalg.matrix_rank(X_)) - _k_resp_eval + 1 <= 0:
+                return None
             try:
                 ht2_ = hotelling_t2_power(
                     _L_common, _Delta_joint, X_, _sigma_joint_arr,
@@ -1750,7 +1772,14 @@ def find_multiresponse_design(
         n_star = best["_n"]
         verify_window = min(max(5, n_star // 10), max(0, max_iter - it))
         _verify_window = verify_window
-        for n_check in range(n_star - 1, max(p, n_star - verify_window - 1), -1):
+        # Scan floor mirrors Phase 1's lower bound; in Hotelling mode the
+        # joint test additionally needs n ≥ p + k (SR-26).
+        _scan_floor_mr = max(
+            p,
+            (p + len(multi_cfg.responses) - 1) if _use_hotelling else 0,
+            n_star - verify_window - 1,
+        )
+        for n_check in range(n_star - 1, _scan_floor_mr, -1):
             if it >= max_iter:
                 break
             _ran_phase2 = True

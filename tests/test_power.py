@@ -1225,3 +1225,65 @@ class TestSR22SplitPlotReportedDf:
         # SP stratum df = n − n_wp − (rank X − rank X_wp) = 12 − 4 − 1 = 7,
         # not the pooled OLS df2 = n − rank(X) = 9.
         assert out["df2"] == 7
+
+
+# ---------------------------------------------------------------------------
+# SR-27: whole-plot-only models must use the between-plot stratum
+# ---------------------------------------------------------------------------
+
+class TestSR27WholePlotOnlyR2:
+    """SR-27 regression (review of SR-11): global_r2_power_sp always used the
+    sub-plot df even when every predictor is a whole-plot term, reporting
+    power 0.97 where the exact plot-mean analysis gives 0.18. WP-only models
+    now use df = n_wp - rank(X_wp) and the plot-mean noncentrality
+    lambda = f2*(1+eta)*sum(m_j/(1+eta*m_j)), MC-verified exact for balanced
+    designs across four configurations."""
+
+    def _wp_only_design(self, n_wp=4, m=10):
+        from lattice_doe.split_plot import build_whole_plot_indicator
+        A = np.repeat(np.array([-1.0, -0.33, 0.33, 1.0])[:n_wp], m)
+        X = np.column_stack([np.ones(n_wp * m), A])
+        Z = build_whole_plot_indicator(n_wp * m, n_wp, m)
+        return X, Z
+
+    def test_wp_only_model_uses_plot_mean_analysis(self):
+        from lattice_doe.power import global_r2_power_sp
+        from scipy.stats import f as f_dist, ncf as ncf_dist
+        X, Z = self._wp_only_design()
+        res = global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05,
+                                 htc_factor_cols=[0, 1])
+        # Hand-computed plot-mean formula (MC truth 0.1817 within noise)
+        f2 = 0.3 / 0.7
+        lam = f2 * 2.0 * 4 * 10 / 11
+        expected = float(1 - ncf_dist.cdf(f_dist.isf(0.05, 1, 2), 1, 2, lam))
+        assert res.power == pytest.approx(expected, abs=1e-10)
+        assert res.power < 0.25  # nowhere near the old 0.97
+
+    def test_wp_only_df_helper(self):
+        from lattice_doe.split_plot import split_plot_r2_df_denom
+        X, Z = self._wp_only_design()
+        assert split_plot_r2_df_denom(X, Z, [0, 1]) == 2   # n_wp - rank(X_wp)
+        assert split_plot_r2_df_denom(X, Z, None) == 36 - 1  # fallback: SP path
+
+    def test_mixed_model_keeps_sp_path_and_warning(self):
+        import warnings as _w
+        from lattice_doe.power import global_r2_power_sp
+        from lattice_doe.split_plot import build_whole_plot_indicator
+        n_wp, m = 4, 10
+        A = np.repeat([-1.0, -0.33, 0.33, 1.0], m)
+        B = np.tile(np.linspace(-1, 1, m), n_wp)
+        X = np.column_stack([np.ones(n_wp * m), A, B])
+        Z = build_whole_plot_indicator(n_wp * m, n_wp, m)
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            res = global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0,
+                                     alpha=0.05, htc_factor_cols=[0, 1])
+        assert 0.0 < res.power < 1.0
+        assert any("blended" in str(c.message) for c in caught)
+
+    def test_wp_saturated_raises(self):
+        from lattice_doe.power import global_r2_power_sp
+        X, Z = self._wp_only_design(n_wp=2, m=10)
+        with pytest.raises(ValueError, match="Whole-plot denominator df"):
+            global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05,
+                               htc_factor_cols=[0, 1])

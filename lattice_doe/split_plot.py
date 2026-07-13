@@ -324,6 +324,27 @@ def split_plot_rank_wp(
     return int(np.linalg.matrix_rank(X_wp))
 
 
+def split_plot_r2_df_denom(
+    X: np.ndarray,
+    Z: np.ndarray,
+    htc_factor_cols: Optional[List[int]] = None,
+) -> int:
+    """Denominator df used by ``global_r2_power_sp`` (SR-22/SR-27).
+
+    Whole-plot stratum df (``n_wp − rank(X_wp)``) when every predictor is a
+    whole-plot term (rank(X) = rank(X_wp), detectable only when
+    *htc_factor_cols* is provided); otherwise the sub-plot stratum df
+    ``n − n_wp − (rank(X) − rank(X_wp))``. Mirrors the branch inside
+    ``global_r2_power_sp`` so report metadata matches the computation.
+    """
+    n_total, n_wp = Z.shape
+    rank_X = int(np.linalg.matrix_rank(X))
+    rank_X_wp = split_plot_rank_wp(X, Z, htc_factor_cols)
+    if htc_factor_cols and rank_X == rank_X_wp:
+        return n_wp - rank_X_wp
+    return n_total - n_wp - (rank_X - rank_X_wp)
+
+
 # ---------------------------------------------------------------------------
 # Per-contrast denominator degrees of freedom
 # ---------------------------------------------------------------------------
@@ -434,6 +455,7 @@ __all__ = [
     "gls_information_matrix",
     "classify_contrasts",
     "split_plot_rank_wp",
+    "split_plot_r2_df_denom",
     "split_plot_df_denom",
     "htc_factor_cols_from_names",
 ]

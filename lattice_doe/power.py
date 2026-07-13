@@ -705,15 +705,21 @@ def global_r2_power_sp(
         λ = f² · max(1, tr(Ṽ⁻¹) − df_num)   (lambda_mode="n_minus_p")
     where Ṽ⁻¹ = (η ZZ' + I)⁻¹ is the scaled inverse covariance.
 
-    Denominator df is the sub-plot stratum df, consistent with
-    ``split_plot_df_denom`` (SR-11):
+    The error stratum follows the tested terms (SR-27):
 
-        df_denom = n − n_wp − (rank(X) − rank(X_wp))
+    * **All predictors whole-plot** (rank(X) = rank(X_wp), detectable when
+      *htc_factor_cols* is provided): the test lives in the between-plot
+      stratum — df_denom = n_wp − rank(X_wp) and
+      λ = f²·(1+η)·Σ_j m_j/(1+η·m_j), the exact plot-mean analysis for
+      balanced designs (MC-verified).
+    * **Otherwise** (mixed or sub-plot predictors): the sub-plot stratum df,
+      consistent with ``split_plot_df_denom`` (SR-11):
+      df_denom = n − n_wp − (rank(X) − rank(X_wp)), with the blended
+      tr(Ṽ⁻¹) noncentrality and its documented warning.
 
-    where rank(X_wp) is computed from *htc_factor_cols* when provided and
-    approximated as 1 (intercept only) otherwise — the fallback is
-    conservative (fewer df).  A ``ValueError`` is raised when df_denom ≤ 0
-    (the sub-plot stratum cannot support the test), instead of silently
+    rank(X_wp) is computed from *htc_factor_cols* when provided and
+    approximated as 1 (intercept only) otherwise.  A ``ValueError`` is
+    raised when the governing stratum's df ≤ 0, instead of silently
     clamping to 1 as earlier versions did.
 
     At eta = 0 the result is identical to ``global_r2_power``.  Note the
@@ -786,16 +792,6 @@ def global_r2_power_sp(
     if eta == 0.0:
         return global_r2_power(r2_target, X, alpha, lambda_mode=lambda_mode)
 
-    warnings.warn(
-        "global_r2_power_sp approximates the split-plot noncentrality with a "
-        "blended effective sample size tr((η ZZ' + I)⁻¹), which assumes the R² "
-        "signal is spread proportionally across whole-plot and sub-plot strata. "
-        "If the signal comes mainly from whole-plot (HTC) factors the power "
-        "estimate can be optimistic; validate by simulation.",
-        UserWarning,
-        stacklevel=2,
-    )
-
     n, p = X.shape
     n_wp = Z.shape[1]
 
@@ -806,22 +802,54 @@ def global_r2_power_sp(
         raise ValueError(
             f"Numerator df must be positive; got {df_num} (rank(X)={np.linalg.matrix_rank(X)})."
         )
-    # Sub-plot stratum df, consistent with split_plot_df_denom (SR-11).
     rank_X = int(np.linalg.matrix_rank(X))
     rank_X_wp = split_plot_rank_wp(X, Z, htc_factor_cols)
-    df_denom = n - n_wp - (rank_X - rank_X_wp)
-    if df_denom <= 0:
-        raise ValueError(
-            f"Sub-plot denominator df must be positive; got {df_denom} "
-            f"(n={n}, n_wp={n_wp}, rank(X)={rank_X}, rank(X_wp)={rank_X_wp}). "
-            "The sub-plot stratum cannot support the global R² test — "
-            "increase subplots per whole plot or reduce the model size."
-        )
-
-    V_inv = build_split_plot_covariance_inv(Z, eta)
-    eff_n = float(np.trace(V_inv))
-
     f2 = r2_target / (1.0 - r2_target)
+
+    # Tested-term strata (SR-27): when every predictor is a whole-plot term
+    # (rank X == rank X_wp, detectable only when htc_factor_cols is given),
+    # the global R² test lives entirely in the between-plot stratum. The
+    # exact analysis for balanced designs is OLS on the plot means, whose
+    # noise variance is σ²_sp(η + 1/m_j); with r2_target defined at the
+    # observation level (total variance σ²_sp(1 + η)) this gives
+    #     λ = f² · (1 + η) · Σ_j m_j / (1 + η·m_j),
+    #     df_denom = n_wp − rank(X_wp)
+    # (MC-verified exact for balanced designs). The previous sub-plot df
+    # (n − n_wp) overstated power drastically for such models — e.g. 0.97
+    # reported where the true plot-mean power is 0.18.
+    if htc_factor_cols and rank_X == rank_X_wp:
+        df_denom = n_wp - rank_X_wp
+        if df_denom <= 0:
+            raise ValueError(
+                f"Whole-plot denominator df must be positive; got {df_denom} "
+                f"(n_wp={n_wp}, rank(X_wp)={rank_X_wp}). All predictors are "
+                "whole-plot terms and the between-plot stratum cannot "
+                "support the global R² test — increase n_whole_plots."
+            )
+        m_sizes = Z.sum(axis=0)
+        eff_n = float((1.0 + eta) * np.sum(m_sizes / (1.0 + eta * m_sizes)))
+    else:
+        warnings.warn(
+            "global_r2_power_sp approximates the split-plot noncentrality with a "
+            "blended effective sample size tr((η ZZ' + I)⁻¹), which assumes the R² "
+            "signal is spread proportionally across whole-plot and sub-plot strata. "
+            "If the signal comes mainly from whole-plot (HTC) factors the power "
+            "estimate can be optimistic; validate by simulation.",
+            UserWarning,
+            stacklevel=2,
+        )
+        # Sub-plot stratum df, consistent with split_plot_df_denom (SR-11).
+        df_denom = n - n_wp - (rank_X - rank_X_wp)
+        if df_denom <= 0:
+            raise ValueError(
+                f"Sub-plot denominator df must be positive; got {df_denom} "
+                f"(n={n}, n_wp={n_wp}, rank(X)={rank_X}, rank(X_wp)={rank_X_wp}). "
+                "The sub-plot stratum cannot support the global R² test — "
+                "increase subplots per whole plot or reduce the model size."
+            )
+        V_inv = build_split_plot_covariance_inv(Z, eta)
+        eff_n = float(np.trace(V_inv))
+
     if lambda_mode == "n":
         lam = float(f2 * eff_n)
     else:
@@ -1029,13 +1057,11 @@ def eval_response_power(
                 df_method=split_plot_opts.df_method, lambda_mode=cfg.lambda_mode,
                 jitter=jitter, htc_factor_cols=_htc_cols_r2,
             )
-            # Report the sub-plot stratum df actually used (SR-22).
+            # Report the stratum df actually used (SR-22/SR-27).
             if split_plot_opts.eta > 0.0:
-                from .split_plot import split_plot_rank_wp
+                from .split_plot import split_plot_r2_df_denom
 
-                _rank_X_e = int(np.linalg.matrix_rank(X))
-                _rank_wp_e = split_plot_rank_wp(X, Z, _htc_cols_r2 or None)
-                df2 = int(X.shape[0] - Z.shape[1] - (_rank_X_e - _rank_wp_e))
+                df2 = int(split_plot_r2_df_denom(X, Z, _htc_cols_r2 or None))
         else:
             result = global_r2_power(cfg.r2_target, X, cfg.alpha, lambda_mode=cfg.lambda_mode)
         return {

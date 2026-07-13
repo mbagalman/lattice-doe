@@ -757,3 +757,33 @@ class TestSR21ConditionNumberConvention:
         X = np.linalg.qr(np.random.default_rng(1).standard_normal((n, 3)))[0]
         m = compute_design_metrics(X)
         assert m["condition_number"] == pytest.approx(1.0, abs=1e-8)
+
+
+# ---------------------------------------------------------------------------
+# SR-28: numeric-coded categorical factors must reach the preallocation path
+# ---------------------------------------------------------------------------
+
+class TestSR28NumericCodedCategoricals:
+    """SR-28 regression (review of SR-6): categorical columns were inferred
+    from pandas dtype, so numeric-coded categories like {"g": [0, 1, 2]}
+    were treated as continuous -- preallocation/replication was bypassed and
+    n=6 over 3 cells raised. Factor-type metadata is now threaded from the
+    original specification via the cat_cols parameter."""
+
+    def test_numeric_categories_replicate_with_cat_cols(self):
+        cand = build_candidate({"g": [0, 1, 2]}, 50, seed=0)
+        assert len(cand) == 3  # numeric dtype, 3 distinct cells
+        df, idx, _ = build_i_opt_design_with_idx(
+            cand, "~ C(g)", n=6, preallocate_categorical=True,
+            random_state=0, cat_cols=["g"],
+        )
+        assert len(df) == 6
+        assert df.groupby("g").size().tolist() == [2, 2, 2]
+
+    def test_dtype_inference_fallback_unchanged(self):
+        """Without cat_cols, string-typed categories still work as before."""
+        cand = build_candidate({"g": ["a", "b", "c"]}, 50, seed=0)
+        df, _, _ = build_i_opt_design_with_idx(
+            cand, "~ g", n=6, preallocate_categorical=True, random_state=0,
+        )
+        assert len(df) == 6

@@ -325,3 +325,27 @@ class TestSR25AchieverAfterFailingProbe:
         assert rep["achieved_power"] + 1e-3 >= 0.8, (
             "the search discarded its achievers (SR-25)"
         )
+
+
+# ---------------------------------------------------------------------------
+# SR-28 (api level): numeric-coded categoricals through find_optimal_design
+# ---------------------------------------------------------------------------
+
+class TestSR28NumericCategoriesApi:
+    def test_search_exceeds_cells_for_numeric_categories(self):
+        power_cfg = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([1.2]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=60,
+        )
+        design_opts = DesignOptions(
+            random_state=0, starts=1, candidate_points=50,
+            preallocate_categorical=True,
+        )
+        result = find_optimal_design(
+            formula="~ C(g)", factors={"g": [0, 1, 2]},
+            power_cfg=power_cfg, design_opts=design_opts,
+        )
+        rep = result["report"]
+        assert rep["n"] > 3, "search must exceed the 3 numeric-coded cells"
+        assert len(result["design_df"]) == rep["n"]
+        assert rep["achieved_power"] + 1e-3 >= 0.8
