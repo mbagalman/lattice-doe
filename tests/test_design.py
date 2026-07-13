@@ -651,3 +651,75 @@ class TestSR6PreallocationReplication:
         cand = self._cat_cand()
         with pytest.raises(ValueError, match="preallocate_categorical=True"):
             build_i_opt_design_with_idx(cand, "~ A + B", n=12, random_state=0)
+
+
+# ---------------------------------------------------------------------------
+# SR-13: candidate construction must never drop categorical cells or levels
+# ---------------------------------------------------------------------------
+
+class TestSR13CellCoverage:
+    """SR-13 regression: the mixed-design path subsampled the cell list to
+    candidate_points // 2 (10 levels with candidate_points=8 kept only 4
+    levels) and the final size trim could drop cells again; the
+    cap-exceeded branch could miss entire levels. Dropped cells make those
+    treatments unreachable in any design and their model columns
+    unestimable. Cells are now always retained (budget is a soft target,
+    with a warning) and the cap branch repairs level coverage."""
+
+    def test_small_budget_keeps_all_levels_and_warns(self):
+        import warnings as _w
+        from lattice_doe.candidate import build_candidate
+        factors = {"G": [f"g{i}" for i in range(10)], "x": (0.0, 1.0)}
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            cand = build_candidate(factors, candidate_points=8, seed=0)
+        assert cand["G"].nunique() == 10
+        assert any("fewer than 2 continuous samples" in str(c.message)
+                   for c in caught)
+
+    def test_no_permanently_unestimable_columns(self):
+        """The audit's downstream failure: dropped levels left all-zero dummy
+        columns — unestimable at ANY design size. Every level column must now
+        be populated, the rows must be linearly independent (rank = n_rows),
+        and one continuous sample per cell must vary across cells (a constant
+        midpoint would be collinear with the intercept)."""
+        from lattice_doe.candidate import build_candidate
+        from lattice_doe.model_matrix import build_model_matrix
+        factors = {"G": [f"g{i}" for i in range(10)], "x": (0.0, 1.0)}
+        cand = build_candidate(factors, candidate_points=8, seed=0)
+        X, names = build_model_matrix("~ G + x", cand)
+        dummy_cols = [j for j, nm in enumerate(names) if nm.startswith("G[")]
+        assert all(np.abs(X[:, j]).max() > 0 for j in dummy_cols), (
+            "a level's dummy column is all-zero — that treatment is "
+            "permanently unestimable"
+        )
+        # No redundant rows: the candidate spans as much as its size allows.
+        assert np.linalg.matrix_rank(X) == X.shape[0]
+        # The single continuous sample varies across cells.
+        assert cand["x"].nunique() > 1
+
+    def test_ample_budget_respected_without_warning(self):
+        import warnings as _w
+        from lattice_doe.candidate import build_candidate
+        factors = {"G": [f"g{i}" for i in range(10)], "x": (0.0, 1.0)}
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            cand = build_candidate(factors, candidate_points=100, seed=0)
+        assert cand["G"].nunique() == 10
+        assert len(cand) <= 100
+        assert not any("fewer than 2" in str(c.message) for c in caught)
+
+    def test_cap_branch_repairs_level_coverage(self):
+        from lattice_doe.candidate import build_candidate
+        factors = {"F1": ["1a", "1b", "1c"], "F2": ["2a", "2b", "2c"],
+                   "F3": ["3a", "3b", "3c"]}
+        cand = build_candidate(factors, candidate_points=6, seed=0,
+                               cat_cells_cap=5)
+        for f in factors:
+            assert cand[f].nunique() == 3, f"level(s) of {f} missing"
+
+    def test_pure_continuous_unchanged(self):
+        from lattice_doe.candidate import build_candidate
+        cand = build_candidate({"x": (0.0, 1.0), "y": (-1.0, 1.0)},
+                               candidate_points=50, seed=0)
+        assert len(cand) == 50

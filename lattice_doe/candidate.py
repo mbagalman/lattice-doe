@@ -281,6 +281,25 @@ def build_candidate(
             # Remove duplicates while preserving order
             cat_df = cat_df.drop_duplicates().reset_index(drop=True)
 
+            # Level-coverage repair (SR-13): random combination sampling can
+            # miss entire levels, making their model columns unestimable and
+            # those treatments unreachable in any design. Append one
+            # combination per missing level (other factors at their first
+            # level) so every level appears at least once.
+            for fname, levels in zip(cat_factor_names, cat_factor_levels):
+                present = set(cat_df[fname])
+                for lv in levels:
+                    if lv not in present:
+                        repair = {
+                            fn: lvs[0]
+                            for fn, lvs in zip(cat_factor_names, cat_factor_levels)
+                        }
+                        repair[fname] = lv
+                        cat_df = pd.concat(
+                            [cat_df, pd.DataFrame([repair])], ignore_index=True
+                        )
+            cat_df = cat_df.drop_duplicates().reset_index(drop=True)
+
     # Combine continuous and categorical spaces
     if cont and cat:
         # Mixed design: stratified sampling
@@ -288,13 +307,21 @@ def build_candidate(
 
         n_cat_cells = len(cat_df)
 
+        # Every categorical cell must stay represented (SR-13): dropping
+        # cells makes those treatment combinations unreachable in any design
+        # and can leave entire levels' model columns unestimable. When the
+        # budget allows fewer than 2 continuous samples per cell, keep one
+        # row per cell — the candidate set may then exceed candidate_points,
+        # which is a documented soft target.
         if n_cat_cells * 2 > candidate_points:
-            # Not enough budget for multiple samples per cell
-            # Take subset of categorical cells
-            n_cells_to_use = max(1, candidate_points // 2)
-            cat_df = cat_df.sample(n=min(n_cells_to_use, len(cat_df)),
-                                  random_state=seed).reset_index(drop=True)
-            n_cat_cells = len(cat_df)
+            warnings.warn(
+                f"candidate_points={candidate_points} allows fewer than 2 "
+                f"continuous samples per categorical cell ({n_cat_cells} "
+                "cells). Keeping at least one candidate row per cell; the "
+                "candidate set may exceed the requested size. Increase "
+                "candidate_points for better continuous-space coverage.",
+                UserWarning,
+            )
 
         # Determine samples per categorical cell
         samples_per_cell = max(1, candidate_points // n_cat_cells)
@@ -302,13 +329,12 @@ def build_candidate(
         # Generate stratified candidate set
         frames = []
         for idx, cat_row in cat_df.iterrows():
-            # Sample continuous within this categorical stratum
-            if samples_per_cell > 1:
-                sampler = LatinHypercube(d=len(cont), seed=seed + idx if seed is not None else idx)
-                lhs_samples = sampler.random(n=samples_per_cell)
-            else:
-                # Single sample - use center or random point
-                lhs_samples = np.array([[0.5] * len(cont)])
+            # Sample continuous within this categorical stratum. Even with a
+            # single sample per cell the point must vary across cells: a
+            # constant midpoint in every cell would make each continuous
+            # column collinear with the intercept and thus unestimable.
+            sampler = LatinHypercube(d=len(cont), seed=seed + idx if seed is not None else idx)
+            lhs_samples = sampler.random(n=samples_per_cell)
 
             # Scale continuous samples
             cont_subset = pd.DataFrame(lhs_samples, columns=list(cont.keys()))
@@ -324,9 +350,10 @@ def build_candidate(
 
         cand = pd.concat(frames, ignore_index=True)
 
-        # Ensure we don't exceed requested size
-        if len(cand) > candidate_points:
-            cand = cand.sample(n=candidate_points, random_state=seed).reset_index(drop=True)
+        # No trimming below one row per cell: with samples_per_cell =
+        # max(1, candidate_points // n_cat_cells) the set only exceeds
+        # candidate_points in the one-row-per-cell regime, where any trim
+        # would drop cells (SR-13).
 
     elif cont:
         # Pure continuous
