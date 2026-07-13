@@ -406,6 +406,7 @@ def global_r2_power(
     X: np.ndarray,
     alpha: float,
     lambda_mode: Literal["n", "n_minus_p"] = "n",
+    df_num: Optional[int] = None,
 ) -> GlobalPowerResult:
     """
     Power for the global R² test (full model F-test): H0: R² = 0 vs H1: R² = r2_target.
@@ -428,6 +429,13 @@ def global_r2_power(
         Significance level.
     lambda_mode : {"n", "n_minus_p"}
         How to compute λ from f²: either f² * n (default) or f² * (n - p).
+    df_num : int, optional
+        Override for the numerator df. When None (default) it is derived
+        from X via ``_r2_df_num`` (slopes only, intercept excluded). Pass
+        the tested-predictor count explicitly when X contains adjustment
+        columns that are not under test — e.g. blocked designs pass the
+        treatment-slope count so block dummies reduce error df but are not
+        counted as tested predictors (SR-17).
 
     Returns
     -------
@@ -453,7 +461,11 @@ def global_r2_power(
 
     # Standard global F-test: df_num = slopes only (intercept excluded).
     # Delegates to _r2_df_num so the convention is defined in one place.
-    df_num = _r2_df_num(X)
+    # Callers may override df_num when only a subset of the columns in X is
+    # under test — e.g. blocked designs pass the treatment-slope count so
+    # block-dummy adjustment columns are charged to error df but not counted
+    # as tested predictors (SR-17).
+    df_num = _r2_df_num(X) if df_num is None else int(df_num)
 
     if df_num <= 0:
         raise ValueError(

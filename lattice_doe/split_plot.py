@@ -373,7 +373,11 @@ def split_plot_df_denom(
     Raises
     ------
     ValueError
-        If df_method is not one of the accepted values.
+        If df_method is not one of the accepted values, or if a stratum
+        actually used by a contrast row has no error degrees of freedom
+        (SR-15: a saturated stratum makes its contrasts untestable — this
+        previously clamped silently to df = 1 and reported plausible-looking
+        power for designs that cannot support the test).
     """
     if df_method not in ("auto", "conservative", "sp_only"):
         raise ValueError(
@@ -385,17 +389,34 @@ def split_plot_df_denom(
     rank_X = int(np.linalg.matrix_rank(X))
     rank_X_wp = split_plot_rank_wp(X, Z, htc_factor_cols)
 
-    df_wp = max(1, n_wp - rank_X_wp)
-    df_sp = max(1, n_total - n_wp - (rank_X - rank_X_wp))
+    df_wp = n_wp - rank_X_wp
+    df_sp = n_total - n_wp - (rank_X - rank_X_wp)
 
     is_wp = np.asarray(is_wp_contrast, dtype=bool)
     q = len(is_wp)
 
+    def _require_positive(df_val: int, stratum: str) -> None:
+        if df_val <= 0:
+            raise ValueError(
+                f"The {stratum} stratum has no error degrees of freedom "
+                f"(df = {df_val}; n = {n_total}, n_wp = {n_wp}, "
+                f"rank(X) = {rank_X}, rank(X_wp) = {rank_X_wp}): contrasts "
+                "assigned to this stratum are untestable. Increase the "
+                "number of whole plots / subplots per plot, or reduce the "
+                "model size."
+            )
+
     if df_method == "conservative":
+        _require_positive(df_wp, "whole-plot")
         return np.full(q, df_wp, dtype=int)
     if df_method == "sp_only":
+        _require_positive(df_sp, "sub-plot")
         return np.full(q, df_sp, dtype=int)
-    # "auto"
+    # "auto" — only strata actually used by a contrast row must be testable.
+    if bool(np.any(is_wp)):
+        _require_positive(df_wp, "whole-plot")
+    if bool(np.any(~is_wp)):
+        _require_positive(df_sp, "sub-plot")
     df = np.where(is_wp, df_wp, df_sp).astype(int)
     return df
 

@@ -869,3 +869,50 @@ class TestSR4BlockedContrastAlignment:
         )
         # p_full = 4 (intercept, block dummy, A, B); n must exceed it.
         assert result["report"]["n"] >= 5
+
+
+# ---------------------------------------------------------------------------
+# SR-17 — blocked global-R² power must test treatment slopes only
+# ---------------------------------------------------------------------------
+
+class TestSR17BlockedR2DfNum:
+    """SR-17 regression: blocked R² mode used df1 = rank(X_full) − 1, counting
+    the block dummies as tested predictors — the computed power was for
+    'treatments + blocks jointly', contradicting blocked.py's adjustment-only
+    contract. df1 is now the treatment-slope count; block dummies still
+    reduce the error df."""
+
+    def _run(self, n_blocks):
+        factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+        power_cfg = PowerR2Config(r2_target=0.35, alpha=0.05, power=0.8,
+                                  max_n=80)
+        opts = dict(random_state=0, starts=2, candidate_points=200)
+        if n_blocks:
+            opts["n_blocks"] = n_blocks
+        return find_optimal_design(
+            formula="~ 1 + A + B", factors=factors,
+            power_cfg=power_cfg, design_opts=DesignOptions(**opts),
+        )
+
+    def test_df_num_excludes_block_dummies(self):
+        rep = self._run(n_blocks=3)["report"]
+        assert rep["df_num"] == 2  # A and B slopes; not 4 (with 2 dummies)
+
+    def test_power_matches_partial_f_convention(self):
+        """Reported power must equal the noncentral F with df1 = 2 and
+        df2 = n − rank(X_full) (block dummies charged to error)."""
+        from scipy.stats import f as f_dist, ncf as ncf_dist
+        from lattice_doe import build_model_matrix
+        result = self._run(n_blocks=3)
+        rep = result["report"]
+        aug = blocked_formula("~ 1 + A + B", "Block")
+        X_full, _ = build_model_matrix(aug, result["design_df"])
+        n = X_full.shape[0]
+        df2 = n - int(np.linalg.matrix_rank(X_full))
+        lam = 0.35 / 0.65 * n
+        expected = float(1 - ncf_dist.cdf(f_dist.isf(0.05, 2, df2), 2, df2, lam))
+        assert rep["achieved_power"] == pytest.approx(expected, abs=1e-9)
+
+    def test_unblocked_df_num_unchanged(self):
+        rep = self._run(n_blocks=None)["report"]
+        assert rep["df_num"] == 2

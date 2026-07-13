@@ -431,12 +431,19 @@ def find_optimal_design(
                 _htc_cols = htc_factor_cols_from_names(
                     _p_names, sp_opts.htc_factors, _all_fcols,
                 )
-                pr_ = contrast_power_sp(
-                    L_eff, power_cfg.delta, X_, Z_,
-                    sigma_sp=sigma_sp, eta=sp_opts.eta, alpha=power_cfg.alpha,
-                    df_method=sp_opts.df_method, jitter=design_opts.xtx_jitter,
-                    htc_factor_cols=_htc_cols,
-                )
+                try:
+                    pr_ = contrast_power_sp(
+                        L_eff, power_cfg.delta, X_, Z_,
+                        sigma_sp=sigma_sp, eta=sp_opts.eta, alpha=power_cfg.alpha,
+                        df_method=sp_opts.df_method, jitter=design_opts.xtx_jitter,
+                        htc_factor_cols=_htc_cols,
+                    )
+                except ValueError as _e:
+                    if "no error degrees of freedom" in str(_e):
+                        # Saturated stratum at this n_wp (SR-15): the design
+                        # cannot support the test — search higher.
+                        return None
+                    raise
                 df_num_ = int(np.linalg.matrix_rank(power_cfg.L))
             else:
                 _, _p_names = build_model_matrix(formula, design_df_)
@@ -531,9 +538,11 @@ def find_optimal_design(
             n_wp_star = best["_n_wp"]
             verify_window = min(max(3, n_wp_star // 5), max(0, power_cfg.max_iter - it))
             _verify_window = verify_window
+            # Exclusive stop: subtract 1 from the user minimum so the scan
+            # can re-check n_whole_plots itself (SR-19).
             for n_wp_chk in range(
                 n_wp_star - 1,
-                max(max(2, sp_opts.n_whole_plots), n_wp_star - verify_window - 1),
+                max(max(2, sp_opts.n_whole_plots) - 1, n_wp_star - verify_window - 1),
                 -1,
             ):
                 if it >= power_cfg.max_iter:
@@ -614,6 +623,14 @@ def find_optimal_design(
     # Blocked designs draw each block independently from the candidate set, so
     # they support up to n_blocks * n_cand total runs; unblocked designs draw
     # all n runs from the pool at once.
+    # Blocked R² mode: the tested predictors are the treatment slopes only;
+    # block dummies are adjustment columns (reduce error df, not tested).
+    # X_cand is the treatment-only model matrix, so _r2_df_num(X_cand) gives
+    # the correct numerator df including implicit-intercept handling (SR-17).
+    _blocked_r2_df_num: Optional[int] = (
+        _r2_df_num(X_cand) if (is_blocked and mode == "r2") else None
+    )
+
     _n_cand = len(cand)
     _prealloc_replicates = (
         design_opts.preallocate_categorical
@@ -720,8 +737,13 @@ def find_optimal_design(
                 X=X,
                 alpha=power_cfg.alpha,
                 lambda_mode=power_cfg.lambda_mode,
+                df_num=_blocked_r2_df_num,
             )
-            df_num = _r2_df_num(X)  # slopes only, matching global_r2_power convention
+            df_num = (
+                _blocked_r2_df_num
+                if _blocked_r2_df_num is not None
+                else _r2_df_num(X)  # slopes only, matching global_r2_power
+            )
 
         # NaN → singular design at this n; treat as insufficient and search higher
         if np.isnan(power):
@@ -914,8 +936,13 @@ def find_optimal_design(
                 power_v, lam_v = global_r2_power(
                     r2_target=power_cfg.r2_target, X=X_v,
                     alpha=power_cfg.alpha, lambda_mode=power_cfg.lambda_mode,
+                    df_num=_blocked_r2_df_num,
                 )
-                df_num_v = _r2_df_num(X_v)
+                df_num_v = (
+                    _blocked_r2_df_num
+                    if _blocked_r2_df_num is not None
+                    else _r2_df_num(X_v)
+                )
             if np.isnan(power_v) or power_v + tol < target:
                 continue  # not feasible; keep scanning
             df_denom_v = int(X_v.shape[0] - np.linalg.matrix_rank(X_v))
@@ -1270,16 +1297,24 @@ def find_multiresponse_design(
             Z_ = build_whole_plot_indicator(n_total_, n_wp_, subplots_per_wp)
             _, p_names_ = build_model_matrix(formula, design_df_)
             all_fcols_ = [c for c in design_df_.columns if c != "__wp_id__"]
-            per_r_ = [
-                eval_response_power(
-                    r, X_, p_names_,
-                    jitter=design_opts.xtx_jitter,
-                    split_plot_opts=sp_opts,
-                    Z=Z_,
-                    all_factor_names=all_fcols_,
-                )
-                for r in multi_cfg.responses
-            ]
+            try:
+                per_r_ = [
+                    eval_response_power(
+                        r, X_, p_names_,
+                        jitter=design_opts.xtx_jitter,
+                        split_plot_opts=sp_opts,
+                        Z=Z_,
+                        all_factor_names=all_fcols_,
+                    )
+                    for r in multi_cfg.responses
+                ]
+            except ValueError as _e:
+                if "no error degrees of freedom" in str(_e) or (
+                    "denominator df must be positive" in str(_e)
+                ):
+                    # Saturated stratum at this n_wp (SR-15): infeasible here.
+                    return None
+                raise
             combined_ = combine_powers([d["power"] for d in per_r_], weights, rule)
             if np.isnan(combined_):
                 return None
@@ -1317,9 +1352,11 @@ def find_multiresponse_design(
             n_wp_star = best["_n_wp"]
             verify_window = min(max(3, n_wp_star // 5), max(0, max_iter - it))
             _verify_window = verify_window
+            # Exclusive stop: subtract 1 from the user minimum so the scan
+            # can re-check n_whole_plots itself (SR-19).
             for n_wp_chk in range(
                 n_wp_star - 1,
-                max(max(2, sp_opts.n_whole_plots), n_wp_star - verify_window - 1),
+                max(max(2, sp_opts.n_whole_plots) - 1, n_wp_star - verify_window - 1),
                 -1,
             ):
                 if it >= max_iter:

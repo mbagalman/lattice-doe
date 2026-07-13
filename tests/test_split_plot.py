@@ -2973,3 +2973,97 @@ class TestSR14TokenCollision:
         dfs = split_plot_df_denom(X, Z, is_wp, "auto", htc_cols)
         assert bool(is_wp[0])
         assert int(dfs[0]) == 2  # n_wp − rank(X_wp) = 4 − 2
+
+
+# ===========================================================================
+# TestSR15UntestableStratum — df clamps replaced with raises
+# ===========================================================================
+
+class TestSR15UntestableStratum:
+    """SR-15 regression: split_plot_df_denom clamped non-positive stratum df
+    to 1, so designs whose whole-plot stratum was saturated (e.g. n_wp = 2
+    with one HTC factor: df_wp = 0) reported plausible-looking power for
+    untestable contrasts. A stratum actually used by a contrast row now
+    raises; unused strata may be saturated without error."""
+
+    def _saturated_wp_design(self):
+        n_wp, s = 2, 4
+        n = n_wp * s
+        A = np.repeat([-1.0, 1.0], s)
+        B = np.tile([-1.0, -0.33, 0.33, 1.0], n_wp)
+        X = np.column_stack([np.ones(n), A, B])
+        Z = build_whole_plot_indicator(n, n_wp, s)
+        return X, Z
+
+    def test_wp_contrast_in_saturated_wp_stratum_raises(self):
+        X, Z = self._saturated_wp_design()
+        is_wp = classify_contrasts(np.array([[0.0, 1.0, 0.0]]), [0, 1], 3)
+        with pytest.raises(ValueError, match="no error degrees of freedom"):
+            split_plot_df_denom(X, Z, is_wp, "auto", [0, 1])
+
+    def test_sp_contrast_in_same_design_still_works(self):
+        """Saturation of an UNUSED stratum must not raise under 'auto'."""
+        X, Z = self._saturated_wp_design()
+        is_wp = classify_contrasts(np.array([[0.0, 0.0, 1.0]]), [0, 1], 3)
+        dfs = split_plot_df_denom(X, Z, is_wp, "auto", [0, 1])
+        assert int(dfs[0]) > 0
+
+    def test_contrast_power_sp_propagates_the_raise(self):
+        X, Z = self._saturated_wp_design()
+        with pytest.raises(ValueError, match="no error degrees of freedom"):
+            contrast_power_sp(np.array([[0.0, 1.0, 0.0]]), np.array([1.0]),
+                              X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05,
+                              htc_factor_cols=[0, 1], df_method="auto")
+
+    def test_search_skips_saturated_n_wp(self):
+        """End-to-end: the n_wp bisection must treat a saturated whole-plot
+        stratum as infeasible and search higher, not crash or report power."""
+        factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+        pc = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([1.5]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=60,
+        )
+        do = DesignOptions(
+            criterion="I", starts=2, max_iter=30, random_state=0,
+            candidate_points=120,
+            split_plot=SplitPlotOptions(htc_factors=["A"], n_whole_plots=2,
+                                        subplots_per_wp=3, eta=1.0),
+        )
+        out = find_optimal_design("~ 1 + A + B", factors, pc, do)
+        assert out["report"]["split_plot"]["n_whole_plots"] >= 3
+
+
+# ===========================================================================
+# TestSR19ScanIncludesMinimum — Phase-2 scan reaches the user minimum
+# ===========================================================================
+
+class TestSR19ScanIncludesMinimum:
+    """SR-19 regression: the split-plot Phase-2 scan's exclusive range stop
+    was the user minimum itself, so n_whole_plots could never be re-checked
+    after a noisy bisection miss. The stop is now minimum − 1."""
+
+    def test_user_minimum_n_wp_is_reachable(self):
+        factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
+        pc = PowerContrastConfig(
+            L=np.array([[0.0, 0.0, 1.0]]), delta=np.array([2.5]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=60,
+        )
+        do = DesignOptions(
+            criterion="I", starts=2, max_iter=30, random_state=0,
+            candidate_points=120,
+            split_plot=SplitPlotOptions(htc_factors=["A"], n_whole_plots=3,
+                                        subplots_per_wp=3, eta=1.0),
+        )
+        out = find_optimal_design("~ 1 + A + B", factors, pc, do)
+        assert out["report"]["split_plot"]["n_whole_plots"] == 3
+
+    def test_scan_range_arithmetic(self):
+        """The scan values for n_wp_star just above the minimum must include
+        the minimum (exclusive stop = minimum − 1)."""
+        n_wp_star, user_min, window = 5, 3, 5
+        scanned = list(range(
+            n_wp_star - 1,
+            max(max(2, user_min) - 1, n_wp_star - window - 1),
+            -1,
+        ))
+        assert user_min in scanned
