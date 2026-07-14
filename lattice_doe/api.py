@@ -25,14 +25,13 @@ compare_criteria) live in ``analysis.py`` and are re-exported via
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Dict, List, Optional, Union, Any, Literal, Tuple, Callable
+from typing import Dict, List, Optional, Union, Any, Literal, Callable
 import math
 import time
 import numpy as np
 import pandas as pd
 import warnings
 
-from patsy import dmatrix
 from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions, MultiResponseOptions
 from .config import glm_fisher_weight
 from .candidate import estimate_candidate_size, build_candidate, build_split_plot_candidate
@@ -50,7 +49,7 @@ from .power import (
     eval_response_power, combine_powers, hotelling_t2_power,
     glm_contrast_power,
 )
-from .utils import validate_factors, initial_n_guess, normalize_factors
+from .utils import validate_factors, normalize_factors, model_matrix_preview
 from .blocked import blocked_formula, build_blocked_design
 from .progress import Phase, ProgressEvent, ProgressReporter, _coerce_reporter
 
@@ -76,25 +75,19 @@ def _validate_api_inputs(
     Validate formula, factors, and configuration before expensive computations.
     Returns 'p' (number of model parameters) if successful.
     """
-    # 1. Validate formula syntax and get 'p'
+    # 1. Validate formula syntax and get 'p'.
+    #    Count parameters over the FULL categorical-level cross via
+    #    model_matrix_preview (UX-1). A single first-level sample row would make
+    #    Patsy silently drop the remaining dummy columns, undercounting p (e.g.
+    #    a three-level C(g) reported as p=1), which later triggers a misleading
+    #    "parameter count changed / levels had 0 candidates" warning (P2).
     try:
-        # Build a tiny, sample DataFrame to test formula
-        sample_data = {}
-        for k, v in factors.items():
-            if isinstance(v, (list, tuple)) and len(v) > 0:
-                # If categorical, use first level. If continuous, use low bound.
-                sample_data[k] = [v[0]]
-            else:
-                # Fallback for unexpected factor specs
-                sample_data[k] = [1] 
-                
-        X_sample = dmatrix(formula, pd.DataFrame(sample_data), return_type="dataframe")
-        p = X_sample.shape[1]
+        p, _col_names = model_matrix_preview(formula, factors)
     except Exception as e:
         raise ValueError(
             f"Formula validation failed: '{formula}'. "
             f"Ensure all factors in formula are defined in 'factors' "
-            f"and syntax is correct. Original patsy error: {e}"
+            f"and syntax is correct. Original error: {e}"
         ) from e
 
     if p <= 0:
@@ -329,13 +322,22 @@ def find_optimal_design(
     )
     X_cand, _treat_col_names = build_model_matrix(formula, cand)
 
-    # Re-check p just in case the full candidate set changed it (e.g., empty levels)
+    # Re-check p against the realized candidate set — the authoritative model
+    # dimension. The preview p is exact whenever the categorical cross fits
+    # under the preview cap; above the cap it is a provisional compact count
+    # that derived cross-factor terms (e.g. C(a + b)) can undercount, so a
+    # realized p that is LARGER is expected there and adopted silently. A
+    # realized p that is SMALLER means the candidate set genuinely lost a
+    # factor level — e.g. a constraint or cat_cells_cap left some level with
+    # 0 candidate rows — which deserves a warning.
     if X_cand.shape[1] != p:
-        warnings.warn(
-            f"Model parameter count changed from p={p} (sample) to "
-            f"p={X_cand.shape[1]} (full candidate set). Using new p. "
-            "This may happen if some factor levels had 0 candidates."
-        )
+        if X_cand.shape[1] < p:
+            warnings.warn(
+                f"Model parameter count dropped from p={p} (full model) to "
+                f"p={X_cand.shape[1]} (realized candidate set). Using new p. "
+                "Some factor levels received 0 candidate rows (check "
+                "constraints or cat_cells_cap)."
+            )
         p = X_cand.shape[1]
         p_treat = p  # keep p_treat in sync after candidate set update
         if power_cfg.max_n <= p:
@@ -609,6 +611,9 @@ def find_optimal_design(
         while lo_wp < hi_wp and it < power_cfg.max_iter:
             n_wp = (lo_wp + hi_wp) // 2
             it += 1
+            # Pre-build event (forced): never throttled behind the preceding
+            # forced phase event, so the current trial is visible and
+            # cancellation is honored before the expensive GLS build.
             if _reporter is not None:
                 _reporter.emit(
                     Phase.OPTIMIZING,
@@ -616,6 +621,7 @@ def find_optimal_design(
                     iteration=it,
                     trial_n=int(n_wp * subplots_per_wp),
                     target_power=target,
+                    force=True,
                 )
             ev = _sp_eval(n_wp)
             if ev is None:
@@ -662,6 +668,15 @@ def find_optimal_design(
             n_wp_star = best["_n_wp"]
             verify_window = min(max(3, n_wp_star // 5), max(0, power_cfg.max_iter - it))
             _verify_window = verify_window
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.VERIFYING,
+                    message=f"Verifying smaller whole-plot counts below n_wp={n_wp_star}",
+                    trial_n=int(best["report"]["n"]),
+                    current_power=float(best["report"]["achieved_power"]),
+                    target_power=target,
+                    force=True,
+                )
             # Exclusive stop: subtract 1 from the user minimum so the scan
             # can re-check n_whole_plots itself (SR-19).
             for n_wp_chk in range(
@@ -673,6 +688,16 @@ def find_optimal_design(
                     break
                 _ran_phase2 = True
                 it += 1
+                # Per-check forced event: cancellation honored between builds.
+                if _reporter is not None:
+                    _reporter.emit(
+                        Phase.VERIFYING,
+                        message=f"Verifying at n_wp={n_wp_chk}",
+                        iteration=it,
+                        trial_n=int(n_wp_chk * subplots_per_wp),
+                        target_power=target,
+                        force=True,
+                    )
                 ev = _sp_eval(n_wp_chk)
                 if ev is None or ev["report"]["achieved_power"] + tol < target:
                     continue
@@ -872,7 +897,9 @@ def find_optimal_design(
 
         # Pre-build event (UX-3): fires before the potentially long design
         # build so pollers see "building n=…" immediately, bounding the
-        # silent interval to one build cycle.
+        # silent interval to one build cycle. Forced so it is never throttled
+        # behind the immediately-preceding forced phase event (a build can then
+        # run for a long time without exposing the current trial n).
         if _reporter is not None:
             _reporter.emit(
                 Phase.OPTIMIZING,
@@ -880,6 +907,7 @@ def find_optimal_design(
                 iteration=it,
                 trial_n=int(n),
                 target_power=target,
+                force=True,
             )
 
         # 1) Build I-optimal design at n
@@ -1104,6 +1132,17 @@ def find_optimal_design(
                 break
             _ran_phase2 = True
             it += 1
+            # Per-check forced event: keeps the current trial n visible and
+            # honors cancellation between the scan's expensive builds.
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.VERIFYING,
+                    message=f"Verifying at n={n_check}",
+                    iteration=it,
+                    trial_n=int(n_check),
+                    target_power=target,
+                    force=True,
+                )
             if is_blocked:
                 design_df_v, X_v = build_blocked_design(n=n_check, **_blocked_kwargs)
                 sel_idx_v = None
@@ -1336,14 +1375,40 @@ def find_multiresponse_design(
         Per-response power requirements and combination rule.
     design_opts : DesignOptions or None
         Design search options.  Defaults to ``DesignOptions()`` when None.
+    on_progress : callable or ProgressReporter or None
+        Optional progress sink invoked with :class:`ProgressEvent` updates as
+        the search proceeds (validating → generating candidates → optimizing →
+        verifying → done). A bare callback is wrapped in a throttled
+        :class:`ProgressReporter`; pass a configured reporter to control
+        throttling or cancellation.
 
     Returns
     -------
     dict
-        Keys: ``"design"``, ``"n"``, ``"achieved_power"``, ``"responses"``,
-        ``"combination_rule"``, ``"compound_criterion"``, ``"elapsed_sec"``,
-        ``"buckets"``, ``"warnings"``, ``"p"``, ``"iteration"``,
-        ``"search_strategy"``.
+        A result envelope with the same top-level shape as
+        ``find_optimal_design``:
+
+        ``"design_df"`` : pandas.DataFrame
+            The selected design, one row per run.
+        ``"buckets_df"`` : pandas.DataFrame
+            Distinct design points with their replication counts.
+        ``"report"`` : dict
+            All run metadata: ``"n"``, ``"p"``, ``"achieved_power"`` (the
+            combined power), ``"responses"`` (per-response powers),
+            ``"combination_rule"``, ``"compound_criterion"``,
+            ``"elapsed_sec"``, ``"iteration"``, ``"search_strategy"``,
+            ``"warnings"``, the termination fields ``"status"`` /
+            ``"target_met"`` / ``"termination_reason"``, and ``"split_plot"``
+            for split-plot runs.
+
+    .. versionchanged:: 0.1.0
+        The result envelope replaced the previous *flat* top-level keys
+        (``result["design"]``, ``result["responses"]``, ``result["n"]``, …).
+        The design is now ``result["design_df"]`` and every metadata field
+        moved under ``result["report"]`` (e.g. ``result["report"]["n"]`` and
+        ``result["report"]["responses"]``). This makes the multi-response
+        result consumable exactly like the single-response one; code reading
+        the old flat keys must be updated.
     """
     # 1. Detect compound path — any response formula differs from the global formula.
     _compound = any(
@@ -1570,14 +1635,48 @@ def find_multiresponse_design(
                 "_per_r": per_r_, "_combined": combined_,
             }
 
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.OPTIMIZING,
+                message="Searching for the minimum whole-plot count meeting combined target",
+                target_power=target,
+                force=True,
+            )
+
         while lo_wp < hi_wp and it < max_iter:
             n_wp = (lo_wp + hi_wp) // 2
             it += 1
+            # Pre-build event (forced): trial size is visible and cancellation
+            # is honored before the expensive GLS evaluation begins. trial_n
+            # is always the TOTAL run count (n_wp × subplots) so consumers see
+            # a consistent n across pre-build, post-build, and verify events;
+            # the whole-plot count lives in the message.
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.OPTIMIZING,
+                    message=f"Building split-plot design at n_wp={n_wp}",
+                    iteration=it,
+                    trial_n=int(n_wp * subplots_per_wp),
+                    target_power=target,
+                    force=True,
+                )
             ev = _sp_eval_mr(n_wp)
             if ev is None:
                 _run_warnings.append(f"Combined power is NaN at n_wp={n_wp}. Searching higher.")
                 lo_wp = n_wp + 1
                 continue
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.OPTIMIZING,
+                    message=(
+                        f"n_wp={n_wp} (n={ev['_n_total']}): combined power="
+                        f"{ev['_combined']:.4f} (target {target:.4f})"
+                    ),
+                    iteration=it,
+                    trial_n=int(ev["_n_total"]),
+                    current_power=float(ev["_combined"]),
+                    target_power=target,
+                )
             if ev["_combined"] + tol >= target:
                 # Achiever replaces any non-achiever fallback (SR-25).
                 _best_achieves = (
@@ -1598,6 +1697,15 @@ def find_multiresponse_design(
             n_wp_star = best["_n_wp"]
             verify_window = min(max(3, n_wp_star // 5), max(0, max_iter - it))
             _verify_window = verify_window
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.VERIFYING,
+                    message=f"Verifying smaller whole-plot counts below n_wp={n_wp_star}",
+                    trial_n=int(best["_n_total"]),
+                    current_power=float(best["_combined"]),
+                    target_power=target,
+                    force=True,
+                )
             # Exclusive stop: subtract 1 from the user minimum so the scan
             # can re-check n_whole_plots itself (SR-19).
             for n_wp_chk in range(
@@ -1609,6 +1717,15 @@ def find_multiresponse_design(
                     break
                 _ran_phase2 = True
                 it += 1
+                if _reporter is not None:
+                    _reporter.emit(
+                        Phase.VERIFYING,
+                        message=f"Verifying at n_wp={n_wp_chk}",
+                        iteration=it,
+                        trial_n=int(n_wp_chk * subplots_per_wp),
+                        target_power=target,
+                        force=True,
+                    )
                 ev = _sp_eval_mr(n_wp_chk)
                 if ev is None or ev["_combined"] + tol < target:
                     continue
@@ -1738,12 +1855,30 @@ def find_multiresponse_design(
             return {"_design_df": df_, "_idx": idx_, "_per_r": per_r_, "_combined": combined_}
 
         # Phase 1 — bisection
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.OPTIMIZING,
+                message="Searching for the minimum n meeting combined target (compound criterion)",
+                target_power=target,
+                force=True,
+            )
         while lo_c < hi_c and it_c < max_iter:
             n_c = (lo_c + hi_c) // 2
             if n_c > max_n:
                 lo_c = hi_c
                 break
             it_c += 1
+            # Pre-build event (forced): trial n is visible and cancellation is
+            # honored before the expensive compound-optimal build begins.
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.OPTIMIZING,
+                    message=f"Building compound design at n={n_c}",
+                    iteration=it_c,
+                    trial_n=int(n_c),
+                    target_power=target,
+                    force=True,
+                )
             ev_c = _compound_eval_mr(n_c)
             if ev_c is None:
                 _msg = f"Combined power is NaN at n={n_c} (compound path). Searching higher."
@@ -1752,6 +1887,18 @@ def find_multiresponse_design(
                 lo_c = n_c + 1
                 continue
             ev_c["_n"] = n_c
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.OPTIMIZING,
+                    message=(
+                        f"n={n_c}: combined power={ev_c['_combined']:.4f} "
+                        f"(target {target:.4f})"
+                    ),
+                    iteration=it_c,
+                    trial_n=int(n_c),
+                    current_power=float(ev_c["_combined"]),
+                    target_power=target,
+                )
             if ev_c["_combined"] + tol >= target:
                 # Achiever replaces any non-achiever fallback (SR-25).
                 _best_achieves_c = (
@@ -1773,11 +1920,29 @@ def find_multiresponse_design(
             n_star_c = best_c["_n"]
             verify_window_c = min(max(5, n_star_c // 10), max(0, max_iter - it_c))
             _verify_window_c = verify_window_c
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.VERIFYING,
+                    message=f"Verifying smaller n below n={n_star_c}",
+                    trial_n=int(n_star_c),
+                    current_power=float(best_c["_combined"]),
+                    target_power=target,
+                    force=True,
+                )
             for n_check_c in range(n_star_c - 1, max(p_compound, n_star_c - verify_window_c - 1), -1):
                 if it_c >= max_iter:
                     break
                 _ran_phase2_c = True
                 it_c += 1
+                if _reporter is not None:
+                    _reporter.emit(
+                        Phase.VERIFYING,
+                        message=f"Verifying at n={n_check_c}",
+                        iteration=it_c,
+                        trial_n=int(n_check_c),
+                        target_power=target,
+                        force=True,
+                    )
                 ev_c = _compound_eval_mr(n_check_c)
                 if ev_c is None or ev_c["_combined"] + tol < target:
                     continue
@@ -2009,6 +2174,7 @@ def find_multiresponse_design(
                 iteration=it,
                 trial_n=int(n),
                 target_power=target,
+                force=True,
             )
         ev = _ols_eval_mr(n)
         if ev is None:
@@ -2048,6 +2214,15 @@ def find_multiresponse_design(
         n_star = best["_n"]
         verify_window = min(max(5, n_star // 10), max(0, max_iter - it))
         _verify_window = verify_window
+        if _reporter is not None:
+            _reporter.emit(
+                Phase.VERIFYING,
+                message=f"Verifying no smaller n below n={n_star} achieves target",
+                trial_n=int(n_star),
+                current_power=float(best["_combined"]),
+                target_power=target,
+                force=True,
+            )
         # Scan floor mirrors Phase 1's lower bound; in Hotelling mode the
         # joint test additionally needs n ≥ p + k (SR-26).
         _scan_floor_mr = max(
@@ -2060,6 +2235,16 @@ def find_multiresponse_design(
                 break
             _ran_phase2 = True
             it += 1
+            # Per-check forced event: cancellation honored between builds.
+            if _reporter is not None:
+                _reporter.emit(
+                    Phase.VERIFYING,
+                    message=f"Verifying at n={n_check}",
+                    iteration=it,
+                    trial_n=int(n_check),
+                    target_power=target,
+                    force=True,
+                )
             ev = _ols_eval_mr(n_check)
             if ev is None or ev["_combined"] + tol < target:
                 continue

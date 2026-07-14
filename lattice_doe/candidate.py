@@ -99,6 +99,15 @@ def estimate_candidate_size(
     The formula parameter enables future enhancements where model complexity
     (interactions, polynomials) could influence candidate sizing.
     """
+    # Idempotently resolve the discriminated factor-spec dict forms (UX-5).
+    # This is the universal safety net: analysis, power-curve and augmentation
+    # paths that do not route through find_optimal_design still reach candidate
+    # sizing here, so a raw {"type": "continuous", ...} dict would otherwise be
+    # treated as a categorical iterable over its keys.
+    from .utils import normalize_factors
+
+    factors = normalize_factors(factors)
+
     # Separate continuous and categorical factors
     cont = {k: v for k, v in factors.items() if _is_continuous_spec(v)}
     cat = {k: v for k, v in factors.items() if not _is_continuous_spec(v)}
@@ -244,6 +253,13 @@ def build_candidate(
     ~1/(2·candidate_points) per side), so selected designs sit very slightly
     inside the factor ranges. Negligible at default sizes (SR-24f).
     """
+    # Idempotently resolve the discriminated factor-spec dict forms (UX-5) so
+    # every caller — including paths that bypass find_optimal_design — sees
+    # typed specs rather than raw {"type": ...} dicts (see estimate_candidate_size).
+    from .utils import normalize_factors
+
+    factors = normalize_factors(factors)
+
     # Separate factor types
     cont = {k: v for k, v in factors.items() if _is_continuous_spec(v)}
     cat = {k: v for k, v in factors.items() if not _is_continuous_spec(v)}

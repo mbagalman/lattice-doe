@@ -7,7 +7,6 @@ Tests that mock the _HAS_PLOTLY flag run regardless of whether plotly is present
 from __future__ import annotations
 
 import importlib.util
-import sys
 from unittest.mock import patch
 
 import numpy as np
@@ -134,7 +133,6 @@ class TestPlotlyCurveByN:
         assert isinstance(result["figure"], go.Figure)
 
     def test_has_expected_traces(self):
-        import plotly.graph_objects as go
         from lattice_doe.power_curves import power_curve_by_n
 
         result = power_curve_by_n(
@@ -218,7 +216,6 @@ class TestPlotlyCurveByEffect:
         assert isinstance(result["figure"], go.Figure)
 
     def test_has_power_trace(self):
-        import plotly.graph_objects as go
         from lattice_doe.power_curves import power_curve_by_effect
 
         result = power_curve_by_effect(
@@ -347,7 +344,6 @@ class TestPlotlySensitivity:
         assert isinstance(result["figure"], go.Figure)
 
     def test_has_power_trace_and_reference_lines(self):
-        import plotly.graph_objects as go
         from lattice_doe import power_sensitivity
 
         result = power_sensitivity(

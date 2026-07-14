@@ -18,7 +18,6 @@ D3  Constraint expression    } expander
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import streamlit as st
 
 from state import init_state, render_sidebar

@@ -960,7 +960,10 @@ def build_i_opt_design_with_idx(
 
     p_names: List[str] = []
     try:
-        # Build matrix from a small but representative sample
+        # Rough pre-build column count from a head-sample, used only for the
+        # memory heuristic below. This can undercount categorical models (the
+        # head rows may omit some levels); the full candidate set built below
+        # is authoritative, so we reconcile silently rather than warning (P2).
         sample_size = max(5, min(len(cand), 50))
         X_sample, p_names = build_model_matrix(formula, cand.head(sample_size))
         p = X_sample.shape[1]
@@ -1001,20 +1004,16 @@ def build_i_opt_design_with_idx(
             ResourceWarning,
         )
 
-    # Build cached model matrix for candidates once
+    # Build cached model matrix for candidates once — this is the authoritative
+    # column count. The head-sample p above may be lower for categorical models
+    # (a subset can omit levels); adopt the full count silently. A genuine loss
+    # of levels from the whole candidate set is surfaced upstream in
+    # find_optimal_design against the full categorical-level preview (P2).
     X_cand, p_names_cand = build_model_matrix(formula, cand)
 
-    if p != X_cand.shape[1]:
-        warnings.warn(
-            f"Model parameter count mismatch between sample ({p}) and full "
-            f"candidate set ({X_cand.shape[1]}). Using full set count.",
-            RuntimeWarning
-        )
+    if p != X_cand.shape[1] or not p_names:
         p = X_cand.shape[1]
         p_names = p_names_cand
-    elif not p_names:
-        p_names = p_names_cand
-        p = X_cand.shape[1]
 
     # Parallelized multi-start path
     if workers is not None and workers > 1 and n_start > 1:
@@ -1220,6 +1219,11 @@ def augment_design(
         raise ValueError(f"m must be a positive integer; got {m!r}.")
     if len(design_df) == 0:
         raise ValueError("design_df is empty; there are no existing rows to augment.")
+
+    # Resolve discriminated factor-spec dict forms before any factor use (UX-5).
+    from .utils import normalize_factors
+
+    factors = normalize_factors(factors, formula)
 
     criterion = design_opts.criterion
     jitter = design_opts.xtx_jitter

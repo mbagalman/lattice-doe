@@ -15,9 +15,11 @@ When the concurrency limit is reached, submissions return ``503`` with a
 """
 from __future__ import annotations
 
-import asyncio
 import json
+import time
 from typing import Any, Dict
+
+import anyio
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -171,8 +173,14 @@ async def stream_job_events(job_id: str, http: Request) -> Any:
             content={"error": "JobNotFound", "detail": f"No job with id {job_id!r}."},
         )
 
+    # Emit a keep-alive comment at least this often so proxies and clients do
+    # not time the stream out during a long optimizer build that produces no
+    # new progress event (the search may spend many seconds inside one build).
+    heartbeat_sec = 12.0
+
     async def event_gen():
         last_seq = None
+        last_send = time.monotonic()
         terminal = {"done", "failed", "cancelled"}
         while True:
             if await http.is_disconnected():
@@ -182,13 +190,18 @@ async def stream_job_events(job_id: str, http: Request) -> Any:
                 break
             prog = snap.get("progress") or {}
             seq = prog.get("seq")
+            now = time.monotonic()
             # Emit on a new progress event or a state change to terminal.
             if seq != last_seq or snap["state"] in terminal:
                 last_seq = seq
+                last_send = now
                 yield f"data: {json.dumps(snap)}\n\n"
+            elif now - last_send >= heartbeat_sec:
+                last_send = now
+                yield ": heartbeat\n\n"
             if snap["state"] in terminal:
                 break
-            await asyncio.sleep(0.25)
+            await anyio.sleep(0.25)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 

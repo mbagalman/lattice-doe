@@ -25,7 +25,6 @@ from lattice_doe import (
     power_sensitivity,
     min_detectable_effect,
     compare_criteria,
-    augment_design,
     robustness_report,
     power_curve_by_n_multiresponse,
     multiresponse_sensitivity,
@@ -1997,7 +1996,6 @@ class TestMultiResponseCLI:
     def test_make_multi_response_cfg_explicit_L(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         from lattice_doe.config import PowerContrastConfig
-        import numpy as np
         cfg = self._scenario_cfg()
         # Replace first response with explicit L/delta
         cfg["responses"][0] = {
@@ -2028,7 +2026,6 @@ class TestMultiResponseCLI:
 
     def test_make_multi_response_cfg_too_few_responses_raises(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
-        from lattice_doe.config import MultiResponseOptions
         cfg = self._scenario_cfg()
         cfg["responses"] = cfg["responses"][:1]  # only 1
         factors = _as_factors(cfg["factors"])

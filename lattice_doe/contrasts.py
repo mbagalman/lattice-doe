@@ -16,7 +16,8 @@ Implementation note
 To guarantee that the model coding (dummy columns, interactions, etc.) used to
 construct scenario rows matches the coding used during design generation, we
 build a *single* model matrix that includes:
-  1) at least one candidate row from the factor space (to anchor all levels), and
+  1) a level-covering anchor frame containing every level of every categorical
+     factor (so no dummy column can be silently dropped, TD-7), and
   2) both scenarios.
 We then slice the last two rows to obtain x_a and x_b and form L = x_b - x_a.
 This avoids subtle column-misalignment when not all levels appear in the two
@@ -24,14 +25,18 @@ scenarios themselves.
 """
 from __future__ import annotations
 
-from typing import Dict, Tuple, Union, Any
+from typing import Dict, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from .candidate import build_candidate
 from .model_matrix import build_model_matrix
+from .utils import (
+    FactorSpec,
+    normalize_factors,
+    _spec_is_continuous,
+    _representative_frame,
+)
 
-FactorSpec = Dict[str, Union[list, tuple]]
 Scenario = Dict[str, Union[int, float, str]]
 
 
@@ -74,8 +79,10 @@ def _validate_scenario(
     for factor_name, value in scenario.items():
         spec = factors[factor_name]
 
-        # Case 1: Continuous factor (spec is a tuple)
-        if isinstance(spec, (tuple, list)) and len(spec) == 2 and all(isinstance(x, (int, float)) for x in spec):
+        # Case 1: Continuous factor — classified by the shared package-wide
+        # helper so explicit markers (UX-5) win over the two-numeric heuristic
+        # (a typed binary numeric category like [0, 1] must NOT land here).
+        if _spec_is_continuous(spec):
             low, high = float(spec[0]), float(spec[1])
             if not isinstance(value, (int, float)):
                 raise ValueError(
@@ -132,17 +139,20 @@ def contrast_from_scenarios(
     sesoi : float
         Smallest effect size of interest on the response scale.
     candidate_points : int, default 10
-        Tiny candidate set size to anchor model coding (patsy/pyDOE3). Only a
-        *single* candidate row is used in the actual matrix below.
+        Unused; retained for backward compatibility. Model coding is now
+        anchored by a deterministic level-covering frame (TD-7), not a
+        sampled candidate row.
     seed : int, default 0
-        Random seed used only if continuous LHS is needed when building the
-        tiny candidate set.
+        Unused; retained for backward compatibility (see candidate_points).
 
     Returns
     -------
     (L, delta) : (np.ndarray, np.ndarray)
         ``L`` has shape ``(1, p)``; ``delta`` has shape ``(1,)``.
     """
+    # Resolve discriminated factor-spec dict forms before validation (UX-5);
+    # scenario validation and the anchor candidate both need typed specs.
+    factors = normalize_factors(factors, formula)
     _validate_scenario("scenario_a", scenario_a, factors)
     _validate_scenario("scenario_b", scenario_b, factors)
     if not isinstance(sesoi, (int, float)) or sesoi <= 0:
@@ -150,20 +160,21 @@ def contrast_from_scenarios(
             f"sesoi must be a positive number, but got {sesoi}."
         )
 
-    # Build a tiny candidate to ensure patsy coding is anchored consistently and
-    # that all categorical levels are represented somewhere in the matrix.
-    tmp_cand = build_candidate(
-        factors, candidate_points=candidate_points, seed=seed, constraint_func=None
-    )
+    # Anchor Patsy's coding with a LEVEL-COVERING frame, not a single candidate
+    # row (TD-7): when both scenarios share a categorical level and the lone
+    # anchor row happened to share it too, Patsy never saw the other levels and
+    # silently dropped their dummy columns, returning an L narrower than the
+    # design model (which find_optimal_design then rejects). The representative
+    # frame contains every level of every categorical factor, so the model
+    # coding always matches design generation.
+    anchor_frame, _exact = _representative_frame(factors)
 
     a_df = pd.DataFrame([scenario_a])
     b_df = pd.DataFrame([scenario_b])
 
-    # Concatenate one candidate row + the two scenarios, then build ONE model matrix
-    # Use at least one row from the *start* of the candidate set to anchor coding
-    anchor_row = tmp_cand.iloc[:1]
-    
-    both = pd.concat([anchor_row, a_df, b_df], ignore_index=True)
+    # Concatenate the anchor frame + the two scenarios, then build ONE model
+    # matrix so all rows share identical column coding.
+    both = pd.concat([anchor_frame, a_df, b_df], ignore_index=True)
     
     try:
         X_both, _ = build_model_matrix(formula, both)

@@ -19,7 +19,7 @@ from lattice_doe.excel_template import (
     create_excel_template,
     excel_run,
 )
-from lattice_doe.config import DesignOptions, PowerContrastConfig, PowerR2Config
+from lattice_doe.config import PowerContrastConfig, PowerR2Config
 
 
 # ---------------------------------------------------------------------------

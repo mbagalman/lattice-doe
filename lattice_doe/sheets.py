@@ -55,7 +55,7 @@ import pandas as pd
 
 from .config import (
     PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
-    DesignOptions, SplitPlotOptions, MultiResponseOptions, ResponseSpec,
+    DesignOptions, MultiResponseOptions, ResponseSpec,
 )
 from ._request_builder import build_power_cfg, build_design_opts
 

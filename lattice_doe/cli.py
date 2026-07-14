@@ -64,8 +64,7 @@ import pandas as pd
 from .api import find_optimal_design, find_multiresponse_design
 from .config import (
     PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
-    DesignOptions, SplitPlotOptions,
-    MultiResponseOptions, ResponseSpec,
+    DesignOptions, MultiResponseOptions, ResponseSpec,
 )
 from .contrasts import contrast_from_scenarios
 from ._request_builder import build_power_cfg, build_design_opts
@@ -707,7 +706,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=False,
         help=(
             "Stream live search progress (phase, iteration, n, power, elapsed) "
-            "to stderr while the design search runs."
+            "to stderr while the design search runs. Enabled automatically when "
+            "stderr is an interactive terminal; use --no-progress to suppress."
+        ),
+    )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        default=False,
+        help=(
+            "Suppress the live progress stream even on an interactive terminal "
+            "(progress is otherwise shown automatically when stderr is a TTY)."
         ),
     )
     parser.add_argument(
@@ -1035,9 +1044,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         # --- End Validation, Start Main Task ---
         logger.info("Config validated. Running powered design generation...")
 
-        # Live progress to stderr (UX-3), enabled by --progress or verbose.
+        # Live progress to stderr (UX-3). Explicit via --progress/--verbose, and
+        # on by default on an interactive terminal so a long run never looks
+        # hung; --no-progress opts out. Non-TTY (piped/CI) stays quiet.
         _on_progress = None
-        if args.progress or args.verbose:
+        _show_progress = (args.progress or args.verbose) or (
+            not args.no_progress and sys.stderr.isatty()
+        )
+        if _show_progress:
             from lattice_doe.progress import ProgressReporter
 
             def _render_progress(ev) -> None:
@@ -1225,13 +1239,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         # UX-7: partial completion is a distinct exit code so automation can
         # detect it without parsing warning strings.
         if report.get("status") == "partial":
-            logger.error(
-                "Search finished WITHOUT reaching the target power "
-                f"(termination_reason={report.get('termination_reason')}). "
-                "Outputs were written; exiting 3. Use --allow-partial to "
-                "exit 0 instead."
-            )
-            if not args.allow_partial:
+            _reason = report.get("termination_reason")
+            if args.allow_partial:
+                # Explicitly accepted: informational, exit 0 (not an error).
+                logger.warning(
+                    "Search finished WITHOUT reaching the target power "
+                    f"(termination_reason={_reason}). Partial outputs were "
+                    "written; exiting 0 (--allow-partial)."
+                )
+            else:
+                logger.error(
+                    "Search finished WITHOUT reaching the target power "
+                    f"(termination_reason={_reason}). Outputs were written; "
+                    "exiting 3. Use --allow-partial to exit 0 instead."
+                )
                 return 3
         return 0
 

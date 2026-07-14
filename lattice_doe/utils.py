@@ -10,11 +10,41 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import Any, Dict, List, Optional, Tuple, Union, Literal
+from typing import Any, Dict, List, Optional, Tuple, TypedDict, Union, Literal
 import numpy as np
 
 
-FactorSpec = Dict[str, Union[List[Union[int, float, str]], Tuple[float, float]]]
+class ContinuousFactorSpec(TypedDict):
+    """Explicit continuous factor: ``{"type": "continuous", "low": lo, "high": hi}``."""
+
+    type: Literal["continuous"]
+    low: float
+    high: float
+
+
+class CategoricalFactorSpec(TypedDict):
+    """Explicit categorical factor: ``{"type": "categorical", "levels": [...]}``.
+
+    Levels may be numeric — this is the only unambiguous way to express a
+    numeric-coded category such as ``[0, 1]`` (the legacy shorthand treats
+    any two-element numeric sequence as a continuous range).
+    """
+
+    type: Literal["categorical"]
+    levels: List[Union[int, float, str]]
+
+
+#: One factor's specification: explicit discriminated dict (recommended) or
+#: legacy shorthand — ``(low, high)`` for continuous, ``[level, ...]`` for
+#: categorical.
+FactorSpecValue = Union[
+    ContinuousFactorSpec,
+    CategoricalFactorSpec,
+    List[Union[int, float, str]],
+    Tuple[float, float],
+]
+
+FactorSpec = Dict[str, FactorSpecValue]
 
 
 # --- Discriminated factor-spec markers (UX-5) -----------------------------
@@ -206,6 +236,77 @@ def initial_n_guess(p: int, mode: Literal["contrast", "r2"]) -> int:
     return max(base, p + 1, 16)
 
 
+def _representative_frame(
+    factors: Dict[str, Any],
+    max_cross_rows: int = 10_000,
+) -> Tuple["Any", bool]:
+    """Build a frame exposing every categorical level to Patsy.
+
+    Returns ``(frame, exact)``:
+
+    * When the categorical Cartesian cross has at most *max_cross_rows*
+      combinations, the frame IS the full cross (continuous factors at their
+      range midpoints) and ``exact=True`` — model-matrix dimensions computed
+      from it are correct for **any** valid Patsy expression, including
+      derived cross-factor terms like ``C(a + b)`` whose levels depend on
+      combinations.
+    * Above the cap, the frame is a compact level cover (each categorical
+      column cycles its own levels; length = largest level list) and
+      ``exact=False``. Patsy derives standard codings per-factor and builds
+      ordinary interaction columns structurally, so the compact count matches
+      the full cross for conventional formulas — but derived cross-factor
+      terms can be undercounted, so callers must treat the result as
+      provisional and defer hard dimension checks to a realized model matrix.
+
+    *factors* must already be normalized.
+    """
+    import itertools
+
+    import pandas as pd
+
+    cat = {k: list(v) for k, v in factors.items() if not _spec_is_continuous(v)}
+    cont = {k: v for k, v in factors.items() if _spec_is_continuous(v)}
+
+    for name, levels in cat.items():
+        if not levels:
+            raise ValueError(
+                "Every categorical factor needs at least one level for the "
+                f"model preview (factor '{name}' has none)."
+            )
+
+    cross_size = 1
+    for levels in cat.values():
+        cross_size *= len(levels)
+        if cross_size > max_cross_rows:
+            break
+
+    if cross_size <= max_cross_rows:
+        # Full Cartesian cross — exact for any Patsy expression.
+        combos = list(itertools.product(*cat.values())) if cat else [()]
+        frame = {name: [c[i] for c in combos]
+                 for i, name in enumerate(cat.keys())}
+        n_rows = len(combos)
+        exact = True
+    else:
+        # Compact level cover — provisional for derived cross-factor terms.
+        n_rows = max(len(levels) for levels in cat.values())
+        if n_rows > max_cross_rows:
+            raise ValueError(
+                f"A categorical factor has {n_rows} levels, exceeding the "
+                f"preview cap of {max_cross_rows}."
+            )
+        frame = {
+            name: list(itertools.islice(itertools.cycle(levels), n_rows))
+            for name, levels in cat.items()
+        }
+        exact = False
+
+    for name, (lo, hi) in cont.items():
+        frame[name] = [(float(lo) + float(hi)) / 2.0] * n_rows
+
+    return pd.DataFrame(frame), exact
+
+
 def model_matrix_preview(
     formula: str,
     factors: Dict[str, Union[Tuple[float, float], List]],
@@ -213,14 +314,17 @@ def model_matrix_preview(
 ) -> Tuple[int, List[str]]:
     """Return (p, column_names) for *formula* over a representative frame.
 
-    Builds the preview frame from the full Cartesian cross of every
-    categorical factor's levels, with continuous factors at their range
-    midpoints (UX-1). A single-row frame containing only the first level of
-    each categorical would make Patsy silently drop the remaining dummy
-    columns and every categorical interaction column, so the reported model
-    size p would undercount — e.g. a three-level ``C(g)`` model shown as
-    p = 1 instead of p = 3 — misleading users constructing contrast
-    matrices against the displayed columns.
+    Uses the full categorical Cartesian cross when it has at most
+    *max_preview_rows* combinations — exact for any valid Patsy expression,
+    including derived cross-factor terms such as ``C(a + b)``. Larger spaces
+    fall back to a compact level cover (each categorical column cycles its
+    own levels), which matches the full cross for conventional formulas
+    (dummies + interactions are built structurally from per-factor codings)
+    but is **provisional** for derived cross-factor terms; downstream
+    validation reconciles against the realized candidate model matrix. A
+    single-row frame containing only the first level of each categorical
+    would undercount p for every categorical model (UX-1), which is why a
+    representative frame is used at all.
 
     Parameters
     ----------
@@ -228,51 +332,22 @@ def model_matrix_preview(
         Patsy model formula.
     factors : dict
         Factor spec — continuous factors as 2-tuples/lists of numbers,
-        categorical factors as lists of levels (package convention).
+        categorical factors as lists of levels (package convention);
+        discriminated dict forms are normalized.
     max_preview_rows : int, default 10 000
-        Guard against categorical-level explosions; raises ValueError when
-        the level cross exceeds this.
+        Largest categorical cross to materialize before switching to the
+        compact cover; also caps a single factor's level count.
 
     Returns
     -------
     (p, column_names)
         Model-matrix column count and Patsy column labels.
     """
-    import itertools
-
-    import pandas as pd
-
     from .model_matrix import build_model_matrix
 
     factors = normalize_factors(factors)
-    cat = {k: list(v) for k, v in factors.items() if not _spec_is_continuous(v)}
-    cont = {k: v for k, v in factors.items() if _spec_is_continuous(v)}
-
-    n_rows = 1
-    for levels in cat.values():
-        if not levels:
-            raise ValueError(
-                "Every categorical factor needs at least one level for the "
-                "model preview."
-            )
-        n_rows *= len(levels)
-    if n_rows > max_preview_rows:
-        raise ValueError(
-            f"Categorical level cross has {n_rows} combinations, exceeding "
-            f"the preview cap of {max_preview_rows}."
-        )
-
-    if cat:
-        combos = list(itertools.product(*cat.values()))
-        frame = {name: [c[i] for c in combos]
-                 for i, name in enumerate(cat.keys())}
-    else:
-        combos = [()]
-        frame = {}
-    for name, (lo, hi) in cont.items():
-        frame[name] = [(float(lo) + float(hi)) / 2.0] * len(combos)
-
-    X, col_names = build_model_matrix(formula, pd.DataFrame(frame))
+    frame, _exact = _representative_frame(factors, max_cross_rows=max_preview_rows)
+    X, col_names = build_model_matrix(formula, frame)
     return X.shape[1], list(col_names)
 
 
@@ -281,4 +356,8 @@ __all__ = [
     "initial_n_guess",
     "model_matrix_preview",
     "normalize_factors",
+    "FactorSpec",
+    "FactorSpecValue",
+    "ContinuousFactorSpec",
+    "CategoricalFactorSpec",
 ]

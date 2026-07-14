@@ -2017,7 +2017,7 @@ class TestCR27CandidateSizing:
           n_sp_cand = max(10, int(300 * 2/3)) = 200
         build_split_plot_design is called with these values via the mock.
         """
-        from unittest.mock import patch, call
+        from unittest.mock import patch
         from lattice_doe.iopt_search import build_split_plot_design as _bsd
 
         captured_kwargs: list = []

@@ -130,3 +130,44 @@ class TestContrastFromScenarios:
                 {"A": "high", "B": 0.0},
                 sesoi=-1.0,
             )
+
+
+class TestSharedCategoricalLevelAnchoring:
+    """TD-7 / UX-25 regression: when both scenarios share a categorical level,
+    the single anchor row could share it too, so Patsy silently dropped the
+    unseen levels' dummy columns and L came back narrower than the design
+    model. The anchor is now a level-covering frame."""
+
+    def test_shared_level_full_width(self):
+        factors = {"g": ["a", "b", "c"], "x": (0.0, 1.0)}
+        L, delta = contrast_from_scenarios(
+            "~ 1 + C(g) + x", factors,
+            {"g": "a", "x": 0.2},   # same level of g in both scenarios
+            {"g": "a", "x": 0.8},
+            sesoi=1.0,
+        )
+        assert L.shape == (1, 4)  # intercept + 2 g-dummies + x
+        # g is held constant, so its dummy columns must cancel exactly...
+        assert np.allclose(L[0, 1:3], 0.0)
+        # ...and the contrast lives entirely on x.
+        assert np.isclose(L[0, 3], 0.6)
+
+    def test_shared_level_other_categorical_changes(self):
+        factors = {"g": ["a", "b", "c"], "h": ["p", "q"]}
+        L, _ = contrast_from_scenarios(
+            "~ 1 + C(g) + C(h)", factors,
+            {"g": "b", "h": "p"},   # g constant, h changes
+            {"g": "b", "h": "q"},
+            sesoi=1.0,
+        )
+        assert L.shape == (1, 4)  # intercept + 2 g-dummies + 1 h-dummy
+        assert np.count_nonzero(L) == 1  # only the h dummy differs
+
+    def test_deterministic(self):
+        """The level-covering anchor is deterministic — identical L on repeat."""
+        factors = {"g": ["a", "b", "c"], "x": (0.0, 1.0)}
+        args = ("~ 1 + C(g) + x", factors,
+                {"g": "c", "x": 0.1}, {"g": "a", "x": 0.9})
+        L1, _ = contrast_from_scenarios(*args, sesoi=1.0)
+        L2, _ = contrast_from_scenarios(*args, sesoi=1.0)
+        assert np.array_equal(L1, L2)

@@ -1436,29 +1436,48 @@ result = find_multiresponse_design(
 )
 ```
 
-The result is a dict with the following keys:
+The result is the **same three-key envelope** returned by `find_optimal_design`:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `"design"` | `DataFrame` | The run table (n rows × factor columns). |
+| `"design_df"` | `DataFrame` | The run table (n rows × factor columns). |
+| `"buckets_df"` | `DataFrame` | Run counts by factor-level bucket (same format as single-response). |
+| `"report"` | `dict` | All run metadata (see next table). |
+
+All multi-response metadata lives under `result["report"]`:
+
+| `report` key | Type | Description |
+|-----|------|-------------|
 | `"n"` | `int` | Number of runs selected. |
+| `"p"` | `int` | Number of model parameters. |
 | `"achieved_power"` | `float` | Combined power at the selected n, under the chosen rule. |
 | `"combination_rule"` | `str` | Which rule was used. |
 | `"responses"` | `list[dict]` | One entry per response. Each dict contains `"name"`, `"power"`, `"lam"` (noncentrality), and `"n"`. |
-| `"buckets"` | `DataFrame` | Run counts by factor-level bucket (same format as single-response). |
 | `"compound_criterion"` | `bool` | `True` if any response has a formula override (different model structure per response). |
 | `"elapsed_sec"` | `float` | Wall-clock time for the search. |
 | `"search_strategy"` | `str` | `"bisection"` or `"bisection+verification"`. |
+| `"status"` / `"target_met"` / `"termination_reason"` | `str` / `bool` / `str` | Machine-readable completion status (`"complete"` vs `"partial"`). |
 | `"warnings"` | `list[str]` | Non-fatal warnings from the search. |
 
-**Reading per-response results.** The `"responses"` list contains one entry per `ResponseSpec`, in the same order you defined them. Each entry is a dict:
+<a name="migrating-multi-response-results"></a>
+> **Changed in v0.1.0.** Earlier versions returned these fields as *flat*
+> top-level keys — `result["design"]`, `result["responses"]`, `result["n"]`,
+> `result["buckets"]`, … Those keys were **removed**. Read the design from
+> `result["design_df"]`, the bucket table from `result["buckets_df"]`, and
+> every metadata field from `result["report"]` (e.g.
+> `result["report"]["responses"]`). The envelope now matches
+> `find_optimal_design`, so both APIs are consumed identically. Code copied
+> from older examples that indexes the flat keys will raise `KeyError` and
+> must be updated.
+
+**Reading per-response results.** The `report["responses"]` list contains one entry per `ResponseSpec`, in the same order you defined them. Each entry is a dict:
 
 ```python
-for resp in result["responses"]:
+for resp in result["report"]["responses"]:
     print(f"{resp['name']}: power={resp['power']:.4f}, lambda={resp['lam']:.4f}")
 ```
 
-When using the `"min"` rule, the `"achieved_power"` at the top level equals the minimum of the per-response powers. The response with the lowest power is the one that determined n.
+When using the `"min"` rule, `result["report"]["achieved_power"]` equals the minimum of the per-response powers. The response with the lowest power is the one that determined n.
 
 ---
 
@@ -1523,10 +1542,11 @@ result = find_multiresponse_design(formula, factors, multi_cfg, opts)
 **Reading the result:**
 
 ```python
-print("n:", result["n"])
-print("achieved_power:", round(result["achieved_power"], 4))
+report = result["report"]
+print("n:", report["n"])
+print("achieved_power:", round(report["achieved_power"], 4))
 
-for resp in result["responses"]:
+for resp in report["responses"]:
     print(f"  {resp['name']}: power={resp['power']:.4f}, lambda={resp['lam']:.4f}")
 ```
 
@@ -1919,7 +1939,7 @@ from lattice_doe import (
 )
 ```
 
-Both share the same basic call shape: formula → factors → power configuration → design options. Single-response returns `{design_df, buckets_df, report}`; multi-response returns `{design, buckets, responses, n, achieved_power, ...}`. The result dict keys are described in full in Section 8.3.
+Both share the same basic call shape: formula → factors → power configuration → design options, and both return the **same** result envelope: `{design_df, buckets_df, report}`. For multi-response designs, all per-response and combination metadata lives inside `report` (see Section 6.4 for the multi-response `report` fields and the migration note from the pre-v0.1.0 flat keys). The single-response result dict keys are described in full in Section 8.3.
 
 The optional keyword arguments on `find_optimal_design` that earlier chapters skipped:
 
@@ -1927,7 +1947,8 @@ The optional keyword arguments on `find_optimal_design` that earlier chapters sk
 |----------|------|-------------|
 | `export_diagnostics_to` | `str` or `None` | Path prefix; if provided, writes diagnostic HTML and CSV files alongside the result. |
 | `export_report_to` | `str` or `None` | Path prefix; if provided, writes a self-contained HTML (or PDF) report. Requires `pip install -e "[report]"`. A write failure does not stop the design result from being returned. |
-| `progress_callback` | `callable` or `None` | Function called with the current `report` dict after each binary-search iteration. Useful for logging and progress bars (see Section 8.4). |
+| `on_progress` | `callable` or `ProgressReporter` or `None` | Unified progress interface: receives structured `ProgressEvent` updates (phases, pre-build busy signals, power, elapsed) throughout the run; supports throttling and cancellation, and works on both design functions (see Section 8.4). |
+| `progress_callback` | `callable` or `None` | **Legacy.** Called with the intermediate `report` dict after each completed binary-search iteration; single-response only, no phases or cancellation. Prefer `on_progress` (see Section 8.4). |
 
 ---
 
@@ -2124,61 +2145,78 @@ print(f"i_criterion={diag['i_criterion']:.6f}")
 
 ---
 
-#### 8.4 Progress callbacks: monitoring long runs
+#### 8.4 Progress reporting: monitoring long runs
 
-For designs with many factors, high `max_n`, or many starts, the binary search can take several minutes. A progress callback lets you log each iteration or display a live progress indicator without polling.
+For designs with many factors, high `max_n`, or many starts, the search can take several minutes. The unified progress interface — `on_progress` — delivers structured `ProgressEvent` updates throughout the run: phase transitions (validating → generating candidates → optimizing → verifying → done), a *pre-build* event before each expensive design build (so you see "building n=…" while the optimizer works, not only after it finishes), the achieved power after each build, and elapsed time. It is supported by **both** `find_optimal_design` and `find_multiresponse_design` (all paths: OLS, split-plot, compound).
+
+The simplest form is a bare callable:
 
 ```python
-import logging
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-log = logging.getLogger(__name__)
-
-def log_progress(report: dict) -> None:
-    log.info(
-        "  iter=%d  n=%d  power=%.4f  elapsed=%.1fs",
-        report.get("iteration", 0),
-        report["n"],
-        report["achieved_power"],
-        report.get("elapsed_sec", 0.0),
-    )
+def show(ev) -> None:
+    print(f"[{ev.elapsed_sec:6.1f}s] {ev.phase}"
+          + (f"  n={ev.trial_n}" if ev.trial_n is not None else "")
+          + (f"  power={ev.current_power:.4f}" if ev.current_power is not None else ""))
 
 result = find_optimal_design(
     formula, factors, power_cfg,
     DesignOptions(auto_candidate=True, starts=10, random_state=42),
-    progress_callback=log_progress,
+    on_progress=show,
 )
 ```
 
-The callback receives the `report` dict as it looks after each binary-search step — the same structure as the final `result["report"]`, but without the final enrichment fields (`elapsed_sec`, `search_strategy`, `warnings`). If the callback raises an exception, the package catches it, emits a `RuntimeWarning`, and continues the search. The callback is called once per bisection step, not once per Fedorov-exchange iteration.
+Each `ProgressEvent` carries: `phase` (str), `message` (str), `iteration` (int), `trial_n` (sample size being evaluated, or `None` outside the optimizing/verifying phases), `current_power` (`None` until a build completes), `target_power`, `elapsed_sec`, and a monotonically increasing `seq`. Exceptions raised by the callback are swallowed — a faulty progress sink never breaks a search.
 
-For a Jupyter notebook progress bar, the `tqdm` library integrates cleanly:
+**Throttling and cancellation.** For finer control, wrap the callback in a `ProgressReporter`:
+
+```python
+from lattice_doe.progress import ProgressReporter, SearchCancelled
+
+stop_requested = False   # e.g. set from a signal handler or UI button
+
+reporter = ProgressReporter(
+    show,
+    min_interval=0.5,                     # deliver at most every 0.5 s (forced
+                                          # events — phase changes, pre-build —
+                                          # always get through)
+    cancelled=lambda: stop_requested,     # checked on EVERY event, throttled or not
+)
+
+try:
+    result = find_optimal_design(formula, factors, power_cfg, opts,
+                                 on_progress=reporter)
+except SearchCancelled:
+    print("search cancelled by request")
+```
+
+When the `cancelled` predicate returns `True`, the search raises `SearchCancelled` at its next checkpoint — checkpoints bracket every design build in both the bisection and verification phases, so cancellation latency is bounded by one build cycle.
+
+For a Jupyter notebook progress bar, `tqdm` integrates cleanly:
 
 ```python
 from tqdm.auto import tqdm
 
-class TqdmCallback:
+class TqdmProgress:
     def __init__(self, max_n: int):
         self.bar = tqdm(total=max_n, desc="n search", unit="runs")
         self._last_n = 0
 
-    def __call__(self, report: dict) -> None:
-        n = report["n"]
-        self.bar.update(n - self._last_n)
-        self.bar.set_postfix(power=f"{report['achieved_power']:.3f}")
-        self._last_n = n
+    def __call__(self, ev) -> None:
+        if ev.trial_n is None:
+            return
+        self.bar.update(ev.trial_n - self._last_n)
+        if ev.current_power is not None:
+            self.bar.set_postfix(power=f"{ev.current_power:.3f}")
+        self._last_n = ev.trial_n
 
     def close(self):
         self.bar.close()
 
-cb = TqdmCallback(max_n=power_cfg.max_n)
-result = find_optimal_design(
-    formula, factors, power_cfg,
-    DesignOptions(auto_candidate=True, starts=10, random_state=42),
-    progress_callback=cb,
-)
-cb.close()
+pb = TqdmProgress(max_n=power_cfg.max_n)
+result = find_optimal_design(formula, factors, power_cfg, opts, on_progress=pb)
+pb.close()
 ```
+
+**Legacy interface.** `find_optimal_design` also still accepts `progress_callback`, an older hook that receives the intermediate `report` dict once per completed bisection step. It fires only *after* each build (no busy signal during one), offers no phases, throttling, or cancellation, and is not available on `find_multiresponse_design`. Prefer `on_progress` in new code; `progress_callback` is retained for backward compatibility.
 
 ---
 

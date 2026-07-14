@@ -53,7 +53,6 @@ from api_server.serialization import (
     pydantic_power_cfg_to_dataclass,
     pydantic_design_opts_to_dataclass,
     serialize_design_result,
-    serialize_report,
 )
 from lattice_doe.config import DesignOptions, PowerContrastConfig, PowerR2Config
 
@@ -1309,6 +1308,16 @@ class TestUX4StrictRequestModels:
         body["design_opts"]["workers"] = 1
         r = await client.post("/design", json=body)
         assert r.status_code == 200
+
+    @pytest.mark.parametrize("bad", [0, -1, -5])
+    async def test_workers_zero_or_negative_422(self, client, bad):
+        """Only null or 1 are valid; 0 and negatives must 422 rather than being
+        silently coerced to None (P2)."""
+        import copy
+        body = copy.deepcopy(self._BODY)
+        body["design_opts"]["workers"] = bad
+        r = await client.post("/design", json=body)
+        assert r.status_code == 422
 
 
 @pytest.mark.anyio

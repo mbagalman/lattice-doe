@@ -13,7 +13,6 @@ Manual persistence test checklist (B4):
 
 from __future__ import annotations
 
-import pandas as pd
 import streamlit as st
 
 from state import init_state, render_sidebar

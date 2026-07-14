@@ -2,13 +2,7 @@
 """Unit tests for the CLI — GL-6: GLM YAML / CLI support."""
 from __future__ import annotations
 
-import json
-import textwrap
-from io import StringIO
-from pathlib import Path
-from unittest.mock import patch
 
-import numpy as np
 import pytest
 
 from lattice_doe.cli import (
@@ -224,7 +218,6 @@ class TestGLMCLI:
 
     def test_link_identity_rejected_by_parser(self):
         """CR-38: --link identity must be rejected by argparse before reaching config."""
-        import io
         with pytest.raises(SystemExit):
             main(["--link", "identity", "--dry-run"])
 
@@ -281,6 +274,25 @@ design:
 
     def test_allow_partial_exits_0(self, tmp_path):
         assert self._run(tmp_path, ["--allow-partial"]) == 0
+
+    def test_partial_no_allow_logs_error(self, tmp_path, caplog):
+        """Without --allow-partial the miss is an error (exit 3)."""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            assert self._run(tmp_path, []) == 3
+        recs = [r for r in caplog.records if "WITHOUT reaching" in r.message]
+        assert recs and all(r.levelno == logging.ERROR for r in recs)
+
+    def test_allow_partial_logs_warning_not_error(self, tmp_path, caplog):
+        """With --allow-partial the miss is informational (exit 0), so it must
+        NOT be logged at ERROR and must not claim 'exiting 3' (P3)."""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            assert self._run(tmp_path, ["--allow-partial"]) == 0
+        recs = [r for r in caplog.records if "WITHOUT reaching" in r.message]
+        assert recs, "expected an informational partial-completion log"
+        assert all(r.levelno == logging.WARNING for r in recs)
+        assert not any("exiting 3" in r.message for r in recs)
 
 
 class TestUX3CliProgress:

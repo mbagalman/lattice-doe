@@ -20,7 +20,7 @@ The module supports both interactive (matplotlib) and data-only outputs.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Union, Literal, Tuple
+from typing import Dict, Optional, Union, Literal, Tuple
 import numpy as np
 import pandas as pd
 
@@ -30,6 +30,7 @@ import warnings
 from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions
 from .config import glm_fisher_weight
 from .candidate import build_candidate, estimate_candidate_size, _is_continuous_spec
+from .utils import normalize_factors
 from .model_matrix import build_model_matrix
 from .iopt_search import build_i_opt_design, build_i_opt_design_with_idx
 from .power import contrast_power, global_r2_power, glm_contrast_power
@@ -98,10 +99,13 @@ def power_curve_by_n(
     # --- Reviewer Feedback: Validation ---
     if n_points <= 0:
         raise ValueError("n_points must be > 0")
-        
+
     if design_opts is None:
         design_opts = DesignOptions()
-    
+
+    # Resolve discriminated factor-spec dict forms before any factor use (UX-5).
+    factors = normalize_factors(factors, formula)
+
     # Build candidate set once (shared across all n values for consistency)
     if design_opts.auto_candidate:
         candidate_points = estimate_candidate_size(
@@ -340,10 +344,13 @@ def power_curve_by_effect(
     # --- Reviewer Feedback: Validation ---
     if effect_points <= 0:
         raise ValueError("effect_points must be > 0")
-        
+
     if design_opts is None:
         design_opts = DesignOptions()
-    
+
+    # Resolve discriminated factor-spec dict forms before any factor use (UX-5).
+    factors = normalize_factors(factors, formula)
+
     # Build the design once at fixed n
     if design_opts.auto_candidate:
         candidate_points = estimate_candidate_size(
@@ -590,6 +597,9 @@ def power_surface_2d(
 
     if design_opts is None:
         design_opts = DesignOptions()
+
+    # Resolve discriminated factor-spec dict forms before any factor use (UX-5).
+    factors = normalize_factors(factors, formula)
 
     # Build candidate set once (shared across all grid evaluations)
     if design_opts.auto_candidate:

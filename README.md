@@ -553,7 +553,7 @@ lattice --template glm-poisson  > glm_config.yml
 
 ## Output Structure
 
-`find_optimal_design(...)` returns a dict with three keys: the design, the replication structure, and the audit trail for how the optimizer got there. (For multi-response designs, see `find_multiresponse_design(...)` which returns a different structure with `design`, `buckets`, `responses`, and flat summary fields.)
+`find_optimal_design(...)` returns a dict with three keys: the design, the replication structure, and the audit trail for how the optimizer got there. `find_multiresponse_design(...)` returns the **same** three-key envelope — `design_df`, `buckets_df`, and `report` — so both APIs are consumed identically; all multi-response metadata (per-response `responses`, `combination_rule`, `compound_criterion`, …) lives under `result["report"]`. (Prior to v0.1.0 the multi-response result used flat top-level keys such as `result["design"]` and `result["responses"]`; those were removed — see the [migration note in the user guide](docs/user-guide.md#migrating-multi-response-results).)
 
 ### `result["design_df"]` — `DataFrame`
 
@@ -1126,6 +1126,20 @@ If `--sheets-credentials` is omitted, the `GOOGLE_APPLICATION_CREDENTIALS` envir
 
 ### Factor specifications
 
+Two forms are accepted for every factor, on every interface (Python, CLI, REST, Sheets/Excel, Streamlit):
+
+**Explicit form (recommended)** — a discriminated dict that states the factor type:
+
+```python
+factors = {
+    "Temperature": {"type": "continuous", "low": 20.0, "high": 80.0},
+    "Catalyst":    {"type": "categorical", "levels": ["A", "B", "C"]},
+    "Dose":        {"type": "categorical", "levels": [0, 1]},   # numeric levels OK
+}
+```
+
+**Legacy shorthand** — type inferred from shape:
+
 ```python
 factors = {
     "Temperature": (20.0, 80.0),       # continuous: 2-element numeric tuple/list
@@ -1134,7 +1148,9 @@ factors = {
 }
 ```
 
-Continuous factors with exactly two numeric elements are sampled via Latin Hypercube. Categorical factors are enumerated as a Cartesian product (capped at `cat_cells_cap`). Mixed designs combine both.
+The shorthand has one inherent ambiguity: **any two-element numeric sequence is treated as a continuous range**, so a binary numeric category like `[0, 1]` cannot be expressed with it — write `{"type": "categorical", "levels": [0, 1]}` instead. When a two-number shorthand factor is wrapped in `C(name)` in the formula (the one case where intent visibly conflicts with the inference), a `DeprecationWarning` steers you to the explicit form.
+
+Continuous factors are sampled via Latin Hypercube. Categorical factors are enumerated as a Cartesian product (capped at `cat_cells_cap`). Mixed designs combine both.
 
 ### Adaptive candidate sizing (`auto_candidate=True`)
 

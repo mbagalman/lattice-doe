@@ -36,7 +36,6 @@ import pandas as pd
 import copy
 
 from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions
-from .config import glm_fisher_weight
 from .model_matrix import build_model_matrix
 from .power import contrast_power, global_r2_power, contrast_power_sp, global_r2_power_sp, glm_contrast_power
 from .split_plot import build_whole_plot_indicator, htc_factor_cols_from_names
@@ -1620,13 +1619,14 @@ def power_curve_by_n_multiresponse(
     # Deferred imports keep module load fast and avoid circular refs.
     from .candidate import build_candidate, estimate_candidate_size, _is_continuous_spec
     from .iopt_search import build_i_opt_design_with_idx, build_compound_design
-    from .utils import validate_factors
-    from .config import MultiResponseOptions as _MROpt
+    from .utils import validate_factors, normalize_factors
     from .power import eval_response_power, combine_powers as _combine
 
     if design_opts is None:
         design_opts = DesignOptions()
 
+    # Resolve discriminated factor-spec dict forms before validation (UX-5).
+    factors = normalize_factors(factors, formula)
     validate_factors(factors)
 
     n_min, n_max = int(n_range[0]), int(n_range[1])
@@ -1843,7 +1843,7 @@ def multiresponse_sensitivity(
     """
     from .candidate import build_candidate, estimate_candidate_size, _is_continuous_spec
     from .iopt_search import build_i_opt_design_with_idx
-    from .utils import validate_factors
+    from .utils import validate_factors, normalize_factors
     from .config import PowerR2Config as _PowerR2Config
     from .power import combine_powers as _combine
 
@@ -1858,6 +1858,8 @@ def multiresponse_sensitivity(
                 "Sigma scaling is undefined for R²-mode responses."
             )
 
+    # Resolve discriminated factor-spec dict forms before validation (UX-5).
+    factors = normalize_factors(factors, formula)
     validate_factors(factors)
 
     if sigma_range[0] <= 0 or sigma_range[1] <= 0:

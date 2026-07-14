@@ -17,7 +17,7 @@ Key design decisions
 """
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Annotated, Any, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -262,10 +262,13 @@ class DesignOptionsModel(StrictRequestModel):
     @field_validator("workers")
     @classmethod
     def _workers_serial_only(cls, v):
-        if v is not None and v > 1:
+        # Only null or 1 (serial) are valid; 0 and negatives would otherwise be
+        # accepted and silently coerced to None during serialization (UX-4/P2).
+        if v is not None and v != 1:
             raise ValueError(
-                "workers > 1 is not supported inside the ASGI server; use "
-                "Uvicorn's --workers flag for horizontal scaling."
+                "workers must be null or 1 (serial); parallel random starts are "
+                "not supported inside the ASGI server. Use Uvicorn's --workers "
+                "flag for horizontal scaling."
             )
         return v
     max_iter: int = Field(1000, gt=0)

@@ -129,3 +129,167 @@ class TestDiscriminatedSpecsEndToEnd:
             issubclass(x.category, DeprecationWarning) and "g" in str(x.message)
             for x in w
         )
+
+
+class TestDiscriminatedSpecsAnalysisBoundaries:
+    """Contract tests: every exported factor-taking API must normalize the
+    discriminated dict forms before candidate generation (P1). Regression for
+    the bug where a continuous ``{"type","low","high"}`` dict was generated as
+    a categorical iterable over its keys.
+    """
+
+    CONT = {"x": {"type": "continuous", "low": 0.0, "high": 1.0}}
+
+    @staticmethod
+    def _assert_numeric_x(series):
+        vals = [float(v) for v in series.tolist()]  # raises if keys leaked in
+        assert all(0.0 <= v <= 1.0 for v in vals)
+        # A leaked categorical over {"type","low","high"} could never be numeric.
+        assert len(set(vals)) > 2
+
+    def test_build_candidate_safety_net(self):
+        from lattice_doe.candidate import build_candidate
+        cand = build_candidate(self.CONT, candidate_points=50, seed=1)
+        self._assert_numeric_x(cand["x"])
+
+    def test_estimate_candidate_size_accepts_dict_spec(self):
+        from lattice_doe.candidate import estimate_candidate_size
+        # Must not raise treating the dict as a categorical iterable.
+        n = estimate_candidate_size("~ 1 + x", self.CONT)
+        assert n > 0
+
+    def _cfg(self):
+        from lattice_doe.config import PowerContrastConfig
+        return PowerContrastConfig(
+            L=np.array([[0.0, 1.0]]), delta=np.array([1.0]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=40,
+        )
+
+    def _opts(self):
+        from lattice_doe.config import DesignOptions
+        return DesignOptions(random_state=0, starts=1, candidate_points=60)
+
+    def test_power_curve_by_n(self):
+        from lattice_doe.analysis import power_curve_by_n
+        df = power_curve_by_n("~ 1 + x", self.CONT, self._cfg(),
+                              self._opts(), n_range=(10, 30), n_points=3)
+        assert len(df) == 3
+
+    def test_power_curve_by_effect(self):
+        from lattice_doe.analysis import power_curve_by_effect
+        df = power_curve_by_effect("~ 1 + x", self.CONT, 12, self._cfg(),
+                                   self._opts())
+        assert len(df) > 0
+
+    def test_power_surface_2d(self):
+        from lattice_doe.power_curves import power_surface_2d
+        out = power_surface_2d(
+            "~ 1 + x", self.CONT, self._cfg(),
+            param1="n", param1_range=(10, 20),
+            param2="effect", param2_range=(0.5, 1.5),
+            grid_points=3, design_opts=self._opts(),
+        )
+        assert out["data"] is not None and len(out["data"]) == 9
+
+    def test_power_curve_by_n_multiresponse(self):
+        from lattice_doe.analysis import power_curve_by_n_multiresponse
+        from lattice_doe.config import ResponseSpec, MultiResponseOptions
+        mc = MultiResponseOptions(
+            responses=[ResponseSpec(name="y1", power_cfg=self._cfg()),
+                       ResponseSpec(name="y2", power_cfg=self._cfg())],
+            power_combination="min",
+        )
+        df = power_curve_by_n_multiresponse(
+            "~ 1 + x", self.CONT, mc, n_range=(10, 30), n_points=3,
+            design_opts=self._opts(),
+        )
+        assert len(df) == 3
+
+    def test_augment_design(self):
+        from lattice_doe.iopt_search import augment_design
+        from lattice_doe.candidate import build_candidate
+        base = build_candidate(self.CONT, candidate_points=20, seed=0).head(8)
+        aug, new = augment_design(base, m=4, formula="~ 1 + x",
+                                  factors=self.CONT, design_opts=self._opts())
+        assert len(new) == 4
+        # Values are numeric in-range (not the dict keys "type"/"low"/"high").
+        # I-optimal augmentation legitimately concentrates a 1-D continuous
+        # factor at its extremes, so we do not require many distinct values.
+        vals = [float(v) for v in new["x"].tolist()]
+        assert all(0.0 <= v <= 1.0 for v in vals)
+
+    def test_contrast_from_scenarios_continuous_dict(self):
+        """P1 regression: explicit continuous dicts raised TypeError in
+        scenario validation (validated before normalization)."""
+        from lattice_doe.contrasts import contrast_from_scenarios
+        L, delta = contrast_from_scenarios(
+            "~ 1 + x", self.CONT,
+            scenario_a={"x": 0.2}, scenario_b={"x": 0.8},
+            sesoi=1.0,
+        )
+        assert L.shape == (1, 2)
+        assert np.isclose(L[0, 1], 0.6)  # x_b - x_a on the x column
+        assert delta.shape == (1,)
+
+    def test_contrast_from_scenarios_numeric_categorical_dict(self):
+        """P1 regression: an explicit binary numeric category must be treated
+        as categorical in scenario validation (the old inline heuristic
+        classified any two-numeric list as continuous)."""
+        from lattice_doe.contrasts import contrast_from_scenarios
+        factors = {"arm": {"type": "categorical", "levels": [0, 1]},
+                   "x": {"type": "continuous", "low": 0.0, "high": 1.0}}
+        L, delta = contrast_from_scenarios(
+            "~ 1 + C(arm) + x", factors,
+            scenario_a={"arm": 0, "x": 0.5},
+            scenario_b={"arm": 1, "x": 0.5},
+            sesoi=2.0,
+        )
+        assert L.shape == (1, 3)
+        # The contrast isolates the arm dummy; x cancels.
+        assert np.isclose(L[0, 2], 0.0)
+        # Out-of-level scenario value must fail CATEGORICAL validation
+        # (not a continuous range check).
+        with pytest.raises(ValueError, match="categorical levels"):
+            contrast_from_scenarios(
+                "~ 1 + C(arm) + x", factors,
+                scenario_a={"arm": 0.5, "x": 0.5},
+                scenario_b={"arm": 1, "x": 0.5},
+                sesoi=2.0,
+            )
+
+    def test_numeric_categorical_dict_through_analysis(self):
+        """A numeric categorical dict spec is honored (not mis-read) at an
+        analysis boundary."""
+        from lattice_doe.candidate import build_candidate
+        cand = build_candidate(
+            {"arm": {"type": "categorical", "levels": [0, 1]}},
+            candidate_points=30, seed=0,
+        )
+        assert sorted(set(cand["arm"].tolist())) == [0, 1]
+
+
+class TestNoSpuriousParameterCountWarning:
+    """P2: a multi-level categorical must count p correctly with no misleading
+    'parameter count changed / levels had 0 candidates' warning."""
+
+    def test_multilevel_categorical_no_pcount_warning(self):
+        from lattice_doe.api import find_optimal_design
+        from lattice_doe.config import PowerContrastConfig, DesignOptions
+        factors = {
+            "g": {"type": "categorical", "levels": ["a", "b", "c"]},
+            "x": {"type": "continuous", "low": 0.0, "high": 1.0},
+        }
+        cfg = PowerContrastConfig(
+            L=np.array([[0, 1, 0, 0]]), delta=np.array([1.0]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=80,
+        )
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            res = find_optimal_design(
+                "~ 1 + C(g) + x", factors, cfg,
+                DesignOptions(random_state=0, starts=1),
+            )
+        assert res["report"]["p"] == 4
+        pcount = [x for x in w if "parameter count" in str(x.message)]
+        assert pcount == [], f"unexpected parameter-count warning(s): " \
+                             f"{[str(x.message) for x in pcount]}"

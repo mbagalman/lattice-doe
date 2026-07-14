@@ -31,7 +31,7 @@ Notes:
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Dict, List, Literal, NamedTuple, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Literal, NamedTuple, Optional
 import numpy as np
 
 if TYPE_CHECKING:
@@ -973,7 +973,7 @@ def eval_response_power(
         Keys: ``"name"``, ``"power"``, ``"lam"``, ``"df2"``,
         and ``"df1"`` (contrast mode only).
     """
-    from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig  # avoid circular at module level
+    from .config import PowerContrastConfig, PowerGLMContrastConfig  # avoid circular at module level
 
     cfg = response.power_cfg
     n, p = X.shape

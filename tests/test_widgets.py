@@ -19,7 +19,7 @@ Layer 4 — Import guard: patches _HAS_WIDGETS=False to verify WidgetsError
 from __future__ import annotations
 
 import importlib.util
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd

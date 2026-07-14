@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("fastapi")  # jobs module imports are stdlib, but keep parity
 
 from api_server.jobs import JobManager, JobsAtCapacity
-from lattice_doe.progress import Phase, SearchCancelled
+from lattice_doe.progress import Phase
 
 
 def _wait_state(mgr, jid, states, timeout=5.0):

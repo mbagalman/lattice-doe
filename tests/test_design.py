@@ -17,7 +17,6 @@ from lattice_doe.iopt_search import (
     _a_criterion_for_indices,
     _criterion_score,
     _one_start_worker,
-    _optimal_indices_from_X,
     _score_design,
     augment_design,
 )
@@ -825,11 +824,64 @@ class TestUX1ModelMatrixPreview:
                                     {"x1": (-1.0, 1.0), "x2": (0.0, 5.0)})
         assert p == 3
 
-    def test_level_cross_cap(self):
+    def test_large_cross_supported_compactly(self):
+        """The preview must not materialize the categorical Cartesian cross:
+        14 binary factors (16 384 cells) need only a 15-column main-effects
+        model, and candidate generation supports such spaces via sampling —
+        validation must not reject them (P2 regression)."""
+        from lattice_doe.utils import model_matrix_preview
+        factors = {f"f{i}": ["lo", "hi"] for i in range(14)}
+        formula = "~ " + " + ".join(f"C(f{i})" for i in range(14))
+        p, names = model_matrix_preview(formula, factors)
+        assert p == 15  # intercept + one dummy per binary factor
+
+    def test_many_levels_two_factors_supported(self):
+        """Two 200-level factors (40 000-cell cross) are fine compactly —
+        the frame is 200 rows, not 40 000."""
+        from lattice_doe.utils import model_matrix_preview
+        p, _ = model_matrix_preview(
+            "~ C(a) + C(b)",
+            {"a": list(range(200)), "b": list(range(200))},
+            max_preview_rows=10_000,
+        )
+        assert p == 1 + 199 + 199
+
+    def test_single_factor_level_cap_still_guards(self):
+        """The cap now guards the frame length (largest single level list)."""
         from lattice_doe.utils import model_matrix_preview
         with pytest.raises(ValueError, match="preview cap"):
             model_matrix_preview(
-                "~ a + b",
-                {"a": list(range(200)), "b": list(range(200))},
+                "~ C(a)",
+                {"a": list(range(20_001))},
                 max_preview_rows=10_000,
             )
+
+    def test_derived_cross_factor_term_exact_under_cap(self):
+        """UX-26 regression: `C(a + b)` builds levels from combinations, which
+        independent level-cycling cannot represent. Under the cap the preview
+        must use the full Cartesian cross and count all 4 derived levels."""
+        from lattice_doe.utils import model_matrix_preview
+        p, _ = model_matrix_preview("~ C(a + b)",
+                                    {"a": ["x", "y"], "b": ["u", "v"]})
+        assert p == 4  # intercept + 3 dummies for the 4 combined levels
+
+    def test_compact_matches_full_cross_with_interactions(self):
+        """The compact frame must reproduce the exact (p, columns) of the full
+        Cartesian cross, including interaction terms."""
+        import itertools
+        import pandas as pd
+        from lattice_doe.model_matrix import build_model_matrix
+        from lattice_doe.utils import model_matrix_preview
+
+        levels = {"a": ["x", "y", "z"], "b": ["u", "v"]}
+        formula = "~ C(a) * C(b) + t + t:C(a)"
+        combos = list(itertools.product(levels["a"], levels["b"]))
+        frame = {
+            "a": [c[0] for c in combos],
+            "b": [c[1] for c in combos],
+            "t": [0.5] * len(combos),
+        }
+        X_full, cols_full = build_model_matrix(formula, pd.DataFrame(frame))
+        p, cols = model_matrix_preview(formula, {**levels, "t": (0.0, 1.0)})
+        assert p == X_full.shape[1]
+        assert list(cols) == list(cols_full)

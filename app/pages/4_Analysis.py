@@ -11,7 +11,6 @@ G2  JSON report download — download full run report as JSON
 from __future__ import annotations
 
 import importlib.util
-import io
 import json
 
 import numpy as np

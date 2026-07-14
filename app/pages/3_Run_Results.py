@@ -387,7 +387,21 @@ if run_clicked and not _issues and _HAS_IOPT:
     try:
         design_opts = _build_design_opts(ss)
         factor_spec = _factors_to_spec(factors)
-        with st.spinner("Searching for the optimal design\u2026"):
+        with st.status("Searching for the optimal design\u2026", expanded=True) as _status:
+            def _on_progress(ev):
+                # Live phase / trial-n / power / elapsed instead of a static
+                # spinner (UX-3). A faulty status update must not break the run.
+                bits = [str(getattr(ev, "phase", "")).replace("_", " ").strip()]
+                if getattr(ev, "trial_n", None) is not None:
+                    bits.append(f"n={ev.trial_n}")
+                if getattr(ev, "current_power", None) is not None:
+                    bits.append(f"power={ev.current_power:.3f}")
+                bits.append(f"{getattr(ev, 'elapsed_sec', 0.0):.1f}s")
+                try:
+                    _status.update(label="Searching \u2014 " + " \u00b7 ".join(b for b in bits if b))
+                except Exception:
+                    pass
+
             if ss.get("mr_enabled", False):
                 multi_cfg = _build_multi_response_cfg(ss)
                 result = find_multiresponse_design(
@@ -395,6 +409,7 @@ if run_clicked and not _issues and _HAS_IOPT:
                     factors=factor_spec,
                     multi_cfg=multi_cfg,
                     design_opts=design_opts,
+                    on_progress=_on_progress,
                 )
                 ss["_last_power_cfg"] = None
             else:
@@ -404,8 +419,10 @@ if run_clicked and not _issues and _HAS_IOPT:
                     factors=factor_spec,
                     power_cfg=power_cfg,
                     design_opts=design_opts,
+                    on_progress=_on_progress,
                 )
                 ss["_last_power_cfg"] = power_cfg
+            _status.update(label="Design complete", state="complete")
         ss["result"] = result
         ss["run_error"] = None
         st.rerun()

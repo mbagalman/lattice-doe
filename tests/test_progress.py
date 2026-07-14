@@ -166,3 +166,149 @@ class TestProgressIntegration:
             on_progress=boom,
         )
         assert result["report"]["n"] > 0
+
+    def test_pre_build_event_forced_through_throttle(self):
+        """The pre-build 'Building design at n=…' event must reach the callback
+        even under aggressive throttling — it is forced so a long build never
+        hides the current trial n (P2 #5)."""
+        from lattice_doe.api import find_optimal_design
+        events = []
+        find_optimal_design(
+            "~ 1 + x1 + x2", self._FACTORS, self._cfg(), self._opts(),
+            # Huge min_interval: only forced events get delivered.
+            on_progress=ProgressReporter(events.append, min_interval=1e9),
+        )
+        build_events = [e for e in events
+                        if e.phase == "optimizing" and e.trial_n is not None
+                        and "Building design" in e.message]
+        assert build_events, "forced pre-build events were throttled away"
+
+    def test_verification_scan_emits_per_check_events(self):
+        """P1 regression: the phase-2 verification scan performed expensive
+        builds with no reporter events, so cancellation and busy signaling
+        were dead throughout it. Per-check events are forced, so they must
+        arrive even under aggressive throttling."""
+        from lattice_doe.api import find_optimal_design
+        events = []
+        res = find_optimal_design(
+            "~ 1 + x1 + x2", self._FACTORS, self._cfg(), self._opts(),
+            # Huge min_interval: only forced events get delivered.
+            on_progress=ProgressReporter(events.append, min_interval=1e9),
+        )
+        assert "verification" in res["report"]["search_strategy"], (
+            "test config no longer triggers the phase-2 scan; pick one that does"
+        )
+        checks = [e for e in events
+                  if e.phase == "verifying" and e.iteration > 0]
+        assert checks, "no per-check verifying events reached the callback"
+
+    # --- Multi-response compound path (MR-5) --------------------------------
+    def _compound_multi(self):
+        from lattice_doe.config import (PowerContrastConfig, ResponseSpec,
+                                        MultiResponseOptions)
+        r1 = ResponseSpec(name="y1", power_cfg=PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.9]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=60))
+        # Distinct per-response formula → compound criterion path.
+        r2 = ResponseSpec(name="y2", formula="~ 1 + x1",
+                          power_cfg=PowerContrastConfig(
+            L=np.array([[0.0, 1.0]]), delta=np.array([0.9]),
+            sigma=1.0, alpha=0.05, power=0.8, max_n=60))
+        return MultiResponseOptions(responses=[r1, r2],
+                                    power_combination="min")
+
+    def test_multiresponse_compound_progress(self):
+        from lattice_doe.api import find_multiresponse_design
+        events = []
+        find_multiresponse_design(
+            "~ 1 + x1 + x2", self._FACTORS, self._compound_multi(),
+            design_opts=self._opts(),
+            on_progress=ProgressReporter(events.append, min_interval=0.0),
+        )
+        phases = [e.phase for e in events]
+        assert phases[0] == "validating" and phases[-1] == "done"
+        assert "optimizing" in phases
+        # A build event exposes the trial n before the expensive build.
+        assert any(e.phase == "optimizing" and e.trial_n is not None
+                   for e in events)
+
+    def test_multiresponse_compound_cancellation(self):
+        """Cancellation must be honored at the per-iteration checkpoints, not
+        just the early phase events: arm the predicate only after the first
+        completed evaluation is observed, then require the next emit to raise.
+        """
+        from lattice_doe.api import find_multiresponse_design
+        armed = {"flag": False}
+
+        def observe(ev):
+            # A completed evaluation carries the achieved combined power.
+            if ev.phase == "optimizing" and ev.current_power is not None:
+                armed["flag"] = True
+
+        with pytest.raises(SearchCancelled):
+            find_multiresponse_design(
+                "~ 1 + x1 + x2", self._FACTORS, self._compound_multi(),
+                design_opts=self._opts(),
+                on_progress=ProgressReporter(
+                    observe, min_interval=0.0,
+                    cancelled=lambda: armed["flag"]),
+            )
+        assert armed["flag"], (
+            "search finished before any evaluation completed — the test "
+            "never exercised the per-iteration cancellation checkpoint"
+        )
+
+    # --- Multi-response split-plot path -------------------------------------
+    def _sp_opts(self):
+        from lattice_doe.config import DesignOptions, SplitPlotOptions
+        return DesignOptions(
+            candidate_points=100, starts=1, max_iter=10, random_state=0,
+            split_plot=SplitPlotOptions(
+                htc_factors=["x1"], n_whole_plots=2, subplots_per_wp=3, eta=1.0),
+        )
+
+    def _sp_multi(self):
+        from lattice_doe.config import (PowerContrastConfig, ResponseSpec,
+                                        MultiResponseOptions)
+        rs = [ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
+                  L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.5]),
+                  sigma=1.0, alpha=0.05, power=0.8, max_n=40, max_iter=10))
+              for nm in ("y1", "y2")]
+        return MultiResponseOptions(responses=rs, power_combination="min")
+
+    def test_multiresponse_split_plot_progress(self):
+        from lattice_doe.api import find_multiresponse_design
+        events = []
+        find_multiresponse_design(
+            "~ 1 + x1 + x2", self._FACTORS, self._sp_multi(),
+            design_opts=self._sp_opts(),
+            on_progress=ProgressReporter(events.append, min_interval=0.0),
+        )
+        phases = [e.phase for e in events]
+        assert phases[0] == "validating" and phases[-1] == "done"
+        assert "optimizing" in phases
+        assert any(e.phase == "optimizing" and e.trial_n is not None
+                   for e in events)
+
+    def test_multiresponse_split_plot_cancellation(self):
+        """Same arm-after-first-evaluation scheme as the compound test: proves
+        the split-plot loop's own checkpoints honor cancellation."""
+        from lattice_doe.api import find_multiresponse_design
+        armed = {"flag": False}
+
+        def observe(ev):
+            if ev.phase == "optimizing" and ev.current_power is not None:
+                armed["flag"] = True
+
+        with pytest.raises(SearchCancelled):
+            find_multiresponse_design(
+                "~ 1 + x1 + x2", self._FACTORS, self._sp_multi(),
+                design_opts=self._sp_opts(),
+                on_progress=ProgressReporter(
+                    observe, min_interval=0.0,
+                    cancelled=lambda: armed["flag"]),
+            )
+        assert armed["flag"], (
+            "search finished before any evaluation completed — the test "
+            "never exercised the per-iteration cancellation checkpoint"
+        )
