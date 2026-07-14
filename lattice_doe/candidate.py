@@ -30,12 +30,15 @@ from scipy.stats.qmc import LatinHypercube
 # Factor-type helper (single source of truth, mirrors utils.validate_factors)
 # ---------------------------------------------------------------------
 def _is_continuous_spec(spec: Any) -> bool:
-    """Return True iff *spec* represents a continuous factor (2-element numeric sequence)."""
-    return (
-        isinstance(spec, (tuple, list))
-        and len(spec) == 2
-        and all(isinstance(x, (int, float)) for x in spec)
-    )
+    """Return True iff *spec* represents a continuous factor.
+
+    Delegates to the shared classifier so discriminated-spec markers
+    (``_CategoricalSpec`` / ``_ContinuousSpec``, UX-5) win over the legacy
+    two-element-numeric heuristic.
+    """
+    from .utils import _spec_is_continuous
+
+    return _spec_is_continuous(spec)
 
 
 # ---------------------------------------------------------------------

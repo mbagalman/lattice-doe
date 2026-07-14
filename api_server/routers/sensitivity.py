@@ -17,6 +17,7 @@ from api_server.models.sensitivity import (
     SensitivityResponse,
 )
 from api_server.serialization import (
+    factors_to_spec,
     df_to_records,
     pydantic_design_opts_to_dataclass,
     pydantic_power_cfg_to_dataclass,
@@ -33,7 +34,7 @@ def _sync_sensitivity(request: SensitivityRequest) -> dict:
     design_df = records_to_df(request.design_df)
     result = power_sensitivity(
         formula=request.formula,
-        factors=dict(request.factors),
+        factors=factors_to_spec(request.factors, request.formula),
         power_cfg=power_cfg,
         design_df=design_df,
         sigma_range=request.sigma_range,
@@ -59,7 +60,7 @@ def _sync_mde(request: MdeRequest) -> dict:
     result = min_detectable_effect(
         design_df=design_df,
         formula=request.formula,
-        factors=dict(request.factors),
+        factors=factors_to_spec(request.factors, request.formula),
         power_cfg=power_cfg,
         target_power=request.target_power,
         design_opts=design_opts,

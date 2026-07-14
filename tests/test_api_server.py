@@ -717,41 +717,45 @@ class TestMultiResponseModels:
     def test_serialize_multiresponse_result_keys(self):
         from api_server.serialization import serialize_multiresponse_result
         fake_result = {
-            "design": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
-            "n": 10,
-            "achieved_power": 0.85,
-            "responses": [{"name": "Y1", "power": 0.87}, {"name": "Y2", "power": 0.85}],
-            "combination_rule": "min",
-            "compound_criterion": False,
-            "elapsed_sec": 1.23,
-            "buckets": pd.DataFrame({"A": [0.1], "count": [2]}),
-            "warnings": [],
+            "design_df": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
+            "buckets_df": pd.DataFrame({"A": [0.1], "count": [2]}),
+            "report": {
+                "n": 10,
+                "achieved_power": 0.85,
+                "responses": [{"name": "Y1", "power": 0.87}, {"name": "Y2", "power": 0.85}],
+                "combination_rule": "min",
+                "compound_criterion": False,
+                "elapsed_sec": 1.23,
+                "warnings": [],
+            },
         }
         out = serialize_multiresponse_result(fake_result)
-        assert isinstance(out["design"], list)
-        assert isinstance(out["buckets"], list)
-        assert out["n"] == 10
-        assert out["combination_rule"] == "min"
-        assert not out["compound_criterion"]
-        assert len(out["responses"]) == 2
+        assert isinstance(out["design_df"], list)
+        assert isinstance(out["buckets_df"], list)
+        assert out["report"]["n"] == 10
+        assert out["report"]["combination_rule"] == "min"
+        assert not out["report"]["compound_criterion"]
+        assert len(out["report"]["responses"]) == 2
 
     def test_serialize_multiresponse_result_numpy_sanitized(self):
         from api_server.serialization import serialize_multiresponse_result
         fake_result = {
-            "design": pd.DataFrame({"A": [0.1]}),
-            "n": np.int64(8),
-            "achieved_power": np.float64(0.82),
-            "responses": [{"name": "Y1", "power": np.float64(0.82)}],
-            "combination_rule": "min",
-            "compound_criterion": False,
-            "elapsed_sec": None,
-            "buckets": pd.DataFrame({"A": [0.1]}),
-            "warnings": [],
+            "design_df": pd.DataFrame({"A": [0.1]}),
+            "buckets_df": pd.DataFrame({"A": [0.1]}),
+            "report": {
+                "n": np.int64(8),
+                "achieved_power": np.float64(0.82),
+                "responses": [{"name": "Y1", "power": np.float64(0.82)}],
+                "combination_rule": "min",
+                "compound_criterion": False,
+                "elapsed_sec": None,
+                "warnings": [],
+            },
         }
         out = serialize_multiresponse_result(fake_result)
-        assert isinstance(out["n"], int)
+        assert isinstance(out["report"]["n"], int)
         # achieved_power sanitized to plain float
-        ap = out["achieved_power"]
+        ap = out["report"]["achieved_power"]
         assert ap is None or isinstance(ap, float)
 
 
@@ -763,63 +767,69 @@ class TestMultiResponseEndpoint:
     @patch("api_server.routers.design.find_multiresponse_design")
     async def test_multiresponse_returns_200_with_mock(self, mock_run, client):
         mock_run.return_value = {
-            "design": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
-            "n": 10,
-            "achieved_power": 0.85,
-            "responses": [
-                {"name": "Y1", "power": 0.87},
-                {"name": "Y2", "power": 0.85},
-            ],
-            "combination_rule": "min",
-            "compound_criterion": False,
-            "elapsed_sec": 0.5,
-            "buckets": pd.DataFrame({"A": [0.1], "count": [2]}),
-            "warnings": [],
+            "design_df": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
+            "buckets_df": pd.DataFrame({"A": [0.1], "count": [2]}),
+            "report": {
+                "n": 10,
+                "achieved_power": 0.85,
+                "responses": [
+                    {"name": "Y1", "power": 0.87},
+                    {"name": "Y2", "power": 0.85},
+                ],
+                "combination_rule": "min",
+                "compound_criterion": False,
+                "elapsed_sec": 0.5,
+                "warnings": [],
+            },
         }
         r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
         assert r.status_code == 200
         body = r.json()
-        assert "design" in body
-        assert body["n"] == 10
-        assert len(body["responses"]) == 2
+        assert "design_df" in body
+        assert body["report"]["n"] == 10
+        assert len(body["report"]["responses"]) == 2
 
     @patch("api_server.routers.design.find_multiresponse_design")
     async def test_multiresponse_responses_count_matches_request(self, mock_run, client):
         mock_run.return_value = {
-            "design": pd.DataFrame({"A": [0.1]}),
-            "n": 5,
-            "achieved_power": 0.80,
-            "responses": [
-                {"name": "Y1", "power": 0.82},
-                {"name": "Y2", "power": 0.80},
-            ],
-            "combination_rule": "min",
-            "compound_criterion": False,
-            "elapsed_sec": 0.2,
-            "buckets": pd.DataFrame({"A": [0.1]}),
-            "warnings": [],
+            "design_df": pd.DataFrame({"A": [0.1]}),
+            "buckets_df": pd.DataFrame({"A": [0.1]}),
+            "report": {
+                "n": 5,
+                "achieved_power": 0.80,
+                "responses": [
+                    {"name": "Y1", "power": 0.82},
+                    {"name": "Y2", "power": 0.80},
+                ],
+                "combination_rule": "min",
+                "compound_criterion": False,
+                "elapsed_sec": 0.2,
+                "warnings": [],
+            },
         }
         r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
         assert r.status_code == 200
         body = r.json()
-        assert len(body["responses"]) == len(_MR_TWO_RESPONSES)
+        assert len(body["report"]["responses"]) == len(_MR_TWO_RESPONSES)
 
     @patch("api_server.routers.design.find_multiresponse_design")
     async def test_multiresponse_combination_rule_in_response(self, mock_run, client):
         mock_run.return_value = {
-            "design": pd.DataFrame({"A": [0.1]}),
-            "n": 5,
-            "achieved_power": 0.80,
-            "responses": [{"name": "Y1", "power": 0.80}, {"name": "Y2", "power": 0.80}],
-            "combination_rule": "min",
-            "compound_criterion": False,
-            "elapsed_sec": 0.1,
-            "buckets": pd.DataFrame({"A": [0.1]}),
-            "warnings": [],
+            "design_df": pd.DataFrame({"A": [0.1]}),
+            "buckets_df": pd.DataFrame({"A": [0.1]}),
+            "report": {
+                "n": 5,
+                "achieved_power": 0.80,
+                "responses": [{"name": "Y1", "power": 0.80}, {"name": "Y2", "power": 0.80}],
+                "combination_rule": "min",
+                "compound_criterion": False,
+                "elapsed_sec": 0.1,
+                "warnings": [],
+            },
         }
         r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
         assert r.status_code == 200
-        assert r.json()["combination_rule"] == "min"
+        assert r.json()["report"]["combination_rule"] == "min"
 
     async def test_422_missing_multi_cfg(self, client):
         r = await client.post("/multiresponse_design", json={
@@ -862,15 +872,17 @@ class TestMultiResponseEndpoint:
     async def test_sigma_joint_roundtrips(self, mock_run, client):
         """sigma_joint list-of-lists passes through serialization without error."""
         mock_run.return_value = {
-            "design": pd.DataFrame({"A": [0.1]}),
-            "n": 5,
-            "achieved_power": 0.82,
-            "responses": [{"name": "Y1", "power": 0.82}, {"name": "Y2", "power": 0.82}],
-            "combination_rule": "min",
-            "compound_criterion": False,
-            "elapsed_sec": 0.1,
-            "buckets": pd.DataFrame({"A": [0.1]}),
-            "warnings": [],
+            "design_df": pd.DataFrame({"A": [0.1]}),
+            "buckets_df": pd.DataFrame({"A": [0.1]}),
+            "report": {
+                "n": 5,
+                "achieved_power": 0.82,
+                "responses": [{"name": "Y1", "power": 0.82}, {"name": "Y2", "power": 0.82}],
+                "combination_rule": "min",
+                "compound_criterion": False,
+                "elapsed_sec": 0.1,
+                "warnings": [],
+            },
         }
         body = {
             **_MR_SIMPLE_BODY,
@@ -890,15 +902,17 @@ class TestMultiResponseEndpoint:
     @patch("api_server.routers.design.find_multiresponse_design")
     async def test_contrast_response_accepted(self, mock_run, client):
         mock_run.return_value = {
-            "design": pd.DataFrame({"A": [0.1], "B": [-0.1]}),
-            "n": 8,
-            "achieved_power": 0.81,
-            "responses": [{"name": "Y1", "power": 0.84}, {"name": "Y2", "power": 0.81}],
-            "combination_rule": "min",
-            "compound_criterion": False,
-            "elapsed_sec": 0.3,
-            "buckets": pd.DataFrame({"A": [0.1]}),
-            "warnings": [],
+            "design_df": pd.DataFrame({"A": [0.1], "B": [-0.1]}),
+            "buckets_df": pd.DataFrame({"A": [0.1]}),
+            "report": {
+                "n": 8,
+                "achieved_power": 0.81,
+                "responses": [{"name": "Y1", "power": 0.84}, {"name": "Y2", "power": 0.81}],
+                "combination_rule": "min",
+                "compound_criterion": False,
+                "elapsed_sec": 0.3,
+                "warnings": [],
+            },
         }
         body = {
             "formula": "~ 1 + A + B",
@@ -943,25 +957,25 @@ class TestMultiResponseIntegration:
         r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
         assert r.status_code == 200
         body = r.json()
-        assert len(body["design"]) >= 1
-        assert body["n"] >= 1
-        assert 0 < body["achieved_power"] <= 1.0
-        assert len(body["responses"]) == 2
-        assert body["combination_rule"] == "min"
-        assert "compound_criterion" in body
+        assert len(body["design_df"]) >= 1
+        assert body["report"]["n"] >= 1
+        assert 0 < body["report"]["achieved_power"] <= 1.0
+        assert len(body["report"]["responses"]) == 2
+        assert body["report"]["combination_rule"] == "min"
+        assert "compound_criterion" in body["report"]
 
     async def test_post_multiresponse_design_has_factor_columns(self, client):
         r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
         assert r.status_code == 200
-        row = r.json()["design"][0]
+        row = r.json()["design_df"][0]
         assert "A" in row and "B" in row
 
     async def test_post_multiresponse_design_no_nan_json(self, client):
         r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
         assert r.status_code == 200
         body = r.json()
-        assert math.isfinite(body["achieved_power"])
-        assert isinstance(body["n"], int)
+        assert math.isfinite(body["report"]["achieved_power"])
+        assert isinstance(body["report"]["n"], int)
 
 
 # ---------------------------------------------------------------------------
@@ -1381,7 +1395,7 @@ class TestUX2JobsRouter:
         assert r.status_code == 202
         snap = await self._poll(client, r.json()["job_id"])
         assert snap["state"] == "done", snap.get("error")
-        assert snap["result"]["n"] > 0
+        assert snap["result"]["report"]["n"] > 0
 
     async def test_unknown_job_404(self, client):
         assert (await client.get("/jobs/nope")).status_code == 404

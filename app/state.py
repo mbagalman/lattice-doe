@@ -157,12 +157,9 @@ def render_sidebar() -> None:
 
         st.markdown("---")
         if result is not None:
-            if "report" in result:
-                n = result["report"]["n"]
-                pwr = result["report"]["achieved_power"]
-            else:
-                n = result["n"]
-                pwr = result["achieved_power"]
+            # Unified envelope for both modes (UX-6).
+            n = result["report"]["n"]
+            pwr = result["report"]["achieved_power"]
             st.success(f"Result ready: n={n}, power={pwr:.3f}")
         else:
             st.info("No result yet — run a design on page 3.")

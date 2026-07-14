@@ -15,6 +15,7 @@ from api_server.models.power_curve import (
     PowerCurveResponse,
 )
 from api_server.serialization import (
+    factors_to_spec,
     pydantic_power_cfg_to_dataclass,
     pydantic_design_opts_to_dataclass,
     df_to_records,
@@ -28,7 +29,7 @@ def _sync_by_n(request: PowerCurveByNRequest) -> dict:
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
     df = power_curve_by_n(
         formula=request.formula,
-        factors=dict(request.factors),
+        factors=factors_to_spec(request.factors, request.formula),
         power_cfg=power_cfg,
         design_opts=design_opts,
         n_range=request.n_range,
@@ -42,7 +43,7 @@ def _sync_by_effect(request: PowerCurveByEffectRequest) -> dict:
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
     df = power_curve_by_effect(
         formula=request.formula,
-        factors=dict(request.factors),
+        factors=factors_to_spec(request.factors, request.formula),
         n=request.n,
         power_cfg=power_cfg,
         design_opts=design_opts,

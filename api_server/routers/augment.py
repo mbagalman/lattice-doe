@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from lattice_doe import augment_design
 from api_server.models.augment import AugmentRequest, AugmentResponse
 from api_server.serialization import (
+    factors_to_spec,
     df_to_records,
     pydantic_design_opts_to_dataclass,
     records_to_df,
@@ -26,7 +27,7 @@ def _sync_augment(request: AugmentRequest) -> dict:
         design_df=existing_df,
         m=request.m,
         formula=request.formula,
-        factors=dict(request.factors),
+        factors=factors_to_spec(request.factors, request.formula),
         design_opts=design_opts,
     )
     return {

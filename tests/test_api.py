@@ -1277,7 +1277,7 @@ class TestCR35MultiResponseSplitPlotGLMGuard:
             self._FORMULA, self._FACTORS, multi, self._sp_opts()
         )
         assert isinstance(result, dict)
-        assert "n_whole_plots" in result
+        assert "n_whole_plots" in result["report"]
 
 
 # ---------------------------------------------------------------------------
@@ -1323,43 +1323,43 @@ class TestMultiResponseAPI:
 
     def test_responses_length_matches_multi_cfg(self):
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
-        assert len(result["responses"]) == 2
+        assert len(result["report"]["responses"]) == 2
 
     def test_response_dicts_have_required_keys(self):
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
-        for rd in result["responses"]:
+        for rd in result["report"]["responses"]:
             assert "name" in rd
             assert "power" in rd
             assert "lam" in rd
 
     def test_compound_criterion_false_for_shared_formula(self):
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
-        assert result["compound_criterion"] is False
+        assert result["report"]["compound_criterion"] is False
 
     def test_combination_rule_in_result(self):
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")], rule="min")
-        assert result["combination_rule"] == "min"
+        assert result["report"]["combination_rule"] == "min"
 
     def test_design_is_dataframe_with_factor_cols(self):
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
-        assert isinstance(result["design"], pd.DataFrame)
-        assert set(_MR_FACTORS.keys()).issubset(result["design"].columns)
+        assert isinstance(result["design_df"], pd.DataFrame)
+        assert set(_MR_FACTORS.keys()).issubset(result["design_df"].columns)
 
     def test_buckets_is_present(self):
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
-        assert "buckets" in result
-        assert isinstance(result["buckets"], pd.DataFrame)
+        assert "buckets_df" in result
+        assert isinstance(result["buckets_df"], pd.DataFrame)
 
     def test_elapsed_sec_positive(self):
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
-        assert result["elapsed_sec"] > 0
+        assert result["report"]["elapsed_sec"] > 0
 
     def test_achieved_power_equals_combine_powers(self):
         from lattice_doe import combine_powers
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")], rule="min")
-        per_powers = [rd["power"] for rd in result["responses"]]
+        per_powers = [rd["power"] for rd in result["report"]["responses"]]
         expected = combine_powers(per_powers, None, "min")
-        assert abs(result["achieved_power"] - expected) < 1e-12
+        assert abs(result["report"]["achieved_power"] - expected) < 1e-12
 
     def test_two_identical_responses_n_matches_single_response(self):
         # With two identical responses + min rule, n must equal single-response n.
@@ -1370,7 +1370,7 @@ class TestMultiResponseAPI:
         single = find_optimal_design(_MR_FORMULA, _MR_FACTORS, single_cfg, opts)
         multi_result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")])
         # Allow ±1 tolerance for design randomness
-        assert abs(multi_result["n"] - single["report"]["n"]) <= 1
+        assert abs(multi_result["report"]["n"] - single["report"]["n"]) <= 1
 
     def test_harder_response_drives_n(self):
         # Y2 has smaller sigma → needs more runs → n must be ≥ Y1 alone
@@ -1380,16 +1380,16 @@ class TestMultiResponseAPI:
         )
         single = find_optimal_design(_MR_FORMULA, _MR_FACTORS, single_cfg, opts)
         result = _run_mr([_contrast_rs("Y1", sigma=1.0), _contrast_rs("Y2", sigma=0.7)])
-        assert result["n"] >= single["report"]["n"] - 1
+        assert result["report"]["n"] >= single["report"]["n"] - 1
 
     def test_product_combination_rule_accepted(self):
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")], rule="product")
-        assert result["combination_rule"] == "product"
+        assert result["report"]["combination_rule"] == "product"
 
     def test_mixed_contrast_r2_responses_no_error(self):
         result = _run_mr([_contrast_rs("Y1"), _r2_rs("Y2")])
-        assert len(result["responses"]) == 2
-        assert result["compound_criterion"] is False
+        assert len(result["report"]["responses"]) == 2
+        assert result["report"]["compound_criterion"] is False
 
     def test_differing_formula_uses_compound_path(self):
         # MR-5: differing formulas now route to the compound criterion path.
@@ -1401,12 +1401,12 @@ class TestMultiResponseAPI:
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=30))
         multi = MultiResponseOptions([r1, r2])
         result = find_multiresponse_design(_MR_FORMULA, _MR_FACTORS, multi, _mr_opts())
-        assert result["compound_criterion"] is True
+        assert result["report"]["compound_criterion"] is True
 
     def test_workers_parallel_returns_same_structure(self):
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")], workers=2)
-        assert "n" in result
-        assert len(result["responses"]) == 2
+        assert "n" in result["report"]
+        assert len(result["report"]["responses"]) == 2
 
     def test_exported_from_top_level(self):
         import lattice_doe
@@ -1451,15 +1451,15 @@ class TestSR1CombinationRuleTarget:
         r2 = _contrast_rs("Y2", power=0.80)
         result = _run_mr([r1, r2], rule="product")
         # Combined target is 0.8 * 0.8 = 0.64.
-        assert result["achieved_power"] >= 0.64 - 1e-3
+        assert result["report"]["achieved_power"] >= 0.64 - 1e-3
 
     def test_product_n_smaller_than_min_rule(self):
         """product rule should require strictly fewer runs than min rule for the
         same per-response targets, because the combined target is 0.64, not 0.80."""
         r1 = _contrast_rs("Y1", power=0.80)
         r2 = _contrast_rs("Y2", power=0.80)
-        n_product = _run_mr([r1, r2], rule="product")["n"]
-        n_min     = _run_mr([r1, r2], rule="min")["n"]
+        n_product = _run_mr([r1, r2], rule="product")["report"]["n"]
+        n_min     = _run_mr([r1, r2], rule="min")["report"]["n"]
         assert n_product <= n_min
 
     def test_weighted_mean_achieved_power_meets_combined_target(self):
@@ -1468,7 +1468,7 @@ class TestSR1CombinationRuleTarget:
         r2 = _contrast_rs("Y2", power=0.80)
         result = _run_mr([r1, r2], rule="weighted_mean")
         # Combined target = (0.8 + 0.8) / 2 = 0.80; achieved_power is on that scale.
-        assert result["achieved_power"] >= 0.80 - 1e-3
+        assert result["report"]["achieved_power"] >= 0.80 - 1e-3
 
     def test_min_rule_bisection_unchanged(self):
         """min rule regression: behaviour and n should be unchanged."""
@@ -1476,7 +1476,7 @@ class TestSR1CombinationRuleTarget:
         r2 = _contrast_rs("Y2", power=0.80)
         result = _run_mr([r1, r2], rule="min")
         # Both per-response powers should meet their individual targets.
-        for rd in result["responses"]:
+        for rd in result["report"]["responses"]:
             assert rd["power"] >= 0.80 - 1e-3
 
     def test_product_asymmetric_targets_combined_scale(self):
@@ -1485,7 +1485,7 @@ class TestSR1CombinationRuleTarget:
         r2 = _contrast_rs("Y2", power=0.70)
         result = _run_mr([r1, r2], rule="product")
         # Combined target = 0.90 * 0.70 = 0.63.
-        assert result["achieved_power"] >= 0.63 - 1e-3
+        assert result["report"]["achieved_power"] >= 0.63 - 1e-3
 
 
 def _cp_run(r1, r2, rule="min", **opts_kw):
@@ -1504,7 +1504,7 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2)
-        assert result["compound_criterion"] is False
+        assert result["report"]["compound_criterion"] is False
 
     def test_different_formulas_compound_flag_true(self):
         # One response uses a sub-formula; compound path should be activated.
@@ -1514,7 +1514,7 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2)
-        assert result["compound_criterion"] is True
+        assert result["report"]["compound_criterion"] is True
 
     def test_compound_result_has_required_keys(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
@@ -1523,10 +1523,12 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2)
-        for key in ("design", "n", "achieved_power", "responses", "combination_rule",
-                    "compound_criterion", "buckets", "elapsed_sec", "p",
+        assert "design_df" in result, "Missing key: design_df"
+        assert "buckets_df" in result, "Missing key: buckets_df"
+        for key in ("n", "achieved_power", "responses", "combination_rule",
+                    "compound_criterion", "elapsed_sec", "p",
                     "iteration", "search_strategy", "warnings"):
-            assert key in result, f"Missing key: {key}"
+            assert key in result["report"], f"Missing key: {key}"
 
     def test_compound_design_is_dataframe(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
@@ -1535,8 +1537,8 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2)
-        assert isinstance(result["design"], pd.DataFrame)
-        assert set(_CP_FACTORS.keys()).issubset(result["design"].columns)
+        assert isinstance(result["design_df"], pd.DataFrame)
+        assert set(_CP_FACTORS.keys()).issubset(result["design_df"].columns)
 
     def test_compound_responses_list_length(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
@@ -1545,7 +1547,7 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2)
-        assert len(result["responses"]) == 2
+        assert len(result["report"]["responses"]) == 2
 
     def test_compound_responses_have_required_keys(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
@@ -1554,7 +1556,7 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2)
-        for rd in result["responses"]:
+        for rd in result["report"]["responses"]:
             assert set(rd.keys()) >= {"name", "power", "lam", "n"}
 
     def test_compound_achieved_power_positive(self):
@@ -1564,7 +1566,7 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2)
-        assert 0.0 < result["achieved_power"] <= 1.0
+        assert 0.0 < result["report"]["achieved_power"] <= 1.0
 
     def test_compound_n_positive_integer(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
@@ -1573,8 +1575,8 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2)
-        assert isinstance(result["n"], int)
-        assert result["n"] > 0
+        assert isinstance(result["report"]["n"], int)
+        assert result["report"]["n"] > 0
 
     def test_a_criterion_compound_raises(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
@@ -1607,8 +1609,8 @@ class TestCompoundCriterion:
         multi = MultiResponseOptions([r1, r2])
         opts = _cp_opts(criterion="D")
         result = find_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
-        assert result["compound_criterion"] is True
-        assert result["n"] > 0
+        assert result["report"]["compound_criterion"] is True
+        assert result["report"]["n"] > 0
 
     def test_compound_design_estimable_both_formulas(self):
         # Both model matrices formed from the returned design rows must have full rank.
@@ -1619,7 +1621,7 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2)
-        design = result["design"]
+        design = result["design_df"]
         X1, _ = build_model_matrix(_CP_FORMULA_LINEAR, design)
         X2, _ = build_model_matrix(_CP_FORMULA, design)
         assert np.linalg.matrix_rank(X1) == X1.shape[1]
@@ -1633,7 +1635,7 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2)
-        assert result["compound_criterion"] is False
+        assert result["report"]["compound_criterion"] is False
 
     def test_compound_combination_rule_stored(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
@@ -1642,7 +1644,7 @@ class TestCompoundCriterion:
         r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
                                                     sigma=1.0, power=0.8, max_n=60, max_iter=20))
         result = _cp_run(r1, r2, rule="weighted_mean")
-        assert result["combination_rule"] == "weighted_mean"
+        assert result["report"]["combination_rule"] == "weighted_mean"
 
 
 # ---------------------------------------------------------------------------
@@ -1676,23 +1678,23 @@ class TestHotellingT2API:
 
     def test_joint_power_key_present(self):
         result = _ht2_run(np.eye(2))
-        assert "joint_power" in result
+        assert "joint_power" in result["report"]
 
     def test_joint_power_in_unit_interval(self):
         result = _ht2_run(np.eye(2))
-        assert 0.0 <= result["joint_power"] <= 1.0
+        assert 0.0 <= result["report"]["joint_power"] <= 1.0
 
     def test_responses_still_present(self):
         # Per-response powers are always reported alongside joint_power.
         result = _ht2_run(np.eye(2))
-        assert len(result["responses"]) == 2
-        for rd in result["responses"]:
+        assert len(result["report"]["responses"]) == 2
+        for rd in result["report"]["responses"]:
             assert "power" in rd
 
     def test_joint_lam_df_keys_present(self):
         result = _ht2_run(np.eye(2))
         for key in ("joint_lam", "joint_df1", "joint_df2"):
-            assert key in result
+            assert key in result["report"]
 
     def test_sigma_joint_none_no_joint_power(self):
         # Without sigma_joint, joint_power should not appear.
@@ -1703,7 +1705,7 @@ class TestHotellingT2API:
         multi = MultiResponseOptions([r1, r2])
         result = find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi,
                                                 _ht2_mr_opts())
-        assert "joint_power" not in result
+        assert "joint_power" not in result["report"]
 
     def test_sigma_joint_with_r2_response_raises(self):
         r1 = ResponseSpec("Y1", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
@@ -1740,8 +1742,8 @@ class TestHotellingT2API:
     def test_sigma_joint_with_ols_contrast_still_works(self):
         """CR-36 regression: OLS contrast responses with sigma_joint are unaffected."""
         result = _ht2_run(np.eye(2))
-        assert "joint_power" in result
-        assert 0.0 <= result["joint_power"] <= 1.0
+        assert "joint_power" in result["report"]
+        assert 0.0 <= result["report"]["joint_power"] <= 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -2193,7 +2195,7 @@ class TestMR10Integration:
             PowerContrastConfig(L=_MR10_L, delta=_MR10_DELTA, sigma=1.5, power=0.8, max_n=40, max_iter=25),
             opts,
         )["report"]["n"]
-        assert mr["n"] >= max(n1, n2) - 1
+        assert mr["report"]["n"] >= max(n1, n2) - 1
 
     def test_s1_min_achieved_is_min_of_per_response(self):
         """achieved_power == min(per-response) under min rule."""
@@ -2202,8 +2204,8 @@ class TestMR10Integration:
         r2 = _mr10_crs("Y2", sigma=1.2, max_n=40)
         multi = MultiResponseOptions([r1, r2], power_combination="min")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        per = [rd["power"] for rd in mr["responses"]]
-        assert mr["achieved_power"] == pytest.approx(min(per), abs=1e-9)
+        per = [rd["power"] for rd in mr["report"]["responses"]]
+        assert mr["report"]["achieved_power"] == pytest.approx(min(per), abs=1e-9)
 
     def test_s2_product_achieved_equals_p1_times_p2(self):
         """achieved_power == P1 * P2 under product rule."""
@@ -2212,9 +2214,9 @@ class TestMR10Integration:
         r2 = _mr10_r2rs("Y2", r2=0.33, max_n=40)
         multi = MultiResponseOptions([r1, r2], power_combination="product")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        p1 = next(rd["power"] for rd in mr["responses"] if rd["name"] == "Y1")
-        p2 = next(rd["power"] for rd in mr["responses"] if rd["name"] == "Y2")
-        assert mr["achieved_power"] == pytest.approx(p1 * p2, abs=1e-9)
+        p1 = next(rd["power"] for rd in mr["report"]["responses"] if rd["name"] == "Y1")
+        p2 = next(rd["power"] for rd in mr["report"]["responses"] if rd["name"] == "Y2")
+        assert mr["report"]["achieved_power"] == pytest.approx(p1 * p2, abs=1e-9)
 
     def test_s2_product_power_leq_min_per_response(self):
         """product rule: achieved_power <= min(per-response powers)."""
@@ -2223,8 +2225,8 @@ class TestMR10Integration:
         r2 = _mr10_r2rs("Y2", r2=0.35, max_n=40)
         multi = MultiResponseOptions([r1, r2], power_combination="product")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        per = [rd["power"] for rd in mr["responses"]]
-        assert mr["achieved_power"] <= min(per) + 1e-9
+        per = [rd["power"] for rd in mr["report"]["responses"]]
+        assert mr["report"]["achieved_power"] <= min(per) + 1e-9
 
     def test_s3_three_responses_weighted_mean_structure(self):
         """Three-response weighted_mean returns valid result."""
@@ -2239,9 +2241,9 @@ class TestMR10Integration:
         ]
         multi = MultiResponseOptions(responses, power_combination="weighted_mean")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        assert len(mr["responses"]) == 3
-        assert mr["combination_rule"] == "weighted_mean"
-        assert isinstance(mr["design"], pd.DataFrame)
+        assert len(mr["report"]["responses"]) == 3
+        assert mr["report"]["combination_rule"] == "weighted_mean"
+        assert isinstance(mr["design_df"], pd.DataFrame)
 
     def test_s3_weighted_mean_achieved_equals_formula(self):
         """achieved_power == weighted mean of per-response powers."""
@@ -2257,10 +2259,10 @@ class TestMR10Integration:
         ]
         multi = MultiResponseOptions(responses, power_combination="weighted_mean")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        per_powers = [rd["power"] for rd in mr["responses"]]
+        per_powers = [rd["power"] for rd in mr["report"]["responses"]]
         weights = [r.weight for r in multi.responses]
         expected = combine_powers(per_powers, weights, "weighted_mean")
-        assert mr["achieved_power"] == pytest.approx(expected, abs=1e-9)
+        assert mr["report"]["achieved_power"] == pytest.approx(expected, abs=1e-9)
 
     def test_s4_compound_criterion_flag_set(self):
         """Responses with different formulas set compound_criterion=True."""
@@ -2279,7 +2281,7 @@ class TestMR10Integration:
         )
         multi = MultiResponseOptions([r1, r2], power_combination="min")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        assert mr["compound_criterion"] is True
+        assert mr["report"]["compound_criterion"] is True
 
     def test_s4_compound_design_estimable_for_both_formulas(self):
         """Compound-criterion design is full-rank for both response model matrices."""
@@ -2299,7 +2301,7 @@ class TestMR10Integration:
         )
         multi = MultiResponseOptions([r1, r2], power_combination="min")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        design_df = mr["design"]
+        design_df = mr["design_df"]
         X_lin, _ = build_model_matrix("~ 1 + A", design_df)
         X_inter, _ = build_model_matrix("~ 1 + A + B + A:B", design_df)
         assert np.linalg.matrix_rank(X_lin) == X_lin.shape[1]
@@ -2315,7 +2317,7 @@ class TestMR10Integration:
             L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        assert 0.0 <= mr["joint_power"] <= 1.0
+        assert 0.0 <= mr["report"]["joint_power"] <= 1.0
 
     def test_s5_hotelling_joint_power_geq_min_per_response(self):
         """Joint T2 power >= min(per-response powers) with identity sigma_joint."""
@@ -2327,8 +2329,8 @@ class TestMR10Integration:
             L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        per = [rd["power"] for rd in mr["responses"]]
-        assert mr["joint_power"] >= min(per) - 1e-9
+        per = [rd["power"] for rd in mr["report"]["responses"]]
+        assert mr["report"]["joint_power"] >= min(per) - 1e-9
 
     def test_s6_split_plot_multi_response_valid_result(self):
         """SplitPlotOptions + MultiResponseOptions produces valid result."""
@@ -2341,9 +2343,9 @@ class TestMR10Integration:
             L=L, delta=np.array([2.0]), sigma=1.5, power=0.8, max_n=30, max_iter=20))
         multi = MultiResponseOptions([r1, r2], power_combination="min")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        assert isinstance(mr["design"], pd.DataFrame)
-        assert len(mr["responses"]) == 2
-        assert mr["n"] >= 1
+        assert isinstance(mr["design_df"], pd.DataFrame)
+        assert len(mr["report"]["responses"]) == 2
+        assert mr["report"]["n"] >= 1
 
     def test_s6_split_plot_design_has_wp_column(self):
         """Split-plot multi-response design includes __wp_id__ column."""
@@ -2356,7 +2358,7 @@ class TestMR10Integration:
             L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20))
         multi = MultiResponseOptions([r1, r2], power_combination="min")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
-        assert "__wp_id__" in mr["design"].columns
+        assert "__wp_id__" in mr["design_df"].columns
 
     def test_s7_combined_power_nondecreasing(self):
         """combined_power is non-decreasing as n increases."""
@@ -2401,7 +2403,7 @@ class TestMR10PropertyBased:
             L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25))
         mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2], power_combination="min"), opts)
-        assert abs(mr["n"] - n_single) <= 1
+        assert abs(mr["report"]["n"] - n_single) <= 1
 
     def test_adding_harder_third_response_min_nondecreasing(self):
         """Adding harder third response under min never decreases n."""
@@ -2416,7 +2418,7 @@ class TestMR10PropertyBased:
             L=_MR10_L, delta=_MR10_DELTA, sigma=2.0, power=0.8, max_n=40, max_iter=25))
         mr3 = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2, r3], power_combination="min"), opts)
-        assert mr3["n"] >= mr2["n"] - 1
+        assert mr3["report"]["n"] >= mr2["report"]["n"] - 1
 
     def test_power_curve_no_nan_fast(self):
         """power_curve_by_n_multiresponse: no NaN (small range)."""
@@ -2437,8 +2439,8 @@ class TestMR10PropertyBased:
         mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS,
             MultiResponseOptions([r1, r2], power_combination="product"), _mr10_opts())
-        per = [rd["power"] for rd in mr["responses"]]
-        assert mr["achieved_power"] <= min(per) + 1e-9
+        per = [rd["power"] for rd in mr["report"]["responses"]]
+        assert mr["report"]["achieved_power"] <= min(per) + 1e-9
 
     def test_response_names_preserved(self):
         """Response names in result match names in MultiResponseOptions."""
@@ -2450,28 +2452,28 @@ class TestMR10PropertyBased:
         ]
         mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions(responses), _mr10_opts())
-        assert [rd["name"] for rd in mr["responses"]] == names
+        assert [rd["name"] for rd in mr["report"]["responses"]] == names
 
     def test_shared_formula_compound_criterion_false(self):
         """Shared global formula => compound_criterion=False."""
         mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS,
             MultiResponseOptions([_mr10_crs("Y1"), _mr10_crs("Y2")]), _mr10_opts())
-        assert mr["compound_criterion"] is False
+        assert mr["report"]["compound_criterion"] is False
 
     def test_warnings_key_is_list(self):
         """warnings key is always a list."""
         mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS,
             MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]), _mr10_opts())
-        assert isinstance(mr["warnings"], list)
+        assert isinstance(mr["report"]["warnings"], list)
 
     def test_elapsed_sec_positive(self):
         """elapsed_sec is positive."""
         mr = find_multiresponse_design(
             _MR10_FORMULA, _MR10_FACTORS,
             MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]), _mr10_opts())
-        assert mr["elapsed_sec"] > 0
+        assert mr["report"]["elapsed_sec"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -3195,9 +3197,9 @@ class TestSR20HotellingSearchSemantics:
                 design_opts=DesignOptions(**self._OPTS),
             )
         # Joint test held to 0.8, not prod(0.8, 0.8) = 0.64
-        assert out["joint_power"] + 1e-3 >= 0.8
+        assert out["report"]["joint_power"] + 1e-3 >= 0.8
         assert any("does not apply" in str(c.message) for c in caught)
-        assert any("does not apply" in s for s in out["warnings"])
+        assert any("does not apply" in s for s in out["report"]["warnings"])
 
     def test_singular_sigma_joint_rejected_before_search(self):
         """SR-29 (supersedes the SR-20c sticky fallback): structural
@@ -3248,10 +3250,10 @@ class TestSR26HotellingFeasibilityFloor:
                 mc, design_opts=DesignOptions(random_state=0, starts=1,
                                               candidate_points=100),
             )
-        assert "joint_power" in out, "joint objective was abandoned"
-        assert out["joint_power"] + 1e-3 >= 0.8
+        assert "joint_power" in out["report"], "joint objective was abandoned"
+        assert out["report"]["joint_power"] + 1e-3 >= 0.8
         # p = 3 params, k = 2 responses: joint test needs n >= 5
-        assert out["n"] >= 5
+        assert out["report"]["n"] >= 5
         assert not any("Falling back" in str(c.message) for c in caught)
 
 
@@ -3323,8 +3325,8 @@ class TestSR30MultiResponseNumericCategoricals:
                                       candidate_points=50,
                                       preallocate_categorical=True),
         )
-        assert out["n"] > 3, "search must exceed the 3 numeric-coded cells"
-        assert out["achieved_power"] + 1e-3 >= 0.8
+        assert out["report"]["n"] > 3, "search must exceed the 3 numeric-coded cells"
+        assert out["report"]["achieved_power"] + 1e-3 >= 0.8
 
 
 # ---------------------------------------------------------------------------
@@ -3444,7 +3446,7 @@ class TestUX7TerminationStatus:
             MultiResponseOptions(responses=resp, power_combination="min"),
             design_opts=DesignOptions(**self._OPTS),
         )
-        assert out["status"] == "partial"
-        assert out["target_met"] is False
-        assert out["termination_reason"] in ("max_n", "max_iter",
+        assert out["report"]["status"] == "partial"
+        assert out["report"]["target_met"] is False
+        assert out["report"]["termination_reason"] in ("max_n", "max_iter",
                                              "candidate_cap")

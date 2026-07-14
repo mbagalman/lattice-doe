@@ -8,11 +8,120 @@ Small, dependency-light helpers used across modules (validation, sizing, etc.).
 """
 from __future__ import annotations
 
-from typing import Dict, List, Tuple, Union, Literal
+import re
+import warnings
+from typing import Any, Dict, List, Optional, Tuple, Union, Literal
 import numpy as np
 
 
 FactorSpec = Dict[str, Union[List[Union[int, float, str]], Tuple[float, float]]]
+
+
+# --- Discriminated factor-spec markers (UX-5) -----------------------------
+# The legacy shorthand classifies any two-element numeric sequence as
+# continuous, so a binary numeric CATEGORY like ``[0, 1]`` is ambiguous and
+# cannot be expressed. The discriminated dict forms
+#   {"type": "continuous", "low": lo, "high": hi}
+#   {"type": "categorical", "levels": [...]}
+# normalize to these marker subclasses, which ARE a tuple / list (so all
+# downstream ``lo, hi = spec`` / ``list(spec)`` code keeps working) but let the
+# spec classifiers resolve the type unambiguously regardless of level dtype.
+
+
+class _ContinuousSpec(tuple):
+    """A ``(low, high)`` continuous spec, explicitly typed."""
+
+    __slots__ = ()
+
+
+class _CategoricalSpec(list):
+    """A list of levels, explicitly typed as categorical."""
+
+    __slots__ = ()
+
+
+def _spec_is_continuous(spec: Any) -> bool:
+    """Authoritative continuous/categorical classifier honoring markers.
+
+    Marker subclasses win; otherwise the legacy heuristic (a two-element
+    all-numeric sequence is continuous) applies.
+    """
+    if isinstance(spec, _CategoricalSpec):
+        return False
+    if isinstance(spec, _ContinuousSpec):
+        return True
+    return (
+        isinstance(spec, (tuple, list))
+        and len(spec) == 2
+        and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in spec)
+    )
+
+
+def normalize_factors(
+    factors: FactorSpec,
+    formula: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Normalize factor specs, resolving the discriminated dict forms (UX-5).
+
+    Accepts, per factor:
+      * ``{"type": "continuous", "low": lo, "high": hi}`` → ``_ContinuousSpec``
+      * ``{"type": "categorical", "levels": [...]}``      → ``_CategoricalSpec``
+      * legacy ``(lo, hi)`` / ``[lo, hi]``                → passed through
+      * legacy ``[level, ...]``                           → passed through
+
+    When *formula* is supplied, a legacy two-element numeric spec that the
+    formula wraps in ``C(name)`` (the one case where the intended type visibly
+    conflicts with the heuristic) triggers a ``DeprecationWarning`` steering the
+    caller to the explicit categorical dict form.
+
+    Returns a new dict; the input is not mutated.
+    """
+    out: Dict[str, Any] = {}
+    for name, spec in factors.items():
+        if isinstance(spec, dict) and "type" in spec:
+            kind = spec.get("type")
+            if kind == "continuous":
+                if "low" not in spec or "high" not in spec:
+                    raise ValueError(
+                        f"Continuous factor '{name}' needs 'low' and 'high' keys."
+                    )
+                out[name] = _ContinuousSpec((spec["low"], spec["high"]))
+            elif kind == "categorical":
+                levels = spec.get("levels")
+                if not isinstance(levels, (list, tuple)) or len(levels) == 0:
+                    raise ValueError(
+                        f"Categorical factor '{name}' needs a non-empty 'levels' list."
+                    )
+                out[name] = _CategoricalSpec(list(levels))
+            else:
+                raise ValueError(
+                    f"Factor '{name}' has unknown type {kind!r}; use "
+                    "'continuous' or 'categorical'."
+                )
+            continue
+
+        # Legacy form — pass through, but flag the ambiguous C(...) case.
+        # Markers are explicit already, so they never warn.
+        if (
+            formula
+            and not isinstance(spec, (_CategoricalSpec, _ContinuousSpec))
+            and isinstance(spec, (tuple, list))
+            and len(spec) == 2
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in spec)
+            and re.search(r"\bC\(\s*" + re.escape(name) + r"\s*[,)]", formula)
+        ):
+            warnings.warn(
+                f"Factor '{name}' is given as a two-number list {list(spec)!r} "
+                f"(treated as a CONTINUOUS range) but the formula wraps it in "
+                f"C({name}). If you meant a categorical factor with levels "
+                f"{list(spec)!r}, use the explicit form "
+                f'{{"type": "categorical", "levels": {list(spec)!r}}}; the '
+                "ambiguous shorthand is deprecated for this case.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        out[name] = spec
+    return out
 
 
 def validate_factors(factors: FactorSpec) -> None:
@@ -40,14 +149,9 @@ def validate_factors(factors: FactorSpec) -> None:
             )
         seen_factor_names[name_lower] = name
 
-        # --- Distinguish continuous vs categorical ---
-        
-        # Continuous: tuple(low, high) or list[low, high] with numeric content
-        is_cont = False
-        if isinstance(spec, (tuple, list)) and len(spec) == 2:
-            if all(isinstance(x, (int, float)) for x in spec):
-                is_cont = True
-        
+        # --- Distinguish continuous vs categorical (markers win, UX-5) ---
+        is_cont = _spec_is_continuous(spec)
+
         if is_cont:
             lo, hi = spec
             try:
@@ -140,16 +244,9 @@ def model_matrix_preview(
 
     from .model_matrix import build_model_matrix
 
-    def _is_cont(spec) -> bool:
-        return (
-            isinstance(spec, (tuple, list))
-            and len(spec) == 2
-            and all(isinstance(x, (int, float)) and not isinstance(x, bool)
-                    for x in spec)
-        )
-
-    cat = {k: list(v) for k, v in factors.items() if not _is_cont(v)}
-    cont = {k: v for k, v in factors.items() if _is_cont(v)}
+    factors = normalize_factors(factors)
+    cat = {k: list(v) for k, v in factors.items() if not _spec_is_continuous(v)}
+    cont = {k: v for k, v in factors.items() if _spec_is_continuous(v)}
 
     n_rows = 1
     for levels in cat.values():
@@ -179,4 +276,9 @@ def model_matrix_preview(
     return X.shape[1], list(col_names)
 
 
-__all__ = ["validate_factors", "initial_n_guess", "model_matrix_preview"]
+__all__ = [
+    "validate_factors",
+    "initial_n_guess",
+    "model_matrix_preview",
+    "normalize_factors",
+]

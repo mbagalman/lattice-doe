@@ -50,7 +50,7 @@ from .power import (
     eval_response_power, combine_powers, hotelling_t2_power,
     glm_contrast_power,
 )
-from .utils import validate_factors, initial_n_guess
+from .utils import validate_factors, initial_n_guess, normalize_factors
 from .blocked import blocked_formula, build_blocked_design
 from .progress import Phase, ProgressEvent, ProgressReporter, _coerce_reporter
 
@@ -182,6 +182,24 @@ def _termination_fields(
     }
 
 
+def _mr_envelope(design_df: "pd.DataFrame", report: Dict[str, Any]) -> Dict[str, Any]:
+    """Wrap a multi-response result in the unified envelope (UX-6).
+
+    Both ``find_optimal_design`` and ``find_multiresponse_design`` return
+    exactly ``{"design_df", "buckets_df", "report"}``. The multi-response
+    metadata that used to live at the top level (``n``, ``achieved_power``,
+    ``responses``, joint/split-plot fields, …) now lives inside ``report``, so
+    every consumer reads ``result["design_df"]`` and ``result["report"][...]``
+    regardless of mode. This is a hard switch: the former ``design`` /
+    ``buckets`` / flat keys are gone.
+    """
+    return {
+        "design_df": design_df,
+        "buckets_df": _buckets_df(design_df),
+        "report": report,
+    }
+
+
 def _candidate_cap_warning(max_n: int, capped_max_n: int, n_cand: int) -> str:
     """Warning text for when the candidate-set cap truncated a failed search."""
     return (
@@ -253,6 +271,9 @@ def find_optimal_design(
     # --- 1. Validate factors and inputs (early exit) ---
     if _reporter is not None:
         _reporter.emit(Phase.VALIDATING, message="Validating inputs", force=True)
+    # Resolve discriminated {"type": ...} factor specs and warn on the
+    # ambiguous [a, b]-under-C(...) case (UX-5) before anything consumes them.
+    factors = normalize_factors(factors, formula)
     validate_factors(factors)
     p = _validate_api_inputs(formula, factors, power_cfg)
 
@@ -1337,6 +1358,7 @@ def find_multiresponse_design(
     if _reporter is not None:
         _reporter.emit(Phase.VALIDATING, message="Validating inputs", force=True)
 
+    factors = normalize_factors(factors, formula)  # UX-5
     validate_factors(factors)
     is_sp = _is_split_plot(design_opts)
 
@@ -1631,22 +1653,22 @@ def find_multiresponse_design(
                 target_power=target,
                 force=True,
             )
-        return {
-            "design": best["_design_df"],
+        return _mr_envelope(best["_design_df"], {
             "n": int(n_final),
+            "p": int(p),
             "achieved_power": float(combined_final),
+            "target_power": float(target),
             "responses": [
                 {"name": rd["name"], "power": rd["power"], "lam": rd["lam"], "n": int(n_final)}
                 for rd in _per_r_final
             ],
             "combination_rule": rule,
             "compound_criterion": False,
-            "buckets": _buckets_df(best["_design_df"]),
+            "criterion": design_opts.criterion,
             "elapsed_sec": round(float(elapsed_sec), 4),
             "search_strategy": "+".join(_strategy_parts),
             "n_whole_plots": int(best["_n_wp"]),
             "subplots_per_wp": int(subplots_per_wp),
-            "p": int(p),
             "iteration": int(it),
             "warnings": list(_run_warnings),
             **_termination_fields(
@@ -1655,7 +1677,7 @@ def find_multiresponse_design(
                 it_count=it,
                 max_iter=max_iter,
             ),
-        }
+        })
 
     # =========================================================================
     # OLS compound-criterion path (responses with different formulas)
@@ -1805,20 +1827,20 @@ def find_multiresponse_design(
                 target_power=target,
                 force=True,
             )
-        return {
-            "design": best_c["_design_df"],
+        return _mr_envelope(best_c["_design_df"], {
             "n": int(n_final_c),
+            "p": int(p_compound),
             "achieved_power": float(combined_final_c),
+            "target_power": float(target),
             "responses": [
                 {"name": rd["name"], "power": rd["power"], "lam": rd["lam"], "n": int(n_final_c)}
                 for rd in _per_r_final_c
             ],
             "combination_rule": rule,
             "compound_criterion": True,
-            "buckets": _buckets_df(best_c["_design_df"]),
+            "criterion": design_opts.criterion,
             "elapsed_sec": round(float(elapsed_sec_c), 4),
             "search_strategy": "+".join(_strategy_parts_c),
-            "p": int(p_compound),
             "iteration": int(it_c),
             "warnings": list(_run_warnings_c),
             **_termination_fields(
@@ -1827,7 +1849,7 @@ def find_multiresponse_design(
                 it_count=it_c,
                 max_iter=max_iter,
             ),
-        }
+        })
 
     # =========================================================================
     # OLS path (shared formula)
@@ -2079,20 +2101,20 @@ def find_multiresponse_design(
             )
 
     _ht2_final = best.get("_ht2")
-    _out: Dict[str, Any] = {
-        "design": best["_design_df"],
+    _report: Dict[str, Any] = {
         "n": int(n_final),
+        "p": int(p),
         "achieved_power": float(combined_final),
+        "target_power": float(target),
         "responses": [
             {"name": rd["name"], "power": rd["power"], "lam": rd["lam"], "n": int(n_final)}
             for rd in _per_r_final
         ],
         "combination_rule": rule,
         "compound_criterion": False,
-        "buckets": _buckets_df(best["_design_df"]),
+        "criterion": design_opts.criterion,
         "elapsed_sec": round(float(elapsed_sec), 4),
         "search_strategy": "+".join(_strategy_parts),
-        "p": int(p),
         "iteration": int(it),
         "warnings": list(_run_warnings),
         **_termination_fields(
@@ -2103,23 +2125,23 @@ def find_multiresponse_design(
         ),
     }
     if _use_hotelling and _ht2_final is not None:
-        _out["joint_power"] = float(_ht2_final.power)
-        _out["joint_lam"] = float(_ht2_final.lam)
-        _out["joint_df1"] = int(_ht2_final.df1)
-        _out["joint_df2"] = int(_ht2_final.df2)
+        _report["joint_power"] = float(_ht2_final.power)
+        _report["joint_lam"] = float(_ht2_final.lam)
+        _report["joint_df1"] = int(_ht2_final.df1)
+        _report["joint_df2"] = int(_ht2_final.df2)
     if _reporter is not None:
         _reporter.emit(
             Phase.DONE,
             message=(
-                f"Done: n={_out['n']}, combined power={_out['achieved_power']:.4f} "
-                f"({_out.get('status', 'complete')})"
+                f"Done: n={_report['n']}, combined power={_report['achieved_power']:.4f} "
+                f"({_report.get('status', 'complete')})"
             ),
-            trial_n=_out["n"],
-            current_power=_out["achieved_power"],
+            trial_n=_report["n"],
+            current_power=_report["achieved_power"],
             target_power=target,
             force=True,
         )
-    return _out
+    return _mr_envelope(best["_design_df"], _report)
 
 
 __all__ = ["find_optimal_design", "find_multiresponse_design"]

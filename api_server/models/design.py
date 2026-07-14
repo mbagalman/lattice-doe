@@ -139,44 +139,53 @@ class MultiResponseDesignRequest(StrictRequestModel):
     }}
 
 
-class MultiResponseDesignResponse(BaseModel):
-    """Response body for POST /multiresponse_design."""
+class MultiResponseReportModel(BaseModel):
+    """The ``report`` block of a multi-response result (UX-6).
 
+    Shares the search-outcome and diagnostic fields with the single-response
+    ``ReportModel``; adds the multi-response-specific keys. ``extra="allow"``
+    keeps it forward-compatible with optional joint / split-plot fields.
+    """
+
+    n: int
+    p: Optional[int] = None
+    achieved_power: float
+    target_power: Optional[float] = None
+    combination_rule: str
+    compound_criterion: bool
+    responses: List[Dict[str, Any]] = Field(default_factory=list)
+    criterion: Optional[str] = None
+    elapsed_sec: Optional[float] = None
+    search_strategy: Optional[str] = None
+    iteration: Optional[int] = None
+    warnings: List[str] = Field(default_factory=list)
     # Machine-readable search outcome (UX-7)
     status: Optional[str] = None
     target_met: Optional[bool] = None
     termination_reason: Optional[str] = None
+    # Hotelling T² (present when sigma_joint was supplied)
+    joint_power: Optional[float] = None
+    joint_lam: Optional[float] = None
+    joint_df1: Optional[int] = None
+    joint_df2: Optional[int] = None
+    # Split-plot summary (present in split-plot mode)
+    n_whole_plots: Optional[int] = None
+    subplots_per_wp: Optional[int] = None
 
-    design: List[Dict[str, Any]] = Field(
+    model_config = {"extra": "allow"}
+
+
+class MultiResponseDesignResponse(BaseModel):
+    """Response body for POST /multiresponse_design (UX-6).
+
+    Unified envelope: same top-level shape as ``DesignResponse``. All
+    multi-response metadata lives in ``report``.
+    """
+
+    design_df: List[Dict[str, Any]] = Field(
         ..., description="Design matrix rows as records."
     )
-    n: int = Field(..., description="Number of runs in the optimal design.")
-    achieved_power: float = Field(
-        ..., description="Combined power achieved by the aggregation rule."
-    )
-    responses: List[Dict[str, Any]] = Field(
-        ..., description="Per-response power details (name, power, n, ...)."
-    )
-    combination_rule: str = Field(
-        ..., description="Aggregation rule used (min / product / weighted_mean)."
-    )
-    compound_criterion: bool = Field(
-        ..., description="True when per-response formulas differ (compound path)."
-    )
-    elapsed_sec: Optional[float] = Field(None, description="Wall-clock search time.")
-    buckets: List[Dict[str, Any]] = Field(
+    buckets_df: List[Dict[str, Any]] = Field(
         ..., description="Unique run-frequency buckets."
     )
-    warnings: List[str] = Field(default_factory=list)
-    # Search diagnostics
-    search_strategy: Optional[str] = Field(None, description="Search strategy string (bisection/growth/verification).")
-    p: Optional[int] = Field(None, description="Number of model parameters.")
-    iteration: Optional[int] = Field(None, description="Number of bisection iterations used.")
-    # Hotelling T² joint power (present when sigma_joint was supplied)
-    joint_power: Optional[float] = Field(None, description="Hotelling T² joint power.")
-    joint_lam: Optional[float] = Field(None, description="Hotelling T² noncentrality λ.")
-    joint_df1: Optional[int] = Field(None, description="Hotelling T² numerator df.")
-    joint_df2: Optional[int] = Field(None, description="Hotelling T² denominator df.")
-    # Split-plot summary (present when split-plot mode was used)
-    n_whole_plots: Optional[int] = Field(None, description="Number of whole plots (split-plot only).")
-    subplots_per_wp: Optional[int] = Field(None, description="Sub-plots per whole plot (split-plot only).")
+    report: MultiResponseReportModel

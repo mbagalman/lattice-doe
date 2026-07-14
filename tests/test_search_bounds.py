@@ -134,8 +134,8 @@ class TestSearchCappedMultiResponse:
         """Shared-formula MR path: same cap applies to the joint search."""
         opts = DesignOptions(candidate_points=200, starts=2, random_state=42)
         res = find_multiresponse_design(FORMULA, FACTORS, self._multi_cfg(), opts)
-        assert res["n"] <= 200
-        assert res["achieved_power"] + 1e-3 >= 0.90
+        assert res["report"]["n"] <= 200
+        assert res["report"]["achieved_power"] + 1e-3 >= 0.90
 
     def test_multiresponse_capped_and_unreachable_warns(self):
         opts = DesignOptions(candidate_points=150, starts=2, random_state=42)
@@ -143,9 +143,9 @@ class TestSearchCappedMultiResponse:
             res = find_multiresponse_design(
                 FORMULA, FACTORS, self._multi_cfg(delta=0.02), opts
             )
-        assert res["n"] <= 150
-        cap_msgs = [m for m in res["warnings"] if "capped" in m]
-        assert cap_msgs, f"no cap warning in MR warnings: {res['warnings']}"
+        assert res["report"]["n"] <= 150
+        cap_msgs = [m for m in res["report"]["warnings"] if "capped" in m]
+        assert cap_msgs, f"no cap warning in MR warnings: {res['report']['warnings']}"
         assert "max_n" in cap_msgs[0]
         assert "candidate_points" in cap_msgs[0]
 
@@ -168,9 +168,9 @@ class TestSearchCappedMultiResponse:
         )
         opts = DesignOptions(candidate_points=200, starts=2, random_state=42)
         res = find_multiresponse_design(FORMULA, FACTORS, multi, opts)
-        assert res["compound_criterion"] is True
-        assert res["n"] <= 200
-        assert res["achieved_power"] + 1e-3 >= 0.90
+        assert res["report"]["compound_criterion"] is True
+        assert res["report"]["n"] <= 200
+        assert res["report"]["achieved_power"] + 1e-3 >= 0.90
 
 
 # ---------------------------------------------------------------------------

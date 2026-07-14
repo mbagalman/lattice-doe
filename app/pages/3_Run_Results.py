@@ -435,34 +435,16 @@ if result is None:
         st.info("Click **Generate design** above to run.")
     st.stop()
 
-# Detect multi-response result (flat dict) vs single-response (nested "report" dict).
-_is_mr = "report" not in result
+# Unified envelope for both modes (UX-6): always design_df / buckets_df /
+# report. Multi-response is distinguished by a combination_rule in the report.
+report = result["report"]
+design_df = result["design_df"]
+buckets_df = result["buckets_df"]
+_is_mr = "combination_rule" in report
 if _is_mr:
-    design_df = result["design"]
-    buckets_df = result["buckets"]
-    _mr_target = max(
-        (float(r.get("power", ss.get("power_target", 0.80))) for r in ss.get("mr_responses", [])),
-        default=float(ss.get("power_target", 0.80)),
-    )
-    report = {
-        "n": result["n"],
-        "achieved_power": result["achieved_power"],
-        "target_power": _mr_target,
-        "elapsed_sec": result.get("elapsed_sec", 0.0),
-        "criterion": "Compound" if result.get("compound_criterion") else ss.get("criterion", "I"),
-        "search_strategy": result.get("search_strategy", "—"),
-        "warnings": result.get("warnings", []),
-        "combination_rule": result.get("combination_rule", "min"),
-        "combined_power": result["achieved_power"],
-        "p": result.get("p"),
-        **{f"{r['name']}_power": r["power"] for r in result.get("responses", [])},
-    }
-    if "joint_power" in result:
-        report["joint_power"] = result["joint_power"]
-else:
-    report = result["report"]
-    design_df = result["design_df"]
-    buckets_df = result["buckets_df"]
+    report.setdefault("combined_power", report.get("achieved_power"))
+    for r in report.get("responses", []):
+        report.setdefault(f"{r['name']}_power", r["power"])
 
 for w in report.get("warnings", []):
     st.warning(f"Run warning: {w}")

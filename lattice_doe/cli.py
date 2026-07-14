@@ -1053,41 +1053,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             _on_progress = ProgressReporter(_render_progress, min_interval=0.3)
 
         if _is_multiresponse:
-            _mr_result = find_multiresponse_design(
+            result = find_multiresponse_design(
                 formula=formula,
                 factors=factors,
                 multi_cfg=multi_cfg,
                 design_opts=design_opts,
                 on_progress=_on_progress,
             )
-            # Normalize multi-response result to the CLI's standard format
-            design_df = _mr_result["design"]
-            buckets_df = _mr_result["buckets"]
-            report: Dict[str, Any] = {
-                "n": _mr_result["n"],
-                "p": _mr_result.get("p"),
-                "achieved_power": _mr_result["achieved_power"],
-                "combined_power": _mr_result["achieved_power"],
-                "combination_rule": _mr_result.get("combination_rule"),
-                "criterion": design_opts.criterion,
-                "algo": design_opts.algo,
-                "starts": design_opts.starts,
-                "elapsed_sec": _mr_result.get("elapsed_sec"),
-                "search_strategy": _mr_result.get("search_strategy"),
-                "warnings": _mr_result.get("warnings", []),
-                "compound_criterion": _mr_result.get("compound_criterion", False),
-                # Machine-readable search outcome (UX-7)
-                "status": _mr_result.get("status"),
-                "target_met": _mr_result.get("target_met"),
-                "termination_reason": _mr_result.get("termination_reason"),
-            }
-            # Add per-response power keys for the summary printout
-            for _rd in _mr_result.get("responses", []):
+            # Unified envelope (UX-6): design_df / buckets_df / report already
+            # present. Enrich the report with the extra fields the CLI summary
+            # printout expects.
+            design_df = result["design_df"]
+            buckets_df = result["buckets_df"]
+            report = result["report"]
+            report["combined_power"] = report["achieved_power"]
+            report["algo"] = design_opts.algo
+            report["starts"] = design_opts.starts
+            for _rd in report.get("responses", []):
                 report[f"{_rd['name']}_power"] = _rd["power"]
-            result = dict(_mr_result)
-            result["design_df"] = design_df
-            result["buckets_df"] = buckets_df
-            result["report"] = report
         else:
             result = find_optimal_design(
                 formula,

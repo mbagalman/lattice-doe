@@ -17,6 +17,7 @@ from api_server.models.design import (
     MultiResponseDesignResponse,
 )
 from api_server.serialization import (
+    factors_to_spec,
     pydantic_design_opts_to_dataclass,
     pydantic_multi_cfg_to_dataclass,
     pydantic_power_cfg_to_dataclass,
@@ -33,7 +34,7 @@ def _sync_run_design(request: DesignRequest) -> dict:
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
     result = find_optimal_design(
         formula=request.formula,
-        factors=dict(request.factors),
+        factors=factors_to_spec(request.factors, request.formula),
         power_cfg=power_cfg,
         design_opts=design_opts,
     )
@@ -65,7 +66,7 @@ def _sync_run_multiresponse_design(request: MultiResponseDesignRequest) -> dict:
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
     result = find_multiresponse_design(
         formula=request.formula,
-        factors=dict(request.factors),
+        factors=factors_to_spec(request.factors, request.formula),
         multi_cfg=multi_cfg,
         design_opts=design_opts,
     )

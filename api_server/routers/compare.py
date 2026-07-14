@@ -17,6 +17,7 @@ from api_server.models.compare import (
 )
 from api_server.models.design import DesignResponse
 from api_server.serialization import (
+    factors_to_spec,
     pydantic_design_opts_to_dataclass,
     pydantic_power_cfg_to_dataclass,
     sanitize_float,
@@ -31,7 +32,7 @@ def _sync_compare(request: CompareCriteriaRequest) -> Dict[str, Any]:
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
     result = compare_criteria(
         formula=request.formula,
-        factors=dict(request.factors),
+        factors=factors_to_spec(request.factors, request.formula),
         power_cfg=power_cfg,
         design_opts=design_opts,
         criteria=request.criteria,

@@ -703,7 +703,10 @@ def _write_results(
     clear_results : bool, default True
         Clear existing content in each output sheet before writing.
     """
-    _is_mr = "report" not in result
+    # Both modes use the unified envelope (UX-6); MR is distinguished by a
+    # multi-response-only key in its report.
+    report = result["report"]
+    _is_mr = "combination_rule" in report
 
     # ------------------------------------------------------------------
     # 1. Results sheet — key/value summary
@@ -714,23 +717,22 @@ def _write_results(
 
     if _is_mr:
         summary_rows: List[List[Any]] = [
-            ["n",                int(result["n"])],
-            ["achieved_power",   float(result["achieved_power"])],
-            ["combination_rule", str(result.get("combination_rule", "min"))],
-            ["compound_criterion", str(result.get("compound_criterion", False))],
-            ["elapsed_sec",      float(result.get("elapsed_sec", 0.0))],
-            ["search_strategy",  str(result.get("search_strategy", ""))],
+            ["n",                int(report["n"])],
+            ["achieved_power",   float(report["achieved_power"])],
+            ["combination_rule", str(report.get("combination_rule", "min"))],
+            ["compound_criterion", str(report.get("compound_criterion", False))],
+            ["elapsed_sec",      float(report.get("elapsed_sec", 0.0))],
+            ["search_strategy",  str(report.get("search_strategy", ""))],
             ["generated_at",     datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")],
-            ["warnings",         "\n".join(result.get("warnings", []))],
+            ["warnings",         "\n".join(report.get("warnings", []))],
         ]
-        for _r in result.get("responses", []):
+        for _r in report.get("responses", []):
             summary_rows.append([f"{_r['name']}_power", float(_r["power"])])
-        if "joint_power" in result:
-            summary_rows.append(["joint_power", float(result["joint_power"])])
-        design_df_val = result["design"]
-        buckets_df_val = result["buckets"]
+        if "joint_power" in report:
+            summary_rows.append(["joint_power", float(report["joint_power"])])
+        design_df_val = result["design_df"]
+        buckets_df_val = result["buckets_df"]
     else:
-        report = result["report"]
         diags  = report.get("diagnostics", {})
         summary_rows = [
             ["n",               int(report["n"])],

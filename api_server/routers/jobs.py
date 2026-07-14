@@ -28,6 +28,7 @@ from lattice_doe.progress import ProgressReporter
 from api_server.jobs import JobsAtCapacity
 from api_server.models.design import DesignRequest, MultiResponseDesignRequest
 from api_server.serialization import (
+    factors_to_spec,
     pydantic_design_opts_to_dataclass,
     pydantic_multi_cfg_to_dataclass,
     pydantic_power_cfg_to_dataclass,
@@ -45,7 +46,7 @@ def _design_runner(request: DesignRequest):
     def run(reporter: ProgressReporter) -> Dict[str, Any]:
         result = find_optimal_design(
             formula=request.formula,
-            factors=dict(request.factors),
+            factors=factors_to_spec(request.factors, request.formula),
             power_cfg=power_cfg,
             design_opts=design_opts,
             on_progress=reporter,
@@ -62,7 +63,7 @@ def _multiresponse_runner(request: MultiResponseDesignRequest):
     def run(reporter: ProgressReporter) -> Dict[str, Any]:
         result = find_multiresponse_design(
             formula=request.formula,
-            factors=dict(request.factors),
+            factors=factors_to_spec(request.factors, request.formula),
             multi_cfg=multi_cfg,
             design_opts=design_opts,
             on_progress=reporter,

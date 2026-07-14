@@ -26,11 +26,42 @@ from pydantic import BaseModel, Field, field_validator
 # Factor specification
 # ---------------------------------------------------------------------------
 
+# Legacy shorthand forms
 # Continuous factor: (low, high) tuple encoded as a two-element list
 FactorContinuous = Tuple[float, float]
 # Categorical factor: list of level strings
 FactorCategorical = List[str]
-FactorSpec = Union[FactorContinuous, FactorCategorical]
+
+
+class ContinuousFactorModel(BaseModel):
+    """Explicit continuous factor spec (UX-5)."""
+
+    type: Literal["continuous"]
+    low: float
+    high: float
+    model_config = {"extra": "forbid"}
+
+
+class CategoricalFactorModel(BaseModel):
+    """Explicit categorical factor spec (UX-5).
+
+    Levels may be numeric — the discriminated form is the only way to express
+    a numeric-coded category such as ``[0, 1]`` unambiguously over HTTP.
+    """
+
+    type: Literal["categorical"]
+    levels: List[Union[str, int, float]] = Field(..., min_length=1)
+    model_config = {"extra": "forbid"}
+
+
+# Dict forms are tried first so a {"type": ...} object is not mis-parsed as a
+# two-number continuous tuple.
+FactorSpec = Union[
+    ContinuousFactorModel,
+    CategoricalFactorModel,
+    FactorContinuous,
+    FactorCategorical,
+]
 
 
 # ---------------------------------------------------------------------------

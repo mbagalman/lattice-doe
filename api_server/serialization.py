@@ -70,6 +70,30 @@ def records_to_df(records: List[Dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+def factors_to_spec(
+    factors: Dict[str, Any], formula: Optional[str] = None
+) -> Dict[str, Any]:
+    """Convert a request's factor mapping to the core factor-spec form (UX-5).
+
+    Discriminated factor models (``ContinuousFactorModel`` /
+    ``CategoricalFactorModel``) are dumped back to ``{"type": ...}`` dicts, then
+    the whole mapping is normalized (resolving markers and emitting the
+    ambiguous-``C(...)`` deprecation warning when *formula* is supplied). Legacy
+    two-list forms pass through unchanged.
+    """
+    from lattice_doe.utils import normalize_factors
+
+    raw: Dict[str, Any] = {}
+    for name, spec in factors.items():
+        if hasattr(spec, "model_dump"):
+            raw[name] = spec.model_dump()
+        elif isinstance(spec, tuple):
+            raw[name] = list(spec)
+        else:
+            raw[name] = spec
+    return normalize_factors(raw, formula)
+
+
 # ---------------------------------------------------------------------------
 # Config conversion: Pydantic model → dataclass
 # ---------------------------------------------------------------------------
@@ -206,34 +230,16 @@ def pydantic_multi_cfg_to_dataclass(model: Any) -> MultiResponseOptions:
 
 
 def serialize_multiresponse_result(result: dict) -> dict:
-    """Convert an find_multiresponse_design result dict to JSON-safe form."""
-    design_df = result.get("design")
-    buckets_df = result.get("buckets")
-    out: dict = {
-        "design": df_to_records(design_df) if isinstance(design_df, pd.DataFrame) else [],
-        "n": int(result["n"]),
-        "achieved_power": sanitize_float(result["achieved_power"]),
-        "responses": [sanitize_value(r) for r in result.get("responses", [])],
-        "combination_rule": str(result.get("combination_rule", "min")),
-        "compound_criterion": bool(result.get("compound_criterion", False)),
-        "elapsed_sec": sanitize_float(result.get("elapsed_sec")),
-        "buckets": df_to_records(buckets_df) if isinstance(buckets_df, pd.DataFrame) else [],
-        "warnings": list(result.get("warnings", [])),
-        # Machine-readable search outcome (UX-7)
-        "status": result.get("status"),
-        "target_met": result.get("target_met"),
-        "termination_reason": result.get("termination_reason"),
-        # Search diagnostics
-        "search_strategy": result.get("search_strategy"),
-        "p": int(result["p"]) if result.get("p") is not None else None,
-        "iteration": int(result["iteration"]) if result.get("iteration") is not None else None,
-        # Hotelling T² (optional — present when sigma_joint was supplied)
-        "joint_power": sanitize_float(result.get("joint_power")),
-        "joint_lam": sanitize_float(result.get("joint_lam")),
-        "joint_df1": int(result["joint_df1"]) if result.get("joint_df1") is not None else None,
-        "joint_df2": int(result["joint_df2"]) if result.get("joint_df2") is not None else None,
-        # Split-plot summary (optional — present when split-plot mode was used)
-        "n_whole_plots": int(result["n_whole_plots"]) if result.get("n_whole_plots") is not None else None,
-        "subplots_per_wp": int(result["subplots_per_wp"]) if result.get("subplots_per_wp") is not None else None,
+    """Convert a find_multiresponse_design result to JSON-safe form (UX-6).
+
+    Multi-response results now use the same envelope as single-response —
+    ``{"design_df", "buckets_df", "report"}`` — so serialization is identical.
+    The multi-response-specific metadata (``responses``, ``combination_rule``,
+    joint / split-plot fields, …) lives inside ``report`` and is sanitized
+    generically by ``serialize_report``.
+    """
+    return {
+        "design_df": df_to_records(result["design_df"]),
+        "buckets_df": df_to_records(result["buckets_df"]),
+        "report": serialize_report(result["report"]),
     }
-    return out

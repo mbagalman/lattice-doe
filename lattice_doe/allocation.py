@@ -67,12 +67,10 @@ from .model_matrix import build_model_matrix
 # ---------------------------------------------------------------------------
 
 def _is_continuous(spec: Any) -> bool:
-    """Return True if *spec* is a 2-element numeric tuple/list (continuous factor)."""
-    return (
-        isinstance(spec, (tuple, list))
-        and len(spec) == 2
-        and all(isinstance(x, (int, float)) for x in spec)
-    )
+    """Return True if *spec* is a continuous factor (markers win, UX-5)."""
+    from .utils import _spec_is_continuous
+
+    return _spec_is_continuous(spec)
 
 
 def _wynn_multiplicative_I(
