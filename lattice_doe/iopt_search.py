@@ -29,6 +29,11 @@ import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+# Runtime import (not TYPE_CHECKING): typing.get_type_hints() on the public
+# functions must be able to resolve the alias. utils has no imports from this
+# module, so there is no circularity.
+from .utils import FactorSpec
+
 from .candidate import estimate_candidate_size, build_candidate
 from .model_matrix import build_model_matrix
 from .config import DesignOptions
@@ -1161,7 +1166,7 @@ def augment_design(
     design_df: pd.DataFrame,
     m: int,
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     design_opts: Optional[DesignOptions] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Augment an existing design by greedily adding *m* new runs.
@@ -1297,7 +1302,7 @@ def build_split_plot_design(
     htc_factors: List[str],
     eta: float,
     *,
-    factors: Optional[Dict[str, Any]] = None,
+    factors: Optional[FactorSpec] = None,
     criterion: str = "I",
     starts: int = 5,
     max_iter: int = 100,

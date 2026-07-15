@@ -152,3 +152,25 @@ class TestPageNavigationPersistence:
         assert at.session_state["alpha"] == pytest.approx(0.10)
         alpha_after = next(w for w in at.number_input if w.key == "alpha")
         assert alpha_after.value == pytest.approx(0.10)
+
+    def test_sigma_joint_text_does_not_crash(self):
+        """UX-30 regression: entering σ_joint text executed
+        ``len(mr_responses)`` before the local variable was assigned further
+        down the page, raising an uncaught NameError."""
+        at = self._fresh_app()
+        at.run()
+        at.switch_page("pages/2_Power_Config.py")
+        at.session_state["mr_enabled"] = True
+        at.run()
+        assert not at.exception
+
+        sj = next(w for w in at.text_area if w.key == "mr_sigma_joint")
+        sj.set_value("1.0 0.3\n0.3 1.0").run()
+        assert not at.exception  # NameError previously surfaced here
+
+        # And with responses present, the k×k shape validation still runs.
+        at.session_state["mr_responses"] = [
+            {"name": "y1"}, {"name": "y2"},
+        ]
+        at.run()
+        assert not at.exception

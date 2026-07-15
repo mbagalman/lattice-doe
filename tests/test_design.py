@@ -865,6 +865,36 @@ class TestUX1ModelMatrixPreview:
                                     {"a": ["x", "y"], "b": ["u", "v"]})
         assert p == 4  # intercept + 3 dummies for the 4 combined levels
 
+    def test_return_exact_pure_categorical_under_cap(self):
+        from lattice_doe.utils import model_matrix_preview
+        p, names, exact = model_matrix_preview(
+            "~ C(g)", {"g": ["a", "b", "c"]}, return_exact=True
+        )
+        assert p == 3 and exact is True
+
+    def test_return_exact_continuous_is_provisional(self):
+        """UX-31 regression: continuous factors are previewed at a single
+        midpoint, so data-derived terms (C(I(x // 1))) can add columns on
+        realized data — the preview must say so."""
+        from lattice_doe.utils import model_matrix_preview
+        p, _, exact = model_matrix_preview(
+            "~ C(I(x // 1))", {"x": (-2.0, 2.0)}, return_exact=True
+        )
+        assert exact is False
+        assert p == 1  # midpoint 0.0 → a single floor level
+
+    def test_return_exact_above_cap_is_provisional(self):
+        from lattice_doe.utils import model_matrix_preview
+        factors = {f"f{i}": ["lo", "hi"] for i in range(14)}  # 16 384 cells
+        formula = "~ " + " + ".join(f"C(f{i})" for i in range(14))
+        p, _, exact = model_matrix_preview(formula, factors, return_exact=True)
+        assert p == 15 and exact is False
+
+    def test_default_two_tuple_unchanged(self):
+        from lattice_doe.utils import model_matrix_preview
+        out = model_matrix_preview("~ C(g)", {"g": ["a", "b"]})
+        assert len(out) == 2
+
     def test_compact_matches_full_cross_with_interactions(self):
         """The compact frame must reproduce the exact (p, columns) of the full
         Cartesian cross, including interaction terms."""

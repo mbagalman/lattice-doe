@@ -10,7 +10,18 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import Any, Dict, List, Optional, Tuple, TypedDict, Union, Literal
+from typing import (
+    Any,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    TypedDict,
+    Union,
+    Literal,
+    overload,
+)
 import numpy as np
 
 
@@ -44,7 +55,11 @@ FactorSpecValue = Union[
     Tuple[float, float],
 ]
 
-FactorSpec = Dict[str, FactorSpecValue]
+#: Factor-name → spec mapping accepted by every public factor-taking API.
+#: ``Mapping`` (read-only, covariant in the value type) rather than ``Dict``:
+#: the APIs never mutate the caller's dict, and covariance lets callers pass
+#: plain ``dict``s of any compatible value type without invariance friction.
+FactorSpec = Mapping[str, FactorSpecValue]
 
 
 # --- Discriminated factor-spec markers (UX-5) -----------------------------
@@ -242,21 +257,28 @@ def _representative_frame(
 ) -> Tuple["Any", bool]:
     """Build a frame exposing every categorical level to Patsy.
 
-    Returns ``(frame, exact)``:
+    Returns ``(frame, cross_exact)``:
 
     * When the categorical Cartesian cross has at most *max_cross_rows*
-      combinations, the frame IS the full cross (continuous factors at their
-      range midpoints) and ``exact=True`` — model-matrix dimensions computed
-      from it are correct for **any** valid Patsy expression, including
-      derived cross-factor terms like ``C(a + b)`` whose levels depend on
-      combinations.
+      combinations, the frame IS the full cross and ``cross_exact=True`` —
+      every CATEGORICAL level combination is materialized, so even derived
+      cross-factor terms like ``C(a + b)`` (whose levels depend on
+      combinations) are coded completely.
     * Above the cap, the frame is a compact level cover (each categorical
       column cycles its own levels; length = largest level list) and
-      ``exact=False``. Patsy derives standard codings per-factor and builds
-      ordinary interaction columns structurally, so the compact count matches
-      the full cross for conventional formulas — but derived cross-factor
-      terms can be undercounted, so callers must treat the result as
-      provisional and defer hard dimension checks to a realized model matrix.
+      ``cross_exact=False``. Patsy derives standard codings per-factor and
+      builds ordinary interaction columns structurally, so the compact count
+      matches the full cross for conventional formulas — but derived
+      cross-factor terms can be undercounted, so callers must treat the
+      result as provisional and defer hard dimension checks to a realized
+      model matrix.
+
+    NOTE: the flag speaks only for the categorical space. Continuous factors
+    are represented by a single midpoint value, so formulas that derive
+    columns from continuous DATA (e.g. ``C(I(x // 1))``) can gain columns on
+    realized data even when ``cross_exact=True``; callers whose exactness
+    contract covers continuous factors must weaken the flag themselves (see
+    ``model_matrix_preview``).
 
     *factors* must already be normalized.
     """
@@ -307,24 +329,51 @@ def _representative_frame(
     return pd.DataFrame(frame), exact
 
 
+@overload
 def model_matrix_preview(
     formula: str,
-    factors: Dict[str, Union[Tuple[float, float], List]],
+    factors: FactorSpec,
+    max_preview_rows: int = ...,
+    return_exact: Literal[False] = ...,
+) -> Tuple[int, List[str]]: ...
+
+
+@overload
+def model_matrix_preview(
+    formula: str,
+    factors: FactorSpec,
+    max_preview_rows: int = ...,
+    *,
+    return_exact: Literal[True],
+) -> Tuple[int, List[str], bool]: ...
+
+
+def model_matrix_preview(
+    formula: str,
+    factors: FactorSpec,
     max_preview_rows: int = 10_000,
-) -> Tuple[int, List[str]]:
+    return_exact: bool = False,
+) -> Union[Tuple[int, List[str]], Tuple[int, List[str], bool]]:
     """Return (p, column_names) for *formula* over a representative frame.
 
     Uses the full categorical Cartesian cross when it has at most
-    *max_preview_rows* combinations — exact for any valid Patsy expression,
-    including derived cross-factor terms such as ``C(a + b)``. Larger spaces
-    fall back to a compact level cover (each categorical column cycles its
-    own levels), which matches the full cross for conventional formulas
-    (dummies + interactions are built structurally from per-factor codings)
-    but is **provisional** for derived cross-factor terms; downstream
-    validation reconciles against the realized candidate model matrix. A
-    single-row frame containing only the first level of each categorical
-    would undercount p for every categorical model (UX-1), which is why a
-    representative frame is used at all.
+    *max_preview_rows* combinations; larger spaces fall back to a compact
+    level cover (each categorical column cycles its own levels), which
+    matches the full cross for conventional formulas (dummies + interactions
+    are built structurally from per-factor codings) but can undercount
+    derived cross-factor terms such as ``C(a + b)``. A single-row frame
+    containing only the first level of each categorical would undercount p
+    for every categorical model (UX-1), which is why a representative frame
+    is used at all.
+
+    The reported count is **exact** only when the categorical cross was fully
+    materialized AND there are no continuous factors: continuous factors are
+    represented by a single midpoint value, so formulas that derive columns
+    from continuous data (e.g. ``C(I(x // 1))`` over a range spanning several
+    integers) can gain columns on realized data. Pass ``return_exact=True``
+    to receive that status; downstream validation in ``find_optimal_design``
+    reconciles a provisional count against the realized candidate model
+    matrix either way.
 
     Parameters
     ----------
@@ -337,17 +386,25 @@ def model_matrix_preview(
     max_preview_rows : int, default 10 000
         Largest categorical cross to materialize before switching to the
         compact cover; also caps a single factor's level count.
+    return_exact : bool, default False
+        When True, return ``(p, column_names, exact)`` so UI/API callers can
+        label a provisional count as such.
 
     Returns
     -------
-    (p, column_names)
-        Model-matrix column count and Patsy column labels.
+    (p, column_names) or (p, column_names, exact)
+        Model-matrix column count, Patsy column labels, and (optionally)
+        whether the count is guaranteed to match any realized model matrix.
     """
     from .model_matrix import build_model_matrix
 
     factors = normalize_factors(factors)
-    frame, _exact = _representative_frame(factors, max_cross_rows=max_preview_rows)
+    frame, cross_exact = _representative_frame(factors, max_cross_rows=max_preview_rows)
+    has_continuous = any(_spec_is_continuous(v) for v in factors.values())
+    exact = cross_exact and not has_continuous
     X, col_names = build_model_matrix(formula, frame)
+    if return_exact:
+        return X.shape[1], list(col_names), exact
     return X.shape[1], list(col_names)
 
 

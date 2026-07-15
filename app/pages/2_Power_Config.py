@@ -51,20 +51,25 @@ def _factors_to_spec(factors: list[dict]) -> dict:
     return spec
 
 
-def _get_p(factors: list[dict], formula: str) -> int | None:
-    """Return model parameter count p, or None if unavailable.
+def _get_p(factors: list[dict], formula: str) -> tuple[int, bool] | None:
+    """Return (model parameter count p, exact), or None if unavailable.
 
-    Uses the full categorical-level cross (UX-1): a single-row example with
-    only the first level made Patsy drop the remaining dummy columns, so p
-    was undercounted for categorical models.
+    Uses a representative frame over the categorical levels (UX-1): a
+    single-row example with only the first level made Patsy drop the
+    remaining dummy columns, so p was undercounted for categorical models.
+    ``exact`` is False when the count is provisional — continuous factors are
+    previewed at midpoints (and huge categorical spaces with a compact level
+    cover), so data-derived terms may add columns at run time.
     """
     if not factors or not formula.strip() or not _HAS_IOPT:
         return None
     try:
         from lattice_doe.utils import model_matrix_preview
 
-        p, _ = model_matrix_preview(formula, _factors_to_spec(factors))
-        return p
+        p, _, exact = model_matrix_preview(
+            formula, _factors_to_spec(factors), return_exact=True
+        )
+        return p, exact
     except Exception:
         return None
 
@@ -183,11 +188,13 @@ if st.session_state["power_mode"] == "glm":
     )
 
     # L matrix + delta (same widgets as contrast mode; delta is on LP scale)
-    p = _get_p(factors, formula)
-    if p is not None:
+    _p_info = _get_p(factors, formula)
+    if _p_info is not None:
+        p, _p_exact = _p_info
         st.caption(
-            f"Your formula has **p\u202f=\u202f{p}** model parameters. "
-            f"Each row of L must have exactly {p} column(s)."
+            f"Your formula has **p\u202f=\u202f{p}** model parameters"
+            + ("" if _p_exact else " (provisional \u2014 data-derived terms may add columns at run time)")
+            + f". Each row of L must have exactly {p} column(s)."
         )
     elif not factors:
         st.info("Define factors on Page 1 first \u2014 p is needed to validate L.")
@@ -270,11 +277,13 @@ elif st.session_state["power_mode"] == "contrast":
     # -----------------------------------------------------------------------
     if st.session_state["contrast_input_mode"] == "matrix":
 
-        p = _get_p(factors, formula)
-        if p is not None:
+        _p_info = _get_p(factors, formula)
+        if _p_info is not None:
+            p, _p_exact = _p_info
             st.caption(
-                f"Your formula has **p\u202f=\u202f{p}** model parameters. "
-                f"Each row of L must have exactly {p} column(s). "
+                f"Your formula has **p\u202f=\u202f{p}** model parameters"
+                + ("" if _p_exact else " (provisional \u2014 data-derived terms may add columns at run time)")
+                + f". Each row of L must have exactly {p} column(s). "
                 "See Page 1 \u2192 'Model matrix columns' for parameter indices."
             )
         elif not factors:
@@ -564,6 +573,11 @@ with st.expander("Multi-response (optional)"):
                 "Enables Hotelling T² joint power calculation instead of independent combination."
             ),
         )
+        # Load the response list BEFORE the covariance validation below uses
+        # its length (reading it after caused a NameError as soon as any
+        # σ_joint text was entered).
+        mr_responses: list = ss.get("mr_responses", [])
+
         _sj_text = ss.get("mr_sigma_joint", "").strip()
         if _sj_text:
             try:
@@ -586,8 +600,6 @@ with st.expander("Multi-response (optional)"):
 
         st.markdown("---")
         st.markdown("**Response list**")
-
-        mr_responses: list = ss.get("mr_responses", [])
 
         # Add response button
         if st.button("+ Add response"):

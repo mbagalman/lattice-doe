@@ -120,9 +120,18 @@ else:
                     )
                 spec[f["name"]] = list(f["levels"])
 
-        p, col_names = model_matrix_preview(formula, spec)
+        p, col_names, _exact = model_matrix_preview(formula, spec, return_exact=True)
 
         st.success(f"Valid formula — **p = {p}** model parameter{'s' if p != 1 else ''}.")
+        if not _exact:
+            st.caption(
+                "⚠️ p is provisional: the preview evaluates continuous factors "
+                "at their midpoints (and very large categorical spaces with a "
+                "compact level cover), so formulas that derive columns from "
+                "data values — e.g. `C(I(x // 1))` or `C(a + b)` — may gain "
+                "columns at run time. The design search uses the realized "
+                "candidate matrix as the authoritative model size."
+            )
         with st.expander(f"Model matrix columns ({p} total)"):
             for i, name in enumerate(col_names):
                 st.text(f"  [{i}]  {name}")

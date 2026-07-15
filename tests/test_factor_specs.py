@@ -257,6 +257,55 @@ class TestDiscriminatedSpecsAnalysisBoundaries:
                 sesoi=2.0,
             )
 
+    def test_i_optimal_allocation_normalizes(self):
+        """P1 regression (UX-35): i_optimal_allocation classified raw specs,
+        so explicit dicts were treated as categoricals whose levels were the
+        dictionary KEYS — returning plausible-looking allocations over cells
+        like ('type', 'low')."""
+        from lattice_doe.allocation import i_optimal_allocation
+        factors = {
+            "Material": {"type": "categorical",
+                         "levels": ["Steel", "Aluminum", "Titanium"]},
+            "Temp": {"type": "continuous", "low": -10.0, "high": 50.0},
+        }
+        alloc = i_optimal_allocation("1 + Material + Temp", factors, n=24)
+        cells = set(alloc.keys())
+        assert cells == {("Steel",), ("Aluminum",), ("Titanium",)}
+        assert sum(alloc.values()) == 24
+
+    def test_factor_spec_hints_resolvable_at_runtime(self):
+        """P2 regression (UX-39): FactorSpec was imported under TYPE_CHECKING
+        only, so typing.get_type_hints() raised NameError on the candidate
+        APIs. The alias must resolve at runtime on every exported
+        factor-taking function."""
+        import typing
+        from lattice_doe import (
+            find_optimal_design, find_multiresponse_design, build_candidate,
+            build_split_plot_candidate, augment_design, i_optimal_allocation,
+            power_curve_by_n, power_curve_by_effect, power_surface_2d,
+            power_curve_by_n_multiresponse, multiresponse_sensitivity,
+        )
+        from lattice_doe.candidate import estimate_candidate_size
+        from lattice_doe.contrasts import contrast_from_scenarios
+        from lattice_doe.utils import FactorSpec
+
+        for fn in (find_optimal_design, find_multiresponse_design,
+                   build_candidate, estimate_candidate_size,
+                   build_split_plot_candidate, augment_design,
+                   i_optimal_allocation, power_curve_by_n,
+                   power_curve_by_effect, power_surface_2d,
+                   power_curve_by_n_multiresponse, multiresponse_sensitivity,
+                   contrast_from_scenarios):
+            hints = typing.get_type_hints(fn)  # NameError before the fix
+            assert hints["factors"] == FactorSpec, fn.__name__
+
+    def test_factor_spec_aliases_exported_top_level(self):
+        import lattice_doe
+        for name in ("FactorSpec", "FactorSpecValue",
+                     "ContinuousFactorSpec", "CategoricalFactorSpec"):
+            assert hasattr(lattice_doe, name)
+            assert name in lattice_doe.__all__
+
     def test_numeric_categorical_dict_through_analysis(self):
         """A numeric categorical dict spec is honored (not mis-read) at an
         analysis boundary."""

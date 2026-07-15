@@ -23,6 +23,15 @@ from .config import (  # noqa: F401
     ResponseSpec, MultiResponseOptions,
 )
 
+# Factor-specification typing (UX-28): the discriminated dict forms and the
+# legacy shorthand, discoverable from the top-level package.
+from .utils import (  # noqa: F401
+    FactorSpec,
+    FactorSpecValue,
+    ContinuousFactorSpec,
+    CategoricalFactorSpec,
+)
+
 # Power surface — canonical implementation in power_curves
 from .power_curves import power_surface_2d  # noqa: F401
 
@@ -86,6 +95,11 @@ __all__ = [
     "SplitPlotOptions",
     "ResponseSpec",
     "MultiResponseOptions",
+    # Factor-spec typing
+    "FactorSpec",
+    "FactorSpecValue",
+    "ContinuousFactorSpec",
+    "CategoricalFactorSpec",
     # Power surface
     "power_surface_2d",
     # Low-level utilities

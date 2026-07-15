@@ -28,14 +28,21 @@ implementations in ``lattice_doe.power_curves`` directly.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Union, Any, Literal, Tuple
+from typing import Dict, List, Optional, Union, Any, Literal, Tuple, cast
 import dataclasses
 import numpy as np
 import pandas as pd
 
 import copy
 
-from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions
+from .config import (
+    PowerContrastConfig,
+    PowerR2Config,
+    PowerGLMContrastConfig,
+    DesignOptions,
+    MultiResponseOptions,
+)
+from .utils import FactorSpec
 from .model_matrix import build_model_matrix
 from .power import contrast_power, global_r2_power, contrast_power_sp, global_r2_power_sp, glm_contrast_power
 from .split_plot import build_whole_plot_indicator, htc_factor_cols_from_names
@@ -51,7 +58,7 @@ from .power_curves import (
 
 def power_curve_by_n(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     design_opts: Optional[DesignOptions] = None,
     n_range: Optional[tuple] = None,
@@ -95,7 +102,7 @@ def power_curve_by_n(
 
 def power_curve_by_effect(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     n: int,
     power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     design_opts: Optional[DesignOptions] = None,
@@ -138,7 +145,7 @@ def power_curve_by_effect(
 
 def generate_power_curves(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     curve_type: Literal["by_n", "by_effect", "both"] = "both",
     n_for_effect: Optional[int] = None,
@@ -183,7 +190,7 @@ def generate_power_curves(
 
 def power_sensitivity(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     design_df: pd.DataFrame,
     sigma_range: Tuple[float, float] = (0.5, 2.0),
@@ -473,7 +480,7 @@ def power_sensitivity(
 
 def power_curve_by_baseline(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     design_df: pd.DataFrame,
     cfg: "PowerGLMContrastConfig",
     baseline_range: Tuple[float, float] = (0.05, 0.95),
@@ -552,7 +559,7 @@ def power_curve_by_baseline(
 def min_detectable_effect(
     design_df: pd.DataFrame,
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     target_power: float = 0.80,
     design_opts: Optional[DesignOptions] = None,
@@ -757,7 +764,7 @@ def min_detectable_effect(
 
 def compare_criteria(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     design_opts: Optional[DesignOptions] = None,
     criteria: Optional[List[str]] = None,
@@ -984,7 +991,7 @@ def _threshold_crossing(
 def robustness_report(
     design_df: pd.DataFrame,
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     design_opts: Optional[DesignOptions] = None,
     sigma_range: Tuple[float, float] = (0.5, 2.0),
@@ -1422,7 +1429,7 @@ def robustness_report(
 
 def power_curve_by_wp(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     subplots_per_wp: int,
     htc_factors: List[str],
@@ -1574,8 +1581,8 @@ def power_curve_by_wp(
 
 def power_curve_by_n_multiresponse(
     formula: str,
-    factors: Dict[str, Any],
-    multi_cfg: "MultiResponseOptions",
+    factors: FactorSpec,
+    multi_cfg: MultiResponseOptions,
     n_range: Tuple[int, int] = (5, 100),
     n_points: int = 20,
     design_opts: Optional[DesignOptions] = None,
@@ -1795,8 +1802,8 @@ def power_curve_by_n_multiresponse(
 
 def multiresponse_sensitivity(
     formula: str,
-    factors: Dict[str, Any],
-    multi_cfg: "MultiResponseOptions",
+    factors: FactorSpec,
+    multi_cfg: MultiResponseOptions,
     fixed_n: int,
     sigma_range: Tuple[float, float] = (0.5, 3.0),
     sigma_points: int = 20,
@@ -1929,7 +1936,9 @@ def multiresponse_sensitivity(
     for scale in scale_vals:
         per_r_: List[Dict[str, Any]] = []
         for r in multi_cfg.responses:
-            cfg = r.power_cfg  # PowerContrastConfig guaranteed
+            # PowerContrastConfig guaranteed: R²/GLM responses were rejected
+            # with a TypeError during validation above.
+            cfg = cast(PowerContrastConfig, r.power_cfg)
             scaled_sigma = float(cfg.sigma) * float(scale)
             pwr, lam = contrast_power(
                 L=cfg.L,

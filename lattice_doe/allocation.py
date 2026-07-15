@@ -60,6 +60,7 @@ import pandas as pd
 
 from .config import DesignOptions
 from .model_matrix import build_model_matrix
+from .utils import FactorSpec, normalize_factors
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +241,7 @@ def _round_allocation(
 
 def i_optimal_allocation(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     n: int,
     design_opts: Optional[DesignOptions] = None,
 ) -> Dict[Tuple[Any, ...], int]:
@@ -303,6 +304,12 @@ def i_optimal_allocation(
 
     if n < 1:
         raise ValueError(f"n must be >= 1; got {n}.")
+
+    # Resolve discriminated factor-spec dict forms before classification
+    # (UX-5): a raw {"type": ...} dict would otherwise be treated as a
+    # categorical whose levels are its dictionary keys.
+    _nf: Dict[str, Any] = normalize_factors(factors, formula)
+    factors = _nf
 
     # Separate categorical and continuous factors
     cat_names: List[str] = [k for k, v in factors.items() if not _is_continuous(v)]

@@ -25,6 +25,11 @@ import numpy as np
 import pandas as pd
 from scipy.stats.qmc import LatinHypercube
 
+# Runtime import (not TYPE_CHECKING): typing.get_type_hints() on the public
+# functions must be able to resolve the alias. utils has no imports from this
+# module, so there is no circularity.
+from .utils import FactorSpec
+
 
 # ---------------------------------------------------------------------
 # Factor-type helper (single source of truth, mirrors utils.validate_factors)
@@ -46,7 +51,7 @@ def _is_continuous_spec(spec: Any) -> bool:
 # ---------------------------------------------------------------------
 def estimate_candidate_size(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     cand_min: int = 1000,
     cand_max: int = 10000,
     cat_cells_cap: int = 10000,
@@ -106,11 +111,11 @@ def estimate_candidate_size(
     # treated as a categorical iterable over its keys.
     from .utils import normalize_factors
 
-    factors = normalize_factors(factors)
+    _nf: Dict[str, Any] = normalize_factors(factors)
 
     # Separate continuous and categorical factors
-    cont = {k: v for k, v in factors.items() if _is_continuous_spec(v)}
-    cat = {k: v for k, v in factors.items() if not _is_continuous_spec(v)}
+    cont = {k: v for k, v in _nf.items() if _is_continuous_spec(v)}
+    cat = {k: v for k, v in _nf.items() if not _is_continuous_spec(v)}
 
     # Case 1: Purely continuous design
     if not cat:
@@ -198,7 +203,7 @@ def estimate_candidate_size(
 # Candidate set generation
 # ---------------------------------------------------------------------
 def build_candidate(
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     candidate_points: int = 2000,
     seed: Optional[int] = 123,
     constraint_func: Optional[callable] = None,
@@ -258,11 +263,11 @@ def build_candidate(
     # typed specs rather than raw {"type": ...} dicts (see estimate_candidate_size).
     from .utils import normalize_factors
 
-    factors = normalize_factors(factors)
+    _nf: Dict[str, Any] = normalize_factors(factors)
 
     # Separate factor types
-    cont = {k: v for k, v in factors.items() if _is_continuous_spec(v)}
-    cat = {k: v for k, v in factors.items() if not _is_continuous_spec(v)}
+    cont = {k: v for k, v in _nf.items() if _is_continuous_spec(v)}
+    cat = {k: v for k, v in _nf.items() if not _is_continuous_spec(v)}
 
     # Case 1: Continuous-only candidate space
     cont_df = pd.DataFrame()
@@ -409,7 +414,7 @@ def build_candidate(
 # Split-plot candidate set generation
 # ---------------------------------------------------------------------
 def build_split_plot_candidate(
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     htc_factors: List[str],
     n_whole_plots: int,
     subplots_per_wp: int,

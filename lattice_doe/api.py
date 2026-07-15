@@ -49,7 +49,7 @@ from .power import (
     eval_response_power, combine_powers, hotelling_t2_power,
     glm_contrast_power,
 )
-from .utils import validate_factors, normalize_factors, model_matrix_preview
+from .utils import validate_factors, normalize_factors, model_matrix_preview, FactorSpec
 from .blocked import blocked_formula, build_blocked_design
 from .progress import Phase, ProgressEvent, ProgressReporter, _coerce_reporter
 
@@ -207,7 +207,7 @@ def _candidate_cap_warning(max_n: int, capped_max_n: int, n_cand: int) -> str:
 
 def find_optimal_design(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     design_opts: Optional[DesignOptions] = None,
     export_diagnostics_to: Optional[str] = None,
@@ -1356,7 +1356,7 @@ def find_optimal_design(
 
 def find_multiresponse_design(
     formula: str,
-    factors: Dict[str, Any],
+    factors: FactorSpec,
     multi_cfg: MultiResponseOptions,
     design_opts: Optional[DesignOptions] = None,
     on_progress: "Optional[Callable[[ProgressEvent], None] | ProgressReporter]" = None,

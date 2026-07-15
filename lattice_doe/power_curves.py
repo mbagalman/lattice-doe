@@ -30,7 +30,7 @@ import warnings
 from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions
 from .config import glm_fisher_weight
 from .candidate import build_candidate, estimate_candidate_size, _is_continuous_spec
-from .utils import normalize_factors
+from .utils import normalize_factors, FactorSpec
 from .model_matrix import build_model_matrix
 from .iopt_search import build_i_opt_design, build_i_opt_design_with_idx
 from .power import contrast_power, global_r2_power, glm_contrast_power
@@ -47,7 +47,7 @@ except ImportError:
 
 def power_curve_by_n(
     formula: str,
-    factors: dict,
+    factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     n_range: Optional[Tuple[int, int]] = None,
     n_points: int = 20,
@@ -290,7 +290,7 @@ def power_curve_by_n(
 
 def power_curve_by_effect(
     formula: str,
-    factors: dict,
+    factors: FactorSpec,
     n: int,
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     effect_range: Optional[Tuple[float, float]] = None,
@@ -514,7 +514,7 @@ def power_curve_by_effect(
 
 def power_surface_2d(
     formula: str,
-    factors: dict,
+    factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
     param1: Literal['n', 'effect', 'sigma', 'alpha'],
     param1_range: Tuple[float, float],

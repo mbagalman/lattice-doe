@@ -2190,31 +2190,45 @@ except SearchCancelled:
 
 When the `cancelled` predicate returns `True`, the search raises `SearchCancelled` at its next checkpoint — checkpoints bracket every design build in both the bisection and verification phases, so cancellation latency is bounded by one build cycle.
 
-For a Jupyter notebook progress bar, `tqdm` integrates cleanly:
+For a Jupyter notebook progress bar, `tqdm` integrates cleanly. Note that
+`trial_n` is a *bisection candidate*, not completed work — it moves up and
+down as the search narrows in (and again during the verification scan), so it
+must not drive the bar position. Advance by the monotonically increasing
+evaluation count instead and show the current trial as status text:
 
 ```python
 from tqdm.auto import tqdm
 
 class TqdmProgress:
-    def __init__(self, max_n: int):
-        self.bar = tqdm(total=max_n, desc="n search", unit="runs")
-        self._last_n = 0
+    """Indeterminate-style bar: each completed evaluation is one tick;
+    the current trial n and its power appear as postfix metadata."""
+
+    def __init__(self):
+        self.bar = tqdm(desc="design search", unit="eval")  # no total: count-up bar
+        self._last_iter = 0
 
     def __call__(self, ev) -> None:
-        if ev.trial_n is None:
-            return
-        self.bar.update(ev.trial_n - self._last_n)
+        if ev.iteration > self._last_iter:
+            self.bar.update(ev.iteration - self._last_iter)
+            self._last_iter = ev.iteration
+        post = {"phase": ev.phase}
+        if ev.trial_n is not None:
+            post["n"] = ev.trial_n
         if ev.current_power is not None:
-            self.bar.set_postfix(power=f"{ev.current_power:.3f}")
-        self._last_n = ev.trial_n
+            post["power"] = f"{ev.current_power:.3f}"
+        self.bar.set_postfix(post)
 
     def close(self):
         self.bar.close()
 
-pb = TqdmProgress(max_n=power_cfg.max_n)
+pb = TqdmProgress()
 result = find_optimal_design(formula, factors, power_cfg, opts, on_progress=pb)
 pb.close()
 ```
+
+(The total number of evaluations is not known in advance — bisection uses
+roughly `log2(max_n)` steps plus a short verification scan — which is why a
+count-up bar without a `total` is the honest representation.)
 
 **Legacy interface.** `find_optimal_design` also still accepts `progress_callback`, an older hook that receives the intermediate `report` dict once per completed bisection step. It fires only *after* each build (no busy signal during one), offers no phases, throttling, or cancellation, and is not available on `find_multiresponse_design`. Prefer `on_progress` in new code; `progress_callback` is retained for backward compatibility.
 
