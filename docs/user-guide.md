@@ -495,7 +495,55 @@ This L = [[0, 1, 0, 1]] says: the total effect being tested is `β₁ + β₃ ×
 - Use **scenarios** when thinking about the effect is natural in terms of "what happens when I change these settings from here to there?" This is the right mental model for most practitioners and avoids the coefficient-scale confusion.
 - Use **manual L** when you need precise control over the mathematical contrast — for example, when testing a specific coefficient regardless of operating point, or constructing multi-contrast joint tests.
 
-> **A practical note on coverage.** `contrast_from_scenarios` builds the model matrix from a small candidate set plus your two scenario rows. For the built L to have the correct number of columns, the candidate set must include all categorical factor levels. This works automatically when your scenarios together span multiple levels of each categorical factor, or when the auto-generated candidate set is large enough to include all levels. If you see a `ValueError` about column count mismatch, use manual L construction instead.
+##### Formulas whose coding is learned from the data
+
+For ordinary formulas — main effects, `:` and `*` interactions, `C(...)` on a categorical factor — nothing below applies. `contrast_from_scenarios` derives the model coding from your factor specification alone, covering every level of every categorical factor the formula references, so L always comes out with the same columns as the design's model matrix. Your two scenarios do not need to span the levels between them.
+
+Some formulas, though, have a coding that *cannot* be known from the factor spec, because it is learned from the actual data rows:
+
+- **Stateful transforms** — `bs`, `cr`, `cc`, `te`, `center`, `standardize`, `scale`. A spline's knots are placed at quantiles of the observed values; `center` subtracts the observed mean. Feed the same formula different rows and you get columns that are the same in number but different in value.
+- **Categoricals derived from continuous factors** — for example `C(I(x // 1))`, where which levels exist depends on which values of `x` were realized.
+
+In both cases a contrast built from a guessed anchor would be the right *width* but the wrong *numbers* — a silently incorrect estimand rather than a loud failure. So `contrast_from_scenarios` refuses, raising `ContrastCodingError` (a `ValueError` subclass), unless you name the coding authority explicitly with `coding_data`.
+
+**The authority is the candidate set your design run will actually select from.** Build it with `build_search_candidate`, which takes your `DesignOptions` and applies the very same sizing, seed, constraints and caps that `find_optimal_design` will apply. Do not hand-write `build_candidate(...)` arguments: a different seed or size yields a same-width, numerically different L, and nothing will tell you.
+
+```python
+from lattice_doe import DesignOptions, PowerContrastConfig, find_optimal_design
+from lattice_doe.candidate import build_search_candidate
+from lattice_doe.contrasts import contrast_from_scenarios
+
+formula = "~ 1 + bs(Temperature, df=3) + Catalyst"
+factors = {"Temperature": (100.0, 200.0), "Catalyst": ["A", "B"]}
+
+opts = DesignOptions(candidate_points=2000, random_state=42)
+
+# The candidate set this run will select from - the coding authority.
+cand, _ = build_search_candidate(formula, factors, opts)
+
+L, delta = contrast_from_scenarios(
+    formula=formula,
+    factors=factors,
+    scenario_a={"Temperature": 150.0, "Catalyst": "A"},
+    scenario_b={"Temperature": 180.0, "Catalyst": "B"},
+    sesoi=0.5,
+    coding_data=cand,          # <- learned from this data, and nothing else
+)
+
+power_cfg = PowerContrastConfig(L=L, delta=delta, alpha=0.05, power=0.8,
+                                sigma=1.0, max_n=400)
+result = find_optimal_design(formula, factors, power_cfg, opts)   # same opts
+```
+
+When `coding_data` is given it becomes the *exclusive* authority: knots, means and level sets are learned from it and from nothing else. Your scenario rows are then transformed against that fixed coding — they cannot widen the model or shift a spline's knots. A scenario using a level absent from `coding_data` raises rather than silently adding a column.
+
+> **Keep the candidate set fixed.** `allow_candidate_growth` is `False` by default, which is what you want here. Turning it on lets the search rebuild a larger candidate set once if conditioning is poor, which re-derives the spline knots from the new rows while your L still encodes the old ones — the two would stop describing the same contrast. Leave growth off whenever you pair `coding_data` with a stateful formula.
+
+> **Split-plot runs have a different coding authority.** A search with `split_plot` options does not select from the ordinary candidate set at all — it builds separate whole-plot and sub-plot pools and learns its coding from their combinations, so `build_search_candidate` is *not* the authority for such runs. For a data-dependent coding combined with split-plot options, construct L manually; the app and the CLI refuse the scenario form in this combination for the same reason.
+
+> **Splines cannot extrapolate past their outermost knots.** Those knots come from the candidate set, and a sampled candidate set never quite reaches a factor's declared bounds. A scenario sitting exactly on a bound (`Temperature: 100.0` above) can therefore fall outside them and raise. The fix is to move the scenario a little inside the realized range — **not** to extend `coding_data` with extra rows: the search still builds its own candidate, and added rows shift the spline knots, so L would silently stop matching the design's model.
+
+**From the Streamlit app or the CLI.** Both do all of this for you: each builds the candidate set from the design options you configured and codes the contrast against it, so scenario mode simply works for these formulas — there is nothing to copy by hand. Two cases still report rather than guess. The **Preview L and δ** expander on the Power Config page has no design options to work from, so for such formulas it defers to the Run page instead of showing an L the run would not use. And if you enable candidate growth, both refuse, for the reason above; turn it off, or supply `L` and δ directly (**Matrix (L, δ)** in the app, explicit `L`/`delta` entries in a CLI config).
 
 ---
 
@@ -2659,7 +2707,7 @@ factors:
 
 When a factor has exactly two numeric elements they are treated as a continuous range. To define a two-level numeric categorical, use strings: `["0", "1"]` or `[low, high]`.
 
-**Scenario-based contrasts.** The `contrast.scenario_a` and `contrast.scenario_b` keys specify two complete factor settings in YAML dict notation. The CLI calls `contrast_from_scenarios` internally and derives L and delta automatically. Use this form whenever possible — it avoids manual column-index counting and is easier to review.
+**Scenario-based contrasts.** The `contrast.scenario_a` and `contrast.scenario_b` keys specify two complete factor settings in YAML dict notation. The CLI calls `contrast_from_scenarios` internally and derives L and delta automatically — for formulas whose coding is learned from the data (see §3.3) it codes the contrast against the very candidate set the run will select from. Use this form whenever possible — it avoids manual column-index counting and is easier to review.
 
 ```yaml
 contrast:
@@ -2940,7 +2988,7 @@ This page specifies what the design should be powered to detect and how the sear
 
 *Contrast-based mode.* Two sub-options appear:
 
-- **Scenario-based** (recommended): enter values for all factors in Scenario A and Scenario B, then specify the SESOI (smallest effect of interest in response units). The app calls `contrast_from_scenarios` automatically and displays the derived L matrix and δ for inspection before running.
+- **Scenario-based** (recommended): enter values for all factors in Scenario A and Scenario B, then specify the SESOI (smallest effect of interest in response units). The app calls `contrast_from_scenarios` automatically and displays the derived L matrix and δ for inspection before running. For formulas whose coding is learned from the data (splines and other stateful transforms — see §3.3), the preview defers and L is built at run time against the run's own candidate set.
 - **Matrix mode** (advanced): paste the L matrix and δ vector directly as space- or comma-separated text.
 
 The current p (from Page 1) is shown as a reminder when entering L in matrix mode, reducing the risk of column-count mismatches.

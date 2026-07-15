@@ -24,6 +24,7 @@ import streamlit as st
 from scipy.stats import f as scipy_f
 from scipy.stats import ncf as scipy_ncf
 
+from components.power_params import scenario_contrast
 from state import init_state, render_sidebar
 
 st.set_page_config(page_title="Run & Results — Lattice DOE", layout="wide")
@@ -40,7 +41,6 @@ try:
         MultiResponseOptions,
         ResponseSpec,
     )
-    from lattice_doe.contrasts import contrast_from_scenarios
     from lattice_doe._request_builder import build_power_cfg, build_design_opts
     _HAS_IOPT = True
 except ImportError:
@@ -77,8 +77,13 @@ def _parse_vector(text: str) -> np.ndarray:
     return np.array([float(x) for x in text.replace(",", " ").split()])
 
 
-def _build_power_cfg(ss: dict):
-    """Build PowerContrastConfig, PowerR2Config, or PowerGLMContrastConfig from session state."""
+def _build_power_cfg(ss: dict, design_opts: DesignOptions):
+    """Build PowerContrastConfig, PowerR2Config, or PowerGLMContrastConfig from session state.
+
+    design_opts is the options object this run will use: a scenario contrast
+    over a formula whose coding is learned from data must be coded against
+    the candidate set those options produce (UX-48).
+    """
     if ss["power_mode"] == "contrast":
         if ss["contrast_input_mode"] == "matrix":
             L = _parse_matrix(ss["L_text"])
@@ -88,7 +93,8 @@ def _build_power_cfg(ss: dict):
             factor_spec = _factors_to_spec(factors)
             scenario_a = {f["name"]: ss.get(f"scen_a_{f['name']}") for f in factors}
             scenario_b = {f["name"]: ss.get(f"scen_b_{f['name']}") for f in factors}
-            L, delta = contrast_from_scenarios(
+            L, delta = scenario_contrast(
+                design_opts=design_opts,
                 formula=ss["formula"],
                 factors=factor_spec,
                 scenario_a=scenario_a,
@@ -413,7 +419,7 @@ if run_clicked and not _issues and _HAS_IOPT:
                 )
                 ss["_last_power_cfg"] = None
             else:
-                power_cfg = _build_power_cfg(ss)
+                power_cfg = _build_power_cfg(ss, design_opts)
                 result = find_optimal_design(
                     formula=formula,
                     factors=factor_spec,

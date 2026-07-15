@@ -174,3 +174,36 @@ class TestPageNavigationPersistence:
         ]
         at.run()
         assert not at.exception
+
+    def test_stateful_formula_preview_points_at_the_run(self):
+        """UX-46/UX-48: the Page 2 preview has no design options, so it cannot
+        know the candidate set that will establish a stateful formula's coding.
+        It must say so and point at the Run page — which builds L correctly —
+        rather than crashing or naming a Python-only argument the app user
+        cannot pass."""
+        at = self._fresh_app()
+        at.run()
+
+        at.session_state["formula"] = "~ 1 + bs(x, df=3)"
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+        ]
+        at.switch_page("pages/2_Power_Config.py")
+        at.session_state["power_mode"] = "contrast"
+        at.session_state["contrast_input_mode"] = "scenario"
+        at.session_state["scen_a_x"] = 0.2
+        at.session_state["scen_b_x"] = 0.8
+        at.session_state["sesoi"] = 0.5
+        at.run()
+
+        assert not at.exception, "the page must not crash on a stateful formula"
+
+        errors = " ".join(e.value for e in at.error)
+        assert "Run" in errors, (
+            f"expected the preview to defer to the Run page; got: {errors!r}"
+        )
+        # It must not tell an app user to pass a Python-only argument, nor
+        # hand them a snippet whose seed/size may not match the real run.
+        assert "Pass coding_data=" not in errors
+        assert "seed=42" not in errors

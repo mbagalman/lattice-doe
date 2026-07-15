@@ -16,6 +16,7 @@ import json
 import numpy as np
 import streamlit as st
 
+from components.power_params import scenario_contrast
 from state import init_state, render_sidebar
 
 st.set_page_config(page_title="Analysis — Lattice DOE", layout="wide")
@@ -33,7 +34,6 @@ try:
         PowerContrastConfig,
         PowerR2Config,
     )
-    from lattice_doe.contrasts import contrast_from_scenarios
 
     _HAS_IOPT = True
 except ImportError:
@@ -70,7 +70,7 @@ def _parse_vector(text: str) -> np.ndarray:
     return np.array([float(x) for x in text.replace(",", " ").split()])
 
 
-def _build_power_cfg(ss: dict):
+def _build_power_cfg(ss: dict, design_opts: DesignOptions):
     """Reconstruct PowerContrastConfig or PowerR2Config from session state."""
     if ss["power_mode"] == "contrast":
         if ss["contrast_input_mode"] == "matrix":
@@ -81,7 +81,8 @@ def _build_power_cfg(ss: dict):
             factor_spec = _factors_to_spec(factors)
             scenario_a = {f["name"]: ss.get(f"scen_a_{f['name']}") for f in factors}
             scenario_b = {f["name"]: ss.get(f"scen_b_{f['name']}") for f in factors}
-            L, delta = contrast_from_scenarios(
+            L, delta = scenario_contrast(
+                design_opts=design_opts,
                 formula=ss["formula"],
                 factors=factor_spec,
                 scenario_a=scenario_a,
@@ -362,9 +363,13 @@ factors = ss.get("factors", [])
 formula = ss.get("formula", "")
 factor_spec = _factors_to_spec(factors)
 
-# Try to reconstruct the power config from session state.
+design_opts = _build_design_opts(ss)
+
+# Try to reconstruct the power config from session state. Design options come
+# first: a scenario contrast over a formula whose coding is learned from data
+# is coded against the candidate set those options produce (UX-48).
 try:
-    power_cfg = _build_power_cfg(ss)
+    power_cfg = _build_power_cfg(ss, design_opts)
     _cfg_ok = True
 except Exception as exc:
     st.warning(
@@ -372,8 +377,6 @@ except Exception as exc:
         "Re-check the contrast/R\u00b2 inputs on **Step 2** and re-run on **Step 3**."
     )
     _cfg_ok = False
-
-design_opts = _build_design_opts(ss)
 
 # ===========================================================================
 # F1 — Sensitivity analysis

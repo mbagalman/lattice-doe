@@ -7,9 +7,11 @@ Convenience builders for contrasts
 Helpers to build contrast matrices `L` and SESOI vectors `delta` from
 human-friendly descriptions (e.g., two named scenarios in factor space).
 
-Public functions
-----------------
+Public API
+----------
 - contrast_from_scenarios(...): single-row L (1 x p) for a pairwise difference
+- coding_is_data_dependent(...): why a formula needs coding_data, or None
+- ContrastCodingError: raised when the coding cannot be derived from the spec
 
 Implementation note
 -------------------
@@ -17,13 +19,26 @@ To guarantee that the model coding (dummy columns, interactions, etc.) used to
 construct scenario rows matches the coding used during design generation, the
 coding is established with :func:`patsy.incr_dbuilder` over an anchor that
 covers every level of every formula-referenced categorical factor (streamed in
-chunks — no anchor model matrix is ever materialized, TD-7/UX-36), plus the
-two scenario rows. Only the 2 × p scenario matrix is built; L = x_b − x_a.
-Callers holding realized data (a candidate set or design) can pass it as
-``coding_data`` to make that data the authority instead.
+chunks — no anchor model matrix is ever materialized, TD-7/UX-36). Only the
+2 × p scenario matrix is built; L = x_b − x_a.
+
+Factors are enumerated jointly only where they are combined inside a single
+*categorical-valued* derived term such as ``C(a + b)``, whose level set is the
+set of realized combinations. Main effects, ``:``/``*`` interactions (UX-42)
+and numeric derived terms such as ``I(a + b)`` (UX-45) code structurally, so a
+per-factor level cover is exact — and far cheaper — for them. Each term
+is scanned in its OWN segment, so overlapping terms cost the sum of their
+crosses rather than the product of their union (UX-47).
+
+Some codings cannot be derived from the factor spec at all, because they are
+learned from the data: stateful transforms (``bs``, ``center``, …) and
+categoricals derived from continuous factors. Those raise
+:class:`ContrastCodingError` unless the caller passes ``coding_data``, which
+then becomes the exclusive coding authority.
 """
 from __future__ import annotations
 
+import ast
 import itertools
 import re
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
@@ -39,6 +54,40 @@ from .utils import (
 )
 
 Scenario = Dict[str, Union[int, float, str]]
+
+
+#: Default remedy for :class:`ContrastCodingError`, phrased for the Python API.
+PY_CODING_REMEDY = (
+    "Pass coding_data= with the realized candidate set "
+    "(build_candidate(factors, ...)) or an existing design "
+    "(result['design_df']), or construct L explicitly."
+)
+
+
+class ContrastCodingError(ValueError):
+    """The model coding cannot be reproduced from the factor spec alone.
+
+    Raised when the formula's coding is learned from realized data (stateful
+    transforms, categoricals derived from continuous factors) or when the
+    level cross needed to anchor it is too large.
+
+    The message is split into a *reason* (what about the formula makes the
+    coding unreproducible — the same for every caller) and a *remedy* (what to
+    do about it — different for every caller). Interfaces that cannot supply
+    ``coding_data``, such as the CLI and the Streamlit scenario builder,
+    re-raise with their own remedy rather than repeating advice the user
+    cannot act on (UX-46)::
+
+        except ContrastCodingError as exc:
+            raise ContrastCodingError(exc.reason, MY_REMEDY) from exc
+
+    Subclasses :class:`ValueError` for backward compatibility.
+    """
+
+    def __init__(self, reason: str, remedy: str = PY_CODING_REMEDY) -> None:
+        self.reason = reason
+        self.remedy = remedy
+        super().__init__(f"{reason} {remedy}".strip())
 
 
 def _validate_scenario(
@@ -139,61 +188,223 @@ def _formula_factor_codes(formula: str) -> List[str]:
         return [formula]
 
 
+def _code_calls(code: str) -> set:
+    """Names of functions *called* in a factor-code expression.
+
+    ``scale(x)`` reports ``{"scale"}``; a bare factor named ``scale`` reports
+    nothing. Keeping the two apart is what lets a factor whose name collides
+    with a Patsy transform stay usable (UX-44)."""
+    try:
+        tree = ast.parse(code.strip(), mode="eval")
+    except SyntaxError:
+        # Conservative fallback: anything in call position.
+        return set(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(", code))
+    calls: set = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            fn = node.func
+            if isinstance(fn, ast.Name):
+                calls.add(fn.id)
+            elif isinstance(fn, ast.Attribute):
+                calls.add(fn.attr)
+    return calls
+
+
 def _code_identifiers(code: str) -> set:
-    """Names a factor-code expression can reference: Python identifiers from
-    Patsy's own AST walk, plus ``Q("...")``-quoted names (which resolve via
-    the data and can contain non-identifier characters)."""
+    """Data names a factor-code expression can reference.
+
+    Names in call position (``scale`` in ``scale(x)``) are excluded: they
+    resolve to transforms, not to data columns. ``Q("...")``-quoted names are
+    included — they resolve via the data and may contain characters that are
+    not valid Python identifiers."""
     names: set = set()
     try:
-        from patsy.eval import ast_names
+        tree = ast.parse(code.strip(), mode="eval")
+    except SyntaxError:
+        try:
+            from patsy.eval import ast_names
 
-        names |= set(ast_names(code))
-    except Exception:
-        # Conservative fallback: any identifier-shaped token.
-        names |= set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", code))
+            names |= set(ast_names(code))
+        except Exception:
+            # Conservative fallback: any identifier-shaped token.
+            names |= set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", code))
+    else:
+        called = {n.func for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node not in called:
+                names.add(node.id)
     for m in re.finditer(r"""Q\(\s*['"](.+?)['"]\s*\)""", code):
         names.add(m.group(1))
     return names
 
 
-def _merge_groups(groups: List[set]) -> List[set]:
-    """Union-find style merge of overlapping sets."""
-    merged: List[set] = []
-    for g in groups:
-        g = set(g)
-        keep: List[set] = []
-        for m in merged:
-            if m & g:
-                g |= m
-            else:
-                keep.append(m)
-        keep.append(g)
-        merged = keep
-    return merged
+def _coding_dependency_reason(
+    factors: FactorSpec,
+    codes: List[str],
+    code_names: List[set],
+    code_calls: List[set],
+) -> Optional[str]:
+    """Why the coding cannot be derived from *factors* alone, or None.
+
+    Takes the already-parsed factor codes so the caller does not pay to parse
+    the formula twice; :func:`coding_is_data_dependent` is the public wrapper.
+    """
+    # Stateful transforms (bs, cr, center, …) LEARN their parameters from the
+    # data, so an internal anchor would yield a same-width but numerically
+    # different contrast than the realized design coding — silently changing
+    # the estimand (UX-41). Only an actual CALL counts: a factor merely
+    # *named* `scale` codes like any other column (UX-44).
+    stateful = sorted(
+        set().union(*code_calls) & _STATEFUL_TRANSFORMS
+    ) if code_calls else []
+    if stateful:
+        return (
+            f"Formula uses stateful Patsy transform(s) {stateful} whose "
+            "coding parameters (knots, means, scales) are learned from the "
+            "data, so the model coding cannot be derived from the factor "
+            "specification alone — a guessed anchor would give a same-width "
+            "but numerically different contrast, with nothing to signal it."
+        )
+
+    # A categorical DERIVED from continuous data cannot be anchored from a
+    # static frame: the derived levels depend on the realized values. Decided
+    # by EVALUATING the term on a range-spanning probe and reading Patsy's own
+    # FactorInfo.type — syntax is not enough, because Patsy also treats
+    # object-valued results as categorical without any C(...) call, e.g.
+    # ``I(np.where(x < 0.5, "lo", "hi"))`` (UX-51). The C-call test survives
+    # only as a conservative fallback for terms the probe cannot evaluate.
+    _probe: Optional[pd.DataFrame] = None
+    for code, names, calls in zip(codes, code_names, code_calls):
+        cont_refs = sorted(
+            n for n in names
+            if n in factors and _spec_is_continuous(factors[n])
+        )
+        if not cont_refs:
+            # Terms over categorical factors only: every level combination is
+            # enumerable from the spec, so the coding is derivable.
+            continue
+        if _probe is None:
+            _probe = _spanning_probe(factors)
+        is_cat = _derived_result_is_categorical(code, _probe)
+        if is_cat is True or (is_cat is None and "C" in calls):
+            return (
+                f"Formula derives categorical levels from continuous "
+                f"factor(s) {cont_refs} (term {code!r}). Which levels exist "
+                "depends on the realized data, so the model coding cannot "
+                "be derived from the factor specification alone."
+            )
+    return None
+
+
+def _spanning_probe(factors: FactorSpec, rows: int = 5) -> "pd.DataFrame":
+    """A tiny frame spanning each factor's range, for result-TYPE probes.
+
+    Continuous factors get evenly spaced values across [low, high] — a single
+    pinned value would let a thresholding expression such as
+    ``np.where(x < 0.5, ...)`` realize only one branch. Categorical factors
+    cycle their levels. The dtype of an expression does not depend on how
+    many rows it sees, so a handful is enough."""
+    cols: Dict[str, list] = {}
+    for k, v in factors.items():
+        # Any-typed local: after runtime classification the spec is indexed
+        # positionally / iterated, which mypy cannot narrow through the union.
+        spec: Any = v
+        if _spec_is_continuous(spec):
+            lo, hi = float(spec[0]), float(spec[1])
+            cols[k] = list(np.linspace(lo, hi, rows))
+        else:
+            levels = list(spec)
+            cols[k] = [levels[i % len(levels)] for i in range(rows)]
+    return pd.DataFrame(cols)
+
+
+def coding_is_data_dependent(
+    formula: str, factors: FactorSpec
+) -> Optional[str]:
+    """Why *formula*'s coding cannot be derived from *factors* alone, or None.
+
+    Returns a human-readable reason string when :func:`contrast_from_scenarios`
+    would need authoritative ``coding_data`` — the formula uses a stateful
+    Patsy transform, or derives categorical levels from a continuous factor —
+    and ``None`` when the factor specification is sufficient on its own.
+
+    Interfaces use this to decide *up front* whether they must supply
+    ``coding_data``, and whether options that would change the coding mid-run
+    (candidate growth) are safe to leave enabled (UX-48).
+
+    Examples
+    --------
+    >>> coding_is_data_dependent("~ 1 + C(g)", {"g": ["a", "b"]}) is None
+    True
+    >>> "stateful" in coding_is_data_dependent("~ bs(x, df=3)", {"x": (0, 1)})
+    True
+    """
+    factors = normalize_factors(factors, formula)
+    codes = _formula_factor_codes(formula)
+    return _coding_dependency_reason(
+        factors,
+        codes,
+        [_code_identifiers(c) for c in codes],
+        [_code_calls(c) for c in codes],
+    )
+
+
+def _derived_result_is_categorical(
+    code: str, probe: "pd.DataFrame"
+) -> Optional[bool]:
+    """Whether a factor-code expression *evaluates* to a categorical column.
+
+    Only a categorical result needs joint level enumeration: its level set is
+    the set of realized value combinations, so every combination must be
+    visible to Patsy. A numeric derived column (``I(a + b)``) contributes
+    exactly one column no matter which combinations appear, so a per-factor
+    per-factor level cover codes it exactly (UX-45).
+
+    Note this is decided by evaluating the expression, not by its syntax:
+    ``I(a + b)`` is numeric over numeric-coded levels but is a string
+    concatenation — hence categorical — over string levels.
+
+    Returns ``None`` when the expression cannot be evaluated on *probe*, which
+    the caller treats conservatively (assume categorical)."""
+    try:
+        design_info = patsy.incr_dbuilder("0 + " + code, lambda: iter([probe]))
+        infos = list(design_info.factor_infos.values())
+    except Exception:
+        return None
+    if len(infos) != 1:
+        return None
+    return bool(infos[0].type == "categorical")
 
 
 def _iter_anchor_chunks(
     group_blocks: List[Tuple[List[str], List[tuple]]],
-    pinned: Dict[str, Any],
-    n_rows: int,
+    base_row: Dict[str, Any],
     chunk_rows: int = _ANCHOR_CHUNK_ROWS,
 ) -> "Iterator[pd.DataFrame]":
     """Yield the anchor frame in chunks for Patsy's incremental coding scan.
 
-    Each *group_blocks* entry is ``(column_names, value_tuples)``: the value
-    tuples cycle independently per group, so factors combined inside one
-    derived expression stay jointly enumerated while everything else only
-    needs its own levels covered."""
-    for start in range(0, n_rows, chunk_rows):
-        size = min(chunk_rows, n_rows - start)
-        frame: Dict[str, list] = {}
-        for names, block in group_blocks:
+    Each *group_blocks* entry is ``(column_names, value_tuples)`` and gets its
+    OWN segment of rows, with every other factor held at its *base_row* value.
+    Because Patsy accumulates levels across the whole scan, each derived term
+    still sees every combination it can take, while overlapping terms — say
+    ``C(a + b)`` and ``C(b + c)`` — cost the SUM of their two crosses instead
+    of the product of their union (UX-47).
+
+    Factors that only ever code structurally (main effects, ``:``/``*``
+    interactions) get a one-factor group, so their levels are covered in a
+    segment of their own."""
+    if not group_blocks:
+        yield pd.DataFrame({k: [v] for k, v in base_row.items()})
+        return
+    for names, block in group_blocks:
+        for start in range(0, len(block), chunk_rows):
+            rows = block[start:start + chunk_rows]
+            frame: Dict[str, list] = {
+                k: [v] * len(rows) for k, v in base_row.items()
+            }
             for i, nm in enumerate(names):
-                frame[nm] = [block[(start + r) % len(block)][i]
-                             for r in range(size)]
-        for nm, val in pinned.items():
-            frame[nm] = [val] * size
-        yield pd.DataFrame(frame)
+                frame[nm] = [r[i] for r in rows]
+            yield pd.DataFrame(frame)
 
 
 def contrast_from_scenarios(
@@ -248,6 +459,18 @@ def contrast_from_scenarios(
     (L, delta) : (np.ndarray, np.ndarray)
         ``L`` has shape ``(1, p)``; ``delta`` has shape ``(1,)``.
 
+    Raises
+    ------
+    ContrastCodingError
+        If the coding cannot be derived from *factors* alone and no
+        ``coding_data`` was supplied. See the class docstring for how callers
+        that cannot supply it re-phrase the remedy.
+    KeyError
+        If a scenario omits a factor or names an unknown one.
+    ValueError
+        If a scenario value is out of range or not a declared level, or if
+        ``sesoi`` is not positive.
+
     Notes
     -----
     The model coding is established with :func:`patsy.incr_dbuilder`, which
@@ -257,12 +480,28 @@ def contrast_from_scenarios(
     columns.
 
     Factor references are taken from Patsy's parsed factor expressions (plus
-    ``Q("...")`` decoding), not from raw text matching. Only factors whose
-    values are COMBINED inside one derived expression (e.g. ``C(a + b)``) are
-    jointly enumerated; conventional main effects and ``:``/``*``
-    interactions build their columns structurally from per-factor codings,
-    so they need only a cycling level cover. Unreferenced factors cannot
+    ``Q("...")`` decoding), not from raw text matching, and function names are
+    distinguished from column names — a factor named ``scale`` is a factor,
+    not a transform (UX-44).
+
+    Only factors COMBINED inside one derived expression that itself evaluates
+    to a CATEGORICAL column (e.g. ``C(a + b)``) are jointly enumerated, since
+    there the level set is the set of realized combinations. Main effects,
+    ``:``/``*`` interactions and numeric derived terms such as ``I(a + b)``
+    code structurally, so a per-factor level cover is exact for them (UX-42,
+    UX-45). Note this is decided by evaluating the term, not by its syntax:
+    ``I(a + b)`` is numeric over numeric levels but is a string concatenation
+    — hence categorical — over string levels. Unreferenced factors cannot
     affect the coding and are pinned to a single value.
+
+    Examples
+    --------
+    >>> L, delta = contrast_from_scenarios(
+    ...     "~ 1 + C(g) + x", {"g": ["a", "b"], "x": (0.0, 1.0)},
+    ...     {"g": "a", "x": 0.0}, {"g": "b", "x": 0.0}, sesoi=0.5,
+    ... )
+    >>> L.shape, delta
+    ((1, 3), array([0.5]))
     """
     # Resolve discriminated factor-spec dict forms before validation (UX-5).
     factors = normalize_factors(factors, formula)
@@ -296,85 +535,24 @@ def contrast_from_scenarios(
         # coding, so they impose no cost (UX-38).
         codes = _formula_factor_codes(formula)
         code_names = [_code_identifiers(c) for c in codes]
+        code_calls = [_code_calls(c) for c in codes]
         referenced = {
             name for name in factors
             if any(name in names for names in code_names)
         }
 
-        # Stateful transforms (bs, cr, center, …) LEARN their parameters from
-        # the data, so an internal anchor would yield a same-width but
-        # numerically different contrast than the realized design coding —
-        # silently changing the estimand (UX-41).
-        _stateful_used = sorted(
-            set().union(*code_names) & _STATEFUL_TRANSFORMS
-        ) if code_names else []
-        if _stateful_used:
-            raise ValueError(
-                f"Formula uses stateful Patsy transform(s) "
-                f"{_stateful_used} whose coding parameters are learned from "
-                "the data. An internally generated anchor cannot reproduce "
-                "the realized design's coding, so the contrast would be "
-                "silently wrong. Pass coding_data= with the realized "
-                "candidate set (build_candidate(factors, ...)) or an "
-                "existing design (result['design_df'])."
-            )
-
-        # A categorical DERIVED from continuous data cannot be anchored from
-        # a static frame: the derived levels depend on the realized values.
-        for code, names in zip(codes, code_names):
-            if "C" not in names:
-                continue
-            for name in names:
-                if name in factors and _spec_is_continuous(factors[name]):
-                    raise ValueError(
-                        f"Formula derives categorical levels from continuous "
-                        f"factor '{name}' (term {code!r}). The set of "
-                        "derived levels depends on the realized data, so an "
-                        "internally generated anchor cannot guarantee a "
-                        "correct contrast. Pass coding_data= with the "
-                        "realized candidate set (build_candidate(factors, "
-                        "...)) or an existing design (result['design_df']), "
-                        "or construct L explicitly."
-                    )
+        # Codings that are learned from realized data cannot be reproduced
+        # from the spec; the caller must name an authority instead.
+        _reason = _coding_dependency_reason(
+            factors, codes, code_names, code_calls
+        )
+        if _reason:
+            raise ContrastCodingError(_reason)
 
         cat_ref = {
             k: list(v) for k, v in factors.items()
             if k in referenced and not _spec_is_continuous(factors[k])
         }
-
-        # Only factors whose values are COMBINED inside a single derived
-        # expression (e.g. C(a + b)) need joint enumeration; conventional
-        # main effects and ':'/'*' interactions build their columns
-        # structurally from per-factor codings, so a cycling level cover is
-        # exact for them (UX-42). Overlapping combination groups are merged.
-        combo_groups = _merge_groups([
-            {n for n in names if n in cat_ref}
-            for names in code_names
-            if len({n for n in names if n in cat_ref}) >= 2
-        ])
-        grouped = set().union(*combo_groups) if combo_groups else set()
-        groups: List[List[str]] = [sorted(g) for g in combo_groups] + [
-            [k] for k in cat_ref if k not in grouped
-        ]
-
-        group_blocks: List[Tuple[List[str], List[tuple]]] = []
-        n_rows = 1
-        for gnames in groups:
-            block_size = 1
-            for nm in gnames:
-                block_size *= max(len(cat_ref[nm]), 1)
-            if block_size > _CONTRAST_CROSS_CAP:
-                raise ValueError(
-                    "contrast_from_scenarios cannot anchor this model: the "
-                    f"factors {gnames} are combined inside one model term, "
-                    f"and their level cross exceeds {_CONTRAST_CROSS_CAP:,} "
-                    "combinations. Pass coding_data= with the realized "
-                    "candidate set or design, reduce the number of levels, "
-                    "or construct L explicitly."
-                )
-            block = list(itertools.product(*(cat_ref[nm] for nm in gnames)))
-            group_blocks.append((gnames, block))
-            n_rows = max(n_rows, len(block))
 
         # Pin everything that is not a referenced categorical: continuous
         # factors at their midpoint, unreferenced categoricals at their first
@@ -388,8 +566,78 @@ def contrast_from_scenarios(
             else:
                 pinned[k] = list(v)[0]
 
+        # Small frame used only to decide the RESULT TYPE of derived terms.
+        # A handful of rows is enough — the dtype of an expression does not
+        # depend on how many combinations it sees.
+        _probe_rows = min(
+            max((len(v) for v in cat_ref.values()), default=1), 8
+        )
+        probe = pd.DataFrame({
+            **{k: [v[i % len(v)] for i in range(_probe_rows)]
+               for k, v in cat_ref.items()},
+            **{k: [v] * _probe_rows for k, v in pinned.items()},
+        })
+
+        # Only factors whose values are COMBINED inside a single derived
+        # expression that is itself CATEGORICAL (e.g. C(a + b)) need joint
+        # enumeration — there the level set is the set of realized
+        # combinations. Conventional main effects and ':'/'*' interactions
+        # build their columns structurally from per-factor codings (UX-42),
+        # and a numeric derived column such as I(a + b) is one column
+        # regardless (UX-45); a per-factor level cover is exact for both.
+        #
+        # Each such term keeps its OWN group, scanned in its own segment.
+        # Overlapping terms are NOT unioned: C(a + b) + C(b + c) needs the
+        # a×b cross and the b×c cross, never the a×b×c cross (UX-47).
+        _combo: List[Tuple[List[str], str]] = []   # (factor names, term code)
+        _seen: set = set()
+        for code, names in zip(codes, code_names):
+            group = {n for n in names if n in cat_ref}
+            if len(group) < 2:
+                continue
+            # None (un-evaluable) is treated as categorical: conservative, and
+            # the cap below then names coding_data as the way out.
+            if _derived_result_is_categorical(code, probe) is False:
+                continue
+            key = frozenset(group)
+            if key in _seen:      # two terms over the same factors: one scan
+                continue
+            _seen.add(key)
+            _combo.append((sorted(group), code))
+
+        grouped = set().union(*(set(g) for g, _ in _combo)) if _combo else set()
+        # Structural-only factors each get a one-factor group: their levels
+        # need covering, but never jointly with anything else.
+        groups: List[Tuple[List[str], Optional[str]]] = _combo + [
+            ([k], None) for k in cat_ref if k not in grouped
+        ]
+
+        group_blocks: List[Tuple[List[str], List[tuple]]] = []
+        for gnames, term_code in groups:
+            block_size = 1
+            for nm in gnames:
+                block_size *= max(len(cat_ref[nm]), 1)
+            # The cap guards joint enumeration only. A single factor's own
+            # levels are always coverable — the scan is chunked.
+            if term_code is not None and block_size > _CONTRAST_CROSS_CAP:
+                raise ContrastCodingError(
+                    "contrast_from_scenarios cannot anchor this model: the "
+                    f"factors {gnames} are combined inside the categorical "
+                    f"term {term_code!r}, whose level cross ({block_size:,}) "
+                    f"exceeds {_CONTRAST_CROSS_CAP:,} combinations, so its "
+                    "derived level set cannot be enumerated."
+                )
+            block = list(itertools.product(*(cat_ref[nm] for nm in gnames)))
+            group_blocks.append((gnames, block))
+
+        # Every factor gets a resting value; each segment overrides only its
+        # own group's columns.
+        base_row: Dict[str, Any] = dict(pinned)
+        for k, levels in cat_ref.items():
+            base_row[k] = levels[0]
+
         def _iter_maker() -> Iterator[pd.DataFrame]:
-            return _iter_anchor_chunks(group_blocks, pinned, n_rows)
+            return _iter_anchor_chunks(group_blocks, base_row)
 
     try:
         design_info = patsy.incr_dbuilder(formula, _iter_maker)
@@ -408,10 +656,18 @@ def contrast_from_scenarios(
     except Exception as e:
         raise ValueError(
             "Failed to evaluate the scenarios against the model coding. "
-            "This usually means a scenario uses a categorical level (or a "
-            "derived level) that is absent from the coding data — the "
-            "authoritative model has no column for it. Extend coding_data "
-            "to include that level, or change the scenario. "
+            "Either a scenario uses a categorical level (or a derived level) "
+            "that is absent from the coding data — the authoritative model "
+            "has no column for it — or a continuous scenario value lies "
+            "outside the range the coding data covers, which a spline term "
+            "(bs/cr/cc) cannot extrapolate beyond its outermost knots. Note "
+            "a sampled candidate set does not quite reach a factor's declared "
+            "bounds, so a scenario sitting exactly on a bound can fall "
+            "outside them; move the scenario inside the realized range. (Do "
+            "NOT extend coding_data with extra rows to cover the scenario: "
+            "the design search still builds its own candidate, and added "
+            "rows shift stateful coding parameters such as spline knots, so "
+            "L would silently stop matching the design's model.) "
             f"Patsy error: {e}"
         ) from e
 
@@ -424,4 +680,8 @@ def contrast_from_scenarios(
     return L, delta
 
 
-__all__ = ["contrast_from_scenarios"]
+__all__ = [
+    "contrast_from_scenarios",
+    "coding_is_data_dependent",
+    "ContrastCodingError",
+]

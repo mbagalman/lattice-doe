@@ -17,7 +17,7 @@ and are independent of the exchange algorithm and criterion scoring.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import math
 import warnings
 
@@ -29,6 +29,7 @@ from scipy.stats.qmc import LatinHypercube
 # functions must be able to resolve the alias. utils has no imports from this
 # module, so there is no circularity.
 from .utils import FactorSpec
+from .config import DesignOptions
 
 
 # ---------------------------------------------------------------------
@@ -411,6 +412,91 @@ def build_candidate(
 
 
 # ---------------------------------------------------------------------
+# The candidate set the search actually uses
+# ---------------------------------------------------------------------
+def resolve_candidate_points(
+    formula: str,
+    factors: FactorSpec,
+    design_opts: DesignOptions,
+) -> int:
+    """Candidate-set size the search will use for *design_opts*.
+
+    Applies :func:`estimate_candidate_size` when ``auto_candidate`` is set and
+    the fixed ``candidate_points`` otherwise. Split out so callers that need
+    the size before generation (progress reporting) share one rule.
+    """
+    if design_opts.auto_candidate:
+        return estimate_candidate_size(
+            formula=formula,
+            factors=factors,
+            cand_min=design_opts.cand_min,
+            cand_max=design_opts.cand_max,
+            cat_cells_cap=design_opts.cat_cells_cap,
+            per_cell_alpha=design_opts.per_cell_alpha,
+            per_cell_min=design_opts.per_cell_min,
+            per_cell_max=design_opts.per_cell_max,
+            seed=design_opts.random_state,
+        )
+    return int(design_opts.candidate_points)
+
+
+def build_search_candidate(
+    formula: str,
+    factors: FactorSpec,
+    design_opts: DesignOptions,
+    on_size: Optional[Callable[[int], None]] = None,
+) -> Tuple["pd.DataFrame", int]:
+    """Build the candidate set the search will select from, from *design_opts*.
+
+    This is the single definition of "the candidate set this design run uses"
+    for ordinary (non-split-plot) searches. :func:`~lattice_doe.api.
+    find_optimal_design` builds its candidate through it, and interfaces that
+    must reproduce the run's exact model coding — the CLI and the Streamlit
+    pages, which construct scenario contrasts *before* the design runs — call
+    it with the same ``design_opts`` to obtain the authoritative
+    ``coding_data``. Reproducing the arguments by hand instead is how a
+    contrast silently ends up coded against different spline knots (UX-48).
+
+    .. warning::
+        A run with ``design_opts.split_plot`` set does NOT select from this
+        candidate: the split-plot search builds separate whole-plot/sub-plot
+        pools and learns its coding from their combinations (UX-50). Callers
+        needing a coding authority must refuse data-dependent codings for
+        split-plot runs rather than pass this candidate as one.
+
+    Parameters
+    ----------
+    formula : str
+        Patsy-style model formula (only used to size an auto candidate set).
+    factors : dict
+        Factor specifications.
+    design_opts : DesignOptions
+        The options the design run will use. ``random_state``,
+        ``constraint_func``, ``cat_cells_cap`` and the sizing options all feed
+        the result, so passing anything other than the run's own options
+        defeats the purpose.
+    on_size : callable, optional
+        Called with the resolved candidate count before generation begins —
+        for progress reporting, which must announce the size up front.
+
+    Returns
+    -------
+    (cand, candidate_points) : (pd.DataFrame, int)
+    """
+    candidate_points = resolve_candidate_points(formula, factors, design_opts)
+    if on_size is not None:
+        on_size(candidate_points)
+    cand = build_candidate(
+        factors=factors,
+        candidate_points=candidate_points,
+        seed=design_opts.random_state,
+        constraint_func=design_opts.constraint_func,
+        cat_cells_cap=design_opts.cat_cells_cap,
+    )
+    return cand, candidate_points
+
+
+# ---------------------------------------------------------------------
 # Split-plot candidate set generation
 # ---------------------------------------------------------------------
 def build_split_plot_candidate(
@@ -550,4 +636,10 @@ def build_split_plot_candidate(
     return cand
 
 
-__all__ = ["estimate_candidate_size", "build_candidate", "build_split_plot_candidate"]
+__all__ = [
+    "estimate_candidate_size",
+    "resolve_candidate_points",
+    "build_search_candidate",
+    "build_candidate",
+    "build_split_plot_candidate",
+]

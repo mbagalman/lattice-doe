@@ -12,7 +12,9 @@ from lattice_doe.cli import (
     _print_template,
     main,
 )
-from lattice_doe.config import PowerGLMContrastConfig, PowerContrastConfig, PowerR2Config
+from lattice_doe.config import (
+    DesignOptions, PowerGLMContrastConfig, PowerContrastConfig, PowerR2Config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -69,31 +71,31 @@ class TestGLMCLI:
 
     def test_make_power_cfg_returns_glm_type_binomial(self):
         cfg = _glm_cfg_dict(family="binomial", baseline=0.3)
-        result = _make_power_cfg(cfg, FORMULA, FACTORS)
+        result = _make_power_cfg(cfg, FORMULA, FACTORS, DesignOptions())
         assert isinstance(result, PowerGLMContrastConfig)
         assert result.family == "binomial"
 
     def test_make_power_cfg_returns_glm_type_poisson(self):
         cfg = _glm_cfg_dict(family="poisson", baseline=2.0, sesoi=0.3)
-        result = _make_power_cfg(cfg, FORMULA, FACTORS)
+        result = _make_power_cfg(cfg, FORMULA, FACTORS, DesignOptions())
         assert isinstance(result, PowerGLMContrastConfig)
         assert result.family == "poisson"
 
     def test_make_power_cfg_glm_baseline_forwarded(self):
         cfg = _glm_cfg_dict(baseline=0.25)
-        result = _make_power_cfg(cfg, FORMULA, FACTORS)
+        result = _make_power_cfg(cfg, FORMULA, FACTORS, DesignOptions())
         assert result.baseline == pytest.approx(0.25)
 
     def test_make_power_cfg_glm_link_forwarded(self):
         cfg = _glm_cfg_dict(link="logit")
-        result = _make_power_cfg(cfg, FORMULA, FACTORS)
+        result = _make_power_cfg(cfg, FORMULA, FACTORS, DesignOptions())
         assert result.link == "logit"
 
     def test_make_power_cfg_glm_alpha_power_forwarded(self):
         cfg = _glm_cfg_dict()
         cfg["alpha"] = 0.01
         cfg["power"] = 0.90
-        result = _make_power_cfg(cfg, FORMULA, FACTORS)
+        result = _make_power_cfg(cfg, FORMULA, FACTORS, DesignOptions())
         assert result.alpha == pytest.approx(0.01)
         assert result.power == pytest.approx(0.90)
 
@@ -105,7 +107,7 @@ class TestGLMCLI:
             "baseline": 0.3,
             "contrast": {"L": [[0, 1]], "delta": [0.15]},
         }
-        result = _make_power_cfg(cfg, FORMULA, FACTORS)
+        result = _make_power_cfg(cfg, FORMULA, FACTORS, DesignOptions())
         assert isinstance(result, PowerGLMContrastConfig)
         assert result.L.shape == (1, 2)
         assert result.delta[0] == pytest.approx(0.15)
@@ -118,7 +120,7 @@ class TestGLMCLI:
             "contrast": {"L": [[0, 1]], "delta": [0.15]},
         }
         with pytest.raises(ValueError, match="baseline"):
-            _make_power_cfg(cfg, FORMULA, FACTORS)
+            _make_power_cfg(cfg, FORMULA, FACTORS, DesignOptions())
 
     def test_make_power_cfg_glm_missing_contrast_raises(self):
         cfg = {
@@ -129,7 +131,7 @@ class TestGLMCLI:
             # no contrast block
         }
         with pytest.raises(ValueError, match="contrast"):
-            _make_power_cfg(cfg, FORMULA, FACTORS)
+            _make_power_cfg(cfg, FORMULA, FACTORS, DesignOptions())
 
     # ------------------------------------------------------------------
     # 3. _apply_glm_cli_args
@@ -200,7 +202,7 @@ class TestGLMCLI:
             },
             "sigma": 1.0,
         }
-        result = _make_power_cfg(cfg, FORMULA, FACTORS)
+        result = _make_power_cfg(cfg, FORMULA, FACTORS, DesignOptions())
         assert isinstance(result, PowerContrastConfig)
 
     def test_make_power_cfg_r2_unchanged(self):
@@ -209,7 +211,7 @@ class TestGLMCLI:
             "factors": {"A": [0.0, 1.0]},
             "r2_target": 0.15,
         }
-        result = _make_power_cfg(cfg, FORMULA, FACTORS)
+        result = _make_power_cfg(cfg, FORMULA, FACTORS, DesignOptions())
         assert isinstance(result, PowerR2Config)
 
     # ------------------------------------------------------------------

@@ -21,7 +21,7 @@ import numpy as np
 import streamlit as st
 
 from state import init_state, render_sidebar
-from components.power_params import render_power_params
+from components.power_params import render_power_params, scenario_contrast
 
 st.set_page_config(page_title="Power Config — Lattice DOE", layout="wide")
 init_state()
@@ -29,7 +29,6 @@ render_sidebar()
 
 try:
     from lattice_doe.design import build_model_matrix
-    from lattice_doe.contrasts import contrast_from_scenarios
     _HAS_IOPT = True
 except ImportError:
     _HAS_IOPT = False
@@ -454,7 +453,7 @@ to find the index of each parameter.
                             for f in factors
                         }
                         sesoi = float(st.session_state.get("sesoi", 1.0))
-                        L, delta = contrast_from_scenarios(
+                        L, delta = scenario_contrast(
                             formula=formula,
                             factors=factor_spec,
                             scenario_a=scenario_a,

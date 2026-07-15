@@ -1967,21 +1967,21 @@ class TestMultiResponseCLI:
         formula = cfg["formula"]
         from lattice_doe.cli import _as_factors
         factors = _as_factors(cfg["factors"])
-        multi = _make_multi_response_cfg(cfg, formula, factors)
+        multi = _make_multi_response_cfg(cfg, formula, factors, DesignOptions())
         assert isinstance(multi, MultiResponseOptions)
 
     def test_make_multi_response_cfg_response_count(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         factors = _as_factors(cfg["factors"])
-        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
         assert len(multi.responses) == 2
 
     def test_make_multi_response_cfg_names(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         factors = _as_factors(cfg["factors"])
-        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
         names = [r.name for r in multi.responses]
         assert names == ["Yield", "Purity"]
 
@@ -1990,7 +1990,7 @@ class TestMultiResponseCLI:
         cfg = self._scenario_cfg()
         cfg["power_combination"] = "product"
         factors = _as_factors(cfg["factors"])
-        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
         assert multi.power_combination == "product"
 
     def test_make_multi_response_cfg_explicit_L(self):
@@ -2004,7 +2004,7 @@ class TestMultiResponseCLI:
             "contrast": {"L": [[0, 0, 1, 0]], "delta": [0.5]},
         }
         factors = _as_factors(cfg["factors"])
-        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
         assert isinstance(multi.responses[0].power_cfg, PowerContrastConfig)
 
     def test_make_multi_response_cfg_missing_name_raises(self):
@@ -2013,7 +2013,7 @@ class TestMultiResponseCLI:
         cfg["responses"][0]["name"] = ""
         factors = _as_factors(cfg["factors"])
         with pytest.raises(KeyError):
-            _make_multi_response_cfg(cfg, cfg["formula"], factors)
+            _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
 
     def test_make_multi_response_cfg_missing_power_key_raises(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
@@ -2022,7 +2022,7 @@ class TestMultiResponseCLI:
         del cfg["responses"][1]["r2_target"]
         factors = _as_factors(cfg["factors"])
         with pytest.raises(KeyError):
-            _make_multi_response_cfg(cfg, cfg["formula"], factors)
+            _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
 
     def test_make_multi_response_cfg_too_few_responses_raises(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
@@ -2030,7 +2030,7 @@ class TestMultiResponseCLI:
         cfg["responses"] = cfg["responses"][:1]  # only 1
         factors = _as_factors(cfg["factors"])
         with pytest.raises((ValueError, TypeError)):
-            _make_multi_response_cfg(cfg, cfg["formula"], factors)
+            _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
 
     # CR-37 tests ---------------------------------------------------------------
 
@@ -2049,7 +2049,7 @@ class TestMultiResponseCLI:
             },
         }
         factors = _as_factors(cfg["factors"])
-        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
         pcfg = multi.responses[0].power_cfg
         assert isinstance(pcfg, PowerGLMContrastConfig)
         assert pcfg.family == "binomial"
@@ -2067,7 +2067,7 @@ class TestMultiResponseCLI:
         }
         factors = _as_factors(cfg["factors"])
         with pytest.raises(KeyError):
-            _make_multi_response_cfg(cfg, cfg["formula"], factors)
+            _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
 
     def test_glm_contrast_missing_baseline_raises(self):
         """CR-37: contrast + family but no baseline → KeyError."""
@@ -2085,14 +2085,14 @@ class TestMultiResponseCLI:
         }
         factors = _as_factors(cfg["factors"])
         with pytest.raises(KeyError, match="baseline"):
-            _make_multi_response_cfg(cfg, cfg["formula"], factors)
+            _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
 
     def test_plain_contrast_no_glm_keys_unchanged(self):
         """CR-37 regression: contrast without family/baseline still builds PowerContrastConfig."""
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         cfg = self._scenario_cfg()
         factors = _as_factors(cfg["factors"])
-        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors)
+        multi = _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
         assert isinstance(multi.responses[0].power_cfg, PowerContrastConfig)
 
     def test_cli_main_multiresponse_dry_run(self, tmp_path):

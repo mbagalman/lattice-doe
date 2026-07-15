@@ -3,7 +3,50 @@
 import numpy as np
 import pytest
 
-from lattice_doe.contrasts import contrast_from_scenarios
+from lattice_doe.contrasts import ContrastCodingError, contrast_from_scenarios
+
+
+def _full_cross_truth(formula, factors, scenario_a, scenario_b):
+    """Reference L: coding learned from the FULL level cross of every factor.
+
+    Independent of the implementation under test — it enumerates everything
+    rather than reasoning about which terms need joint enumeration."""
+    import itertools
+
+    import pandas as pd
+    import patsy
+
+    cols = {}
+    for k, v in factors.items():
+        if isinstance(v, dict) and v.get("type") == "categorical":
+            cols[k] = list(v["levels"])
+        else:
+            cols[k] = list(v)
+    keys = list(cols)
+    full = pd.DataFrame(
+        list(itertools.product(*(cols[k] for k in keys))), columns=keys
+    )
+    di = patsy.incr_dbuilder(formula, lambda: iter([full]))
+    (M,) = patsy.build_design_matrices(
+        [di], pd.DataFrame([scenario_a, scenario_b])
+    )
+    M = np.asarray(M)
+    return (M[1] - M[0]).reshape(1, -1)
+
+
+def _app_scenario_contrast():
+    """The Streamlit layer's scenario_contrast, importable from the app dir."""
+    import sys
+    from pathlib import Path
+
+    app_dir = str(Path(__file__).resolve().parents[1] / "app")
+    if app_dir not in sys.path:
+        sys.path.insert(0, app_dir)
+    pytest.importorskip("streamlit")
+    from components.power_params import scenario_contrast
+
+    return scenario_contrast
+
 
 FORMULA = "~ 1 + A + B"
 FACTORS = {
@@ -193,7 +236,7 @@ class TestIncrementalCodingAnchor:
 
     def test_additive_large_factors_use_level_cover(self):
         """UX-42: `~ C(a) + C(b)` with two 400-level factors needs only a
-        400-row cycling cover — main effects code per-factor, so the
+        400-row per-factor cover — main effects code per-factor, so the
         160 000-cell cross must NOT be required (the previous revision
         rejected this safe model)."""
         big = {"a": [str(i) for i in range(400)],
@@ -207,7 +250,7 @@ class TestIncrementalCodingAnchor:
 
     def test_interaction_uses_level_cover(self):
         """`:`/`*` interactions build columns structurally from per-factor
-        codings, so they too need only the cycling cover."""
+        codings, so they too need only the per-factor cover."""
         big = {"a": [str(i) for i in range(400)],
                "b": [str(i) for i in range(400)]}
         L, _ = contrast_from_scenarios(
@@ -353,6 +396,80 @@ class TestIncrementalCodingAnchor:
         Xs = np.asarray(Xs)
         assert np.allclose(L, (Xs[1] - Xs[0]).reshape(1, -1))
 
+    def test_factor_named_like_stateful_transform_is_usable(self):
+        """UX-44 regression: detection intersected every identifier with the
+        transform names, so a factor merely NAMED `scale`/`center`/`bs` was
+        rejected even though nothing stateful was called."""
+        cases = [
+            ("~ scale", {"scale": (0.0, 1.0)},
+             {"scale": 0.0}, {"scale": 1.0}),
+            ("~ C(bs)", {"bs": ["lo", "hi"]},
+             {"bs": "lo"}, {"bs": "hi"}),
+            ("~ center + x", {"center": ["p", "q"], "x": (0.0, 1.0)},
+             {"center": "p", "x": 0.0}, {"center": "q", "x": 1.0}),
+            ("~ standardize * te", {"standardize": ["u", "v"], "te": (0.0, 2.0)},
+             {"standardize": "u", "te": 0.5}, {"standardize": "v", "te": 1.5}),
+        ]
+        for formula, factors, a, b in cases:
+            L, _ = contrast_from_scenarios(formula, factors, a, b, sesoi=1.0)
+            assert np.allclose(L, _full_cross_truth(formula, factors, a, b)), (
+                f"wrong L for {formula!r}"
+            )
+
+    def test_called_stateful_transform_still_rejected(self):
+        """The flip side of UX-44: an actual CALL must still be caught, and a
+        name collision must not mask it."""
+        for formula in ("~ bs(x, df=3)", "~ center(x)", "~ scale(x)"):
+            with pytest.raises(ContrastCodingError, match="stateful"):
+                contrast_from_scenarios(
+                    formula, {"x": (0.0, 1.0)},
+                    {"x": 0.0}, {"x": 1.0}, sesoi=1.0,
+                )
+
+    def test_numeric_derived_term_needs_no_cross(self):
+        """UX-45 regression: `~ I(a + b)` over two 400-level numeric-coded
+        categoricals is a two-column NUMERIC model, but every multi-factor
+        derived term was treated as a categorical cross and rejected at the
+        160 000-cell cap."""
+        levels = list(range(400))
+        factors = {"a": {"type": "categorical", "levels": levels},
+                   "b": {"type": "categorical", "levels": levels}}
+        L, _ = contrast_from_scenarios(
+            "~ I(a + b)", factors, {"a": 0, "b": 0}, {"a": 1, "b": 1},
+            sesoi=1.0,
+        )
+        assert L.shape == (1, 2)  # intercept + the single numeric column
+
+    def test_numeric_derived_term_matches_full_cross(self):
+        """Skipping the cross must not change L: at a size where the full
+        cross is still computable, the two must agree exactly."""
+        levels = list(range(20))
+        factors = {"a": {"type": "categorical", "levels": levels},
+                   "b": {"type": "categorical", "levels": levels}}
+        a, b = {"a": 3, "b": 7}, {"a": 11, "b": 2}
+        L, _ = contrast_from_scenarios("~ I(a + b)", factors, a, b, sesoi=1.0)
+        assert np.allclose(L, _full_cross_truth("~ I(a + b)", factors, a, b))
+
+    def test_numeric_derived_term_alongside_own_main_effect(self):
+        """A factor inside a numeric derived term still needs its own level
+        cover when it also appears as a categorical main effect."""
+        factors = {"a": {"type": "categorical", "levels": [0, 1, 2]},
+                   "b": {"type": "categorical", "levels": [0, 5, 10]}}
+        a, b = {"a": 0, "b": 0}, {"a": 2, "b": 5}
+        f = "~ I(a + b) + C(a)"
+        L, _ = contrast_from_scenarios(f, factors, a, b, sesoi=1.0)
+        assert np.allclose(L, _full_cross_truth(f, factors, a, b))
+
+    def test_categorical_valued_derived_term_still_crossed(self):
+        """The result TYPE decides, not the syntax: `I(a + b)` over STRING
+        levels is a concatenation — categorical — so it must still be jointly
+        enumerated even though it is not wrapped in C()."""
+        factors = {"a": ["x", "y"], "b": ["p", "q"]}
+        a, b = {"a": "x", "b": "p"}, {"a": "y", "b": "q"}
+        L, _ = contrast_from_scenarios("~ I(a + b)", factors, a, b, sesoi=1.0)
+        assert L.shape == (1, 4)  # 4 realized combinations -> 4 columns
+        assert np.allclose(L, _full_cross_truth("~ I(a + b)", factors, a, b))
+
     def test_q_quoted_factor_name_referenced(self):
         """UX-40 regression (reference detection): a factor named 'dose%' is
         only referable as Q(\"dose%\") — word-boundary text matching missed
@@ -365,3 +482,471 @@ class TestIncrementalCodingAnchor:
         )
         assert L.shape == (1, 4)  # intercept + 2 dose% dummies + x
         assert np.allclose(L[0, 1:3], 0.0)
+
+
+class TestCodingErrorRemedies:
+    """UX-46/UX-48: each interface answers a data-dependent coding in the way
+    ITS user can act on. The CLI and the Run page build the run's own candidate
+    set and just work; only the preview (no design options) and the growth case
+    report, and neither may echo the Python API's "pass coding_data=" advice."""
+
+    # Scenario values sit INSIDE the range: a sampled candidate set does not
+    # reach the declared bounds, and a spline cannot extrapolate past its
+    # outermost knots (see test_scenario_outside_spline_knots_explains_why).
+    _STATEFUL = ("~ bs(x, df=3)", {"x": (0.0, 1.0)}, {"x": 0.2}, {"x": 0.8}, 1.0)
+
+    def test_error_splits_reason_from_remedy(self):
+        with pytest.raises(ContrastCodingError) as ei:
+            contrast_from_scenarios(*self._STATEFUL)
+        exc = ei.value
+        assert "stateful" in exc.reason
+        assert "coding_data" not in exc.reason  # the reason is remedy-free
+        assert "coding_data" in exc.remedy
+        assert str(exc) == f"{exc.reason} {exc.remedy}"
+
+    def test_error_is_valueerror_subclass(self):
+        """Existing callers catching ValueError must keep working."""
+        assert issubclass(ContrastCodingError, ValueError)
+        with pytest.raises(ValueError):
+            contrast_from_scenarios(*self._STATEFUL)
+
+    def test_cli_codes_against_the_runs_own_candidate(self):
+        """UX-48: the CLI no longer dead-ends on a stateful formula — it codes
+        the contrast against the candidate set its own design_opts produce,
+        which is the set find_optimal_design will select from."""
+        from lattice_doe.candidate import build_search_candidate
+        from lattice_doe.cli import _scenario_contrast
+        from lattice_doe.config import DesignOptions
+
+        formula, factors, a, b, sesoi = self._STATEFUL
+        opts = DesignOptions(random_state=7, candidate_points=400)
+        L, _ = _scenario_contrast(formula, factors, a, b, sesoi, opts)
+
+        cand, _ = build_search_candidate(formula, factors, opts)
+        ref, _ = contrast_from_scenarios(
+            formula, factors, a, b, sesoi, coding_data=cand,
+        )
+        assert np.array_equal(L, ref)
+
+    def test_cli_remedy_when_growth_would_invalidate(self):
+        """Growth rebuilds the candidate mid-search and re-derives the coding
+        while L stays fixed, so it must be refused, not silently accepted."""
+        from lattice_doe.cli import _scenario_contrast
+        from lattice_doe.config import DesignOptions
+
+        formula, factors, a, b, sesoi = self._STATEFUL
+        opts = DesignOptions(allow_candidate_growth=True)
+        with pytest.raises(ContrastCodingError) as ei:
+            _scenario_contrast(formula, factors, a, b, sesoi, opts)
+        exc = ei.value
+        assert "stateful" in exc.reason                        # diagnosis kept
+        assert "allow_candidate_growth" in exc.remedy          # names the flag
+        assert "coding_data" not in exc.remedy                 # not YAML-able
+
+    def test_ui_run_path_codes_against_the_runs_own_candidate(self):
+        from lattice_doe.candidate import build_search_candidate
+        from lattice_doe.config import DesignOptions
+
+        scenario_contrast = _app_scenario_contrast()
+        formula, factors, a, b, sesoi = self._STATEFUL
+        opts = DesignOptions(random_state=11, candidate_points=400)
+        L, _ = scenario_contrast(
+            design_opts=opts, formula=formula, factors=factors,
+            scenario_a=a, scenario_b=b, sesoi=sesoi,
+        )
+        cand, _ = build_search_candidate(formula, factors, opts)
+        ref, _ = contrast_from_scenarios(
+            formula, factors, a, b, sesoi, coding_data=cand,
+        )
+        assert np.array_equal(L, ref)
+
+    def test_ui_preview_defers_instead_of_guessing(self):
+        """Without design options the preview cannot know the coding authority.
+        It must say so — never guess a seed/size, which would show an L the run
+        does not use."""
+        scenario_contrast = _app_scenario_contrast()
+        formula, factors, a, b, sesoi = self._STATEFUL
+        with pytest.raises(ContrastCodingError) as ei:
+            scenario_contrast(formula=formula, factors=factors,
+                              scenario_a=a, scenario_b=b, sesoi=sesoi)
+        exc = ei.value
+        assert "stateful" in exc.reason
+        assert "Run / Results" in exc.remedy
+        assert "coding_data" not in exc.remedy
+
+    def test_no_interface_remedy_hardcodes_a_candidate_recipe(self):
+        """UX-48 regression: the remedies used to hand out a snippet pinning
+        `candidate_points=2000, seed=42`. The CLI default seed is 123 and the
+        app may size adaptively, so copying it silently produced an L for
+        different spline knots — same width, no error."""
+        from lattice_doe import cli
+
+        _app_scenario_contrast()   # puts the app dir on sys.path
+        import components.power_params as pp
+
+        remedies = [
+            cli._CLI_CODING_REMEDY, cli._CLI_GROWTH_REMEDY,
+            pp.UI_CODING_REMEDY, pp.UI_PREVIEW_REMEDY, pp.UI_GROWTH_REMEDY,
+        ]
+        for text in remedies:
+            assert "seed=42" not in text
+            assert "candidate_points=2000" not in text
+            assert "build_candidate(" not in text
+
+    def test_power_params_importable_without_lattice_doe(self):
+        """The pages import components.power_params unconditionally and must
+        still render their 'not installed' notice, so the lattice_doe import
+        has to stay lazy."""
+        import ast
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parents[1]
+               / "app" / "components" / "power_params.py").read_text()
+        tree = ast.parse(src)
+        top_level = [n for n in tree.body
+                     if isinstance(n, (ast.Import, ast.ImportFrom))]
+        for node in top_level:
+            mod = getattr(node, "module", "") or ""
+            names = [a.name for a in node.names]
+            assert not mod.startswith("lattice_doe"), (
+                f"lattice_doe imported at module level: {mod}"
+            )
+            assert not any(n.startswith("lattice_doe") for n in names)
+
+
+class TestOverlappingDerivedTerms:
+    """UX-47: derived terms are scanned one segment each. Overlapping terms
+    must NOT be unioned into a single Cartesian cross."""
+
+    def test_overlapping_terms_are_not_unioned(self):
+        """`C(a+b) + C(b+c)` at 50 levels needs the a×b cross and the b×c
+        cross (2 500 rows each), never the a×b×c cross (125 000 > cap). The
+        previous revision merged {a,b} and {b,c} into {a,b,c} and rejected a
+        model whose coding is perfectly establishable."""
+        lv = list(range(50))
+        factors = {k: {"type": "categorical", "levels": lv}
+                   for k in ("a", "b", "c")}
+        a, b = {"a": 0, "b": 0, "c": 0}, {"a": 1, "b": 1, "c": 1}
+        L, _ = contrast_from_scenarios(
+            "~ C(a + b) + C(b + c)", factors, a, b, sesoi=1.0,
+        )
+        # 1 intercept + 98 dummies per derived term (sums span 0..98).
+        assert L.shape == (1, 197)
+
+    def test_overlapping_terms_match_full_cross(self):
+        """Segmented scanning must not change L: at a size where the full
+        3-way cross is computable, the two must agree exactly."""
+        lv = list(range(6))
+        factors = {k: {"type": "categorical", "levels": lv}
+                   for k in ("a", "b", "c")}
+        a, b = {"a": 0, "b": 0, "c": 0}, {"a": 1, "b": 2, "c": 3}
+        f = "~ C(a + b) + C(b + c)"
+        L, _ = contrast_from_scenarios(f, factors, a, b, sesoi=1.0)
+        assert np.allclose(L, _full_cross_truth(f, factors, a, b))
+
+    def test_three_way_single_term_still_needs_its_own_cross(self):
+        """A genuine 3-factor term is one group: its cross is unavoidable and
+        the cap must still apply — and name the offending term."""
+        lv = [str(i) for i in range(50)]  # 125 000 combinations > cap
+        factors = {k: lv for k in ("a", "b", "c")}
+        with pytest.raises(ContrastCodingError, match=r"C\(a \+ b \+ c\)"):
+            contrast_from_scenarios(
+                "~ C(a + b + c)", factors,
+                {"a": "0", "b": "0", "c": "0"},
+                {"a": "1", "b": "1", "c": "1"},
+                sesoi=1.0,
+            )
+
+    def test_duplicate_factor_sets_scanned_once(self):
+        """Two derived terms over the same factors need only one segment."""
+        factors = {"a": ["p", "q"], "b": ["r", "s"]}
+        a, b = {"a": "p", "b": "r"}, {"a": "q", "b": "s"}
+        f = "~ C(a + b) + I(a + b)"
+        L, _ = contrast_from_scenarios(f, factors, a, b, sesoi=1.0)
+        assert np.allclose(L, _full_cross_truth(f, factors, a, b))
+
+
+class TestCodingIsDataDependent:
+    """UX-48: interfaces ask up front whether they must supply coding_data."""
+
+    def test_none_for_ordinary_formulas(self):
+        from lattice_doe.contrasts import coding_is_data_dependent
+
+        for formula, factors in [
+            ("~ 1 + C(g) + x", {"g": ["a", "b"], "x": (0.0, 1.0)}),
+            ("~ C(a) * C(b)", {"a": ["p", "q"], "b": ["r", "s"]}),
+            ("~ scale", {"scale": (0.0, 1.0)}),          # name collision only
+            ("~ I(a + b)", {"a": {"type": "categorical", "levels": [0, 1]},
+                            "b": {"type": "categorical", "levels": [0, 5]}}),
+        ]:
+            assert coding_is_data_dependent(formula, factors) is None, formula
+
+    def test_reason_for_learned_codings(self):
+        from lattice_doe.contrasts import coding_is_data_dependent
+
+        assert "stateful" in coding_is_data_dependent(
+            "~ bs(x, df=3)", {"x": (0.0, 1.0)}
+        )
+        assert "derives categorical levels" in coding_is_data_dependent(
+            "~ C(I(x // 1))", {"x": (0.0, 5.0)}
+        )
+
+    def test_agrees_with_contrast_from_scenarios(self):
+        """The predicate and the builder must not disagree: whenever a reason
+        is reported, the spec-only path must refuse, and vice versa."""
+        from lattice_doe.contrasts import coding_is_data_dependent
+
+        cases = [
+            ("~ 1 + C(g)", {"g": ["a", "b"]}, {"g": "a"}, {"g": "b"}),
+            ("~ bs(x, df=3)", {"x": (0.0, 1.0)}, {"x": 0.2}, {"x": 0.8}),
+            ("~ C(I(x // 1))", {"x": (0.0, 5.0)}, {"x": 0.5}, {"x": 4.5}),
+            ("~ center", {"center": ["u", "v"]}, {"center": "u"},
+             {"center": "v"}),
+        ]
+        for formula, factors, a, b in cases:
+            reason = coding_is_data_dependent(formula, factors)
+            try:
+                contrast_from_scenarios(formula, factors, a, b, sesoi=1.0)
+                refused = False
+            except ContrastCodingError:
+                refused = True
+            assert refused == (reason is not None), formula
+
+    def test_scenario_outside_spline_knots_explains_why(self):
+        """A scenario sitting exactly on a factor's declared bound can fall
+        outside a spline's outermost knots, because a sampled candidate set
+        never quite reaches the bound. The error must not blame a missing
+        categorical level — the cause here is continuous and different."""
+        from lattice_doe.candidate import build_search_candidate
+        from lattice_doe.config import DesignOptions
+
+        formula, factors = "~ bs(x, df=3)", {"x": (0.0, 1.0)}
+        opts = DesignOptions(random_state=7, candidate_points=400)
+        cand, _ = build_search_candidate(formula, factors, opts)
+        assert cand["x"].min() > 0.0 and cand["x"].max() < 1.0  # premise
+
+        with pytest.raises(ValueError, match="outside the range"):
+            contrast_from_scenarios(
+                formula, factors, {"x": 0.0}, {"x": 1.0}, 1.0,
+                coding_data=cand,
+            )
+        # Just inside the sampled range is fine.
+        L, _ = contrast_from_scenarios(
+            formula, factors, {"x": 0.2}, {"x": 0.8}, 1.0, coding_data=cand,
+        )
+        assert L.shape == (1, 4)
+
+
+class TestSearchCandidateIsTheSharedAuthority:
+    """UX-48: the contrast's coding authority must be the very candidate set
+    the search selects from — not a look-alike rebuilt from guessed args."""
+
+    def test_candidate_is_spec_form_invariant(self):
+        """find_optimal_design normalizes factors before building its
+        candidate; the CLI/app pass the raw spec. All spec forms must yield
+        the identical candidate, or the two would code differently."""
+        from lattice_doe.candidate import build_search_candidate
+        from lattice_doe.config import DesignOptions
+        from lattice_doe.utils import normalize_factors
+
+        f = "~ 1 + bs(x, df=3) + C(g)"
+        opts = DesignOptions(random_state=123, candidate_points=300)
+        plain = {"x": (0.0, 1.0), "g": ["a", "b", "c"]}
+        typed = {"x": {"type": "continuous", "low": 0.0, "high": 1.0},
+                 "g": {"type": "categorical", "levels": ["a", "b", "c"]}}
+
+        cands = [
+            build_search_candidate(f, plain, opts)[0],
+            build_search_candidate(f, normalize_factors(plain, f), opts)[0],
+            build_search_candidate(f, typed, opts)[0],
+            build_search_candidate(f, normalize_factors(typed, f), opts)[0],
+        ]
+        for other in cands[1:]:
+            assert cands[0].equals(other)
+
+    def test_api_builds_its_candidate_through_the_shared_helper(self):
+        """If find_optimal_design ever stops routing through
+        build_search_candidate, the interfaces' authority silently becomes a
+        look-alike. Pin the wiring."""
+        import inspect
+
+        from lattice_doe import api
+
+        src = inspect.getsource(api.find_optimal_design)
+        assert "build_search_candidate(" in src
+        src_mr = inspect.getsource(api.find_multiresponse_design)
+        assert "build_search_candidate(" in src_mr
+
+    @pytest.mark.slow
+    def test_cli_contrast_width_matches_realized_design(self):
+        """End to end: L built by the CLI for a stateful formula must have
+        exactly as many columns as the design the same options produce."""
+        from lattice_doe.api import find_optimal_design
+        from lattice_doe.cli import _scenario_contrast
+        from lattice_doe.config import DesignOptions, PowerContrastConfig
+
+        formula, factors = "~ 1 + bs(x, df=3)", {"x": (0.0, 1.0)}
+        opts = DesignOptions(candidate_points=200, random_state=5, starts=1)
+        L, delta = _scenario_contrast(
+            formula, factors, {"x": 0.2}, {"x": 0.8}, 0.6, opts,
+        )
+        power_cfg = PowerContrastConfig(
+            L=L, delta=delta, alpha=0.05, power=0.8, sigma=1.0, max_n=120,
+        )
+        result = find_optimal_design(formula, factors, power_cfg, opts)
+        assert L.shape[1] == result["report"]["p"]
+
+    def test_cli_multiresponse_sizes_candidate_by_the_global_formula(self):
+        """In multi-response mode a response may carry its own formula, but
+        find_multiresponse_design builds ONE candidate sized by the GLOBAL
+        formula. The per-response contrast must be coded against that
+        candidate — sizing by the response's formula would silently diverge
+        the moment candidate sizing starts reading the formula (today it does
+        not, so this pins the wiring, not a live behavior difference)."""
+        from lattice_doe.candidate import build_search_candidate
+        from lattice_doe.cli import _scenario_contrast
+        from lattice_doe.config import DesignOptions
+
+        factors = {"x": (0.0, 1.0)}
+        global_formula = "~ 1 + x"
+        resp_formula = "~ 1 + bs(x, df=3)"
+        opts = DesignOptions(auto_candidate=True, random_state=3)
+
+        L, _ = _scenario_contrast(
+            resp_formula, factors, {"x": 0.2}, {"x": 0.8}, 0.5, opts,
+            sizing_formula=global_formula,
+        )
+        run_cand, _ = build_search_candidate(global_formula, factors, opts)
+        ref, _ = contrast_from_scenarios(
+            resp_formula, factors, {"x": 0.2}, {"x": 0.8}, 0.5,
+            coding_data=run_cand,
+        )
+        assert np.array_equal(L, ref)
+
+
+class TestImplicitCategoricalDetection:
+    """UX-51: Patsy treats object-valued expression results as categorical
+    without any C(...) call. Detection must go by the EVALUATED result type,
+    not by C-call syntax — the old check let a thresholding expression through
+    to the spec-only anchor, which realized only one branch and produced a
+    same-shaped but wrong (or confusingly failing) contrast."""
+
+    _F = '~ I(np.where(x < 0.5, "lo", "hi"))'
+    _FACTORS = {"x": (0.0, 1.0)}
+
+    def test_predicate_flags_implicit_categorical(self):
+        from lattice_doe.contrasts import coding_is_data_dependent
+
+        reason = coding_is_data_dependent(self._F, self._FACTORS)
+        assert reason is not None and "categorical" in reason
+
+    def test_spec_only_path_refuses(self):
+        with pytest.raises(ContrastCodingError):
+            contrast_from_scenarios(
+                self._F, self._FACTORS, {"x": 0.2}, {"x": 0.8}, sesoi=1.0,
+            )
+
+    def test_coding_data_path_matches_candidate_reference(self):
+        import pandas as pd
+        import patsy
+
+        from lattice_doe.candidate import build_search_candidate
+        from lattice_doe.config import DesignOptions
+
+        cand, _ = build_search_candidate(
+            self._F, self._FACTORS, DesignOptions()
+        )
+        a, b = {"x": 0.2}, {"x": 0.8}
+        L, _ = contrast_from_scenarios(
+            self._F, self._FACTORS, a, b, sesoi=1.0, coding_data=cand,
+        )
+        di = patsy.incr_dbuilder(self._F, lambda: iter([cand]))
+        (M,) = patsy.build_design_matrices([di], pd.DataFrame([a, b]))
+        M = np.asarray(M)
+        assert np.array_equal(L, (M[1] - M[0]).reshape(1, -1))
+        assert np.array_equal(L, np.array([[0.0, -1.0]]))  # reviewer's truth
+
+    def test_explicit_c_cases_still_flagged(self):
+        from lattice_doe.contrasts import coding_is_data_dependent
+
+        for f in ("~ C(I(x // 1))", "~ C(x)"):
+            assert coding_is_data_dependent(f, {"x": (0.0, 1.0)}) is not None
+
+    def test_numeric_derived_terms_not_flagged(self):
+        from lattice_doe.contrasts import coding_is_data_dependent
+
+        cases = [
+            ("~ 1 + x", {"x": (0.0, 1.0)}),
+            ("~ I(x * 2) + C(g)", {"x": (0.0, 1.0), "g": ["a", "b"]}),
+            ("~ np.log(x + 1)", {"x": (0.0, 1.0)}),
+        ]
+        for f, fac in cases:
+            assert coding_is_data_dependent(f, fac) is None, f
+
+
+class TestSplitPlotCodingGuard:
+    """UX-50: a split-plot search learns its coding from separately built
+    whole-plot/sub-plot pools, not from build_search_candidate's ordinary
+    candidate — so for data-dependent codings the interfaces must refuse the
+    scenario form rather than hand over a non-authoritative candidate."""
+
+    _STATEFUL = ("~ bs(x, df=3)", {"x": (0.0, 1.0), "w": ["a", "b"]},
+                 {"x": 0.2, "w": "a"}, {"x": 0.8, "w": "b"}, 1.0)
+
+    @staticmethod
+    def _sp_opts():
+        from lattice_doe.config import DesignOptions, SplitPlotOptions
+
+        return DesignOptions(
+            split_plot=SplitPlotOptions(htc_factors=["w"], n_whole_plots=4),
+        )
+
+    def test_cli_refuses_stateful_scenario_with_split_plot(self):
+        from lattice_doe.cli import _scenario_contrast
+
+        formula, factors, a, b, sesoi = self._STATEFUL
+        with pytest.raises(ContrastCodingError) as ei:
+            _scenario_contrast(formula, factors, a, b, sesoi, self._sp_opts())
+        assert "split-plot" in ei.value.remedy
+        assert "'L' and 'delta'" in ei.value.remedy
+
+    def test_ui_refuses_stateful_scenario_with_split_plot(self):
+        scenario_contrast = _app_scenario_contrast()
+        formula, factors, a, b, sesoi = self._STATEFUL
+        with pytest.raises(ContrastCodingError) as ei:
+            scenario_contrast(design_opts=self._sp_opts(), formula=formula,
+                              factors=factors, scenario_a=a, scenario_b=b,
+                              sesoi=sesoi)
+        assert "split-plot" in ei.value.remedy
+        assert "Matrix" in ei.value.remedy
+
+    def test_ordinary_formula_with_split_plot_unaffected(self):
+        """The guard is scoped to data-dependent codings: a plain formula's
+        coding is spec-derivable regardless of how the search selects rows."""
+        from lattice_doe.cli import _scenario_contrast
+
+        factors = {"x": (0.0, 1.0), "w": ["a", "b"]}
+        L, _ = _scenario_contrast(
+            "~ 1 + x + C(w)", factors,
+            {"x": 0.2, "w": "a"}, {"x": 0.8, "w": "b"}, 1.0, self._sp_opts(),
+        )
+        assert L.shape == (1, 3)
+
+    def test_boundary_error_no_longer_advises_extending_coding_data(self):
+        """UX-52: extending coding_data re-derives spline knots while the
+        search still uses its own sampled candidate — the old advice broke
+        the exact-authority invariant this series established."""
+        from lattice_doe.candidate import build_search_candidate
+        from lattice_doe.config import DesignOptions
+
+        formula, factors = "~ bs(x, df=3)", {"x": (0.0, 1.0)}
+        cand, _ = build_search_candidate(
+            formula, factors, DesignOptions(candidate_points=400,
+                                            random_state=7),
+        )
+        with pytest.raises(ValueError, match="inside the realized range") as ei:
+            contrast_from_scenarios(
+                formula, factors, {"x": 0.0}, {"x": 1.0}, 1.0,
+                coding_data=cand,
+            )
+        assert "extend coding_data to cover it" not in str(ei.value)

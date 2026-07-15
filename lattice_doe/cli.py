@@ -66,10 +66,91 @@ from .config import (
     PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
     DesignOptions, MultiResponseOptions, ResponseSpec,
 )
-from .contrasts import contrast_from_scenarios
+from .candidate import build_search_candidate
+from .contrasts import (
+    ContrastCodingError, coding_is_data_dependent, contrast_from_scenarios,
+)
 from ._request_builder import build_power_cfg, build_design_opts
 
 logger = logging.getLogger("lattice")
+
+#: Remedy when even the run's own candidate set cannot establish the coding —
+#: in practice the combined-term level cross exceeding the cap.
+_CLI_CODING_REMEDY = (
+    "Reduce the number of levels in the combined term, or replace the "
+    "'scenario_a'/'scenario_b'/'sesoi' contrast block with explicit 'L' and "
+    "'delta' entries. See the user guide section 3.3, \"Formulas whose coding "
+    "is learned from the data\"."
+)
+
+#: Remedy when the coding is data-dependent AND split-plot options are set.
+#: The split-plot search does not select from the ordinary candidate set — it
+#: builds separate whole-plot/sub-plot pools and learns its coding from their
+#: combinations — so no candidate this helper could build here is the
+#: authority (UX-50).
+_CLI_SPLIT_PLOT_REMEDY = (
+    "This run uses split-plot options, and a split-plot search learns its "
+    "model coding from separately built whole-plot/sub-plot pools — not from "
+    "the ordinary candidate set, so no scenario contrast built up front can "
+    "be guaranteed to match it. Replace the 'scenario_a'/'scenario_b'/"
+    "'sesoi' contrast block with explicit 'L' and 'delta' entries, or use a "
+    "formula whose coding does not depend on the data."
+)
+
+#: Remedy when the coding is data-dependent AND growth is enabled. Growth
+#: rebuilds the candidate set mid-search and re-derives the coding, while L
+#: stays fixed — so the contrast would silently stop matching the model.
+_CLI_GROWTH_REMEDY = (
+    "Because the coding is learned from the candidate set, the contrast is "
+    "built from the candidate set this run will use. But "
+    "'allow_candidate_growth' is enabled, which lets the search rebuild that "
+    "candidate set mid-run and re-derive the coding, leaving L behind. Set "
+    "'allow_candidate_growth: false' in the config (it is off by default), or "
+    "supply explicit 'L' and 'delta' entries instead of a scenario block."
+)
+
+
+def _scenario_contrast(
+    formula: str,
+    factors: Dict[str, Any],
+    scenario_a: Dict[str, Any],
+    scenario_b: Dict[str, Any],
+    sesoi: float,
+    design_opts: DesignOptions,
+    sizing_formula: Optional[str] = None,
+) -> Any:
+    """Build L and delta for a scenario pair, coded against this run's data.
+
+    When the formula's coding is learned from realized data, the authority is
+    the candidate set the search will actually select from — generated here
+    from the very same ``design_opts``. Reconstructing it by hand (a guessed
+    seed or candidate size) yields a same-width but numerically different L,
+    with no error to signal it (UX-48).
+
+    ``sizing_formula`` is the formula the design run sizes its candidate set
+    by. It matters in multi-response mode, where a response may carry its own
+    *formula* but ``find_multiresponse_design`` builds ONE candidate from the
+    global one — sizing here by the response's formula would break the
+    shared-authority invariant the moment candidate sizing starts reading the
+    formula (today it does not, by accident of implementation).
+    """
+    reason = coding_is_data_dependent(formula, factors)
+    coding_data = None
+    if reason is not None:
+        if design_opts.split_plot is not None:
+            raise ContrastCodingError(reason, _CLI_SPLIT_PLOT_REMEDY)
+        if design_opts.allow_candidate_growth:
+            raise ContrastCodingError(reason, _CLI_GROWTH_REMEDY)
+        coding_data, _ = build_search_candidate(
+            sizing_formula or formula, factors, design_opts,
+        )
+    try:
+        return contrast_from_scenarios(
+            formula, factors, scenario_a, scenario_b, sesoi,
+            coding_data=coding_data,
+        )
+    except ContrastCodingError as exc:
+        raise ContrastCodingError(exc.reason, _CLI_CODING_REMEDY) from exc
 
 
 def _ensure_utf8_output() -> None:
@@ -199,7 +280,10 @@ def _as_factors(raw: Dict[str, Any]) -> Dict[str, Any]:
     return factors
 
 
-def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
+def _make_power_cfg(
+    cfg: Dict[str, Any], formula: str, factors: Dict[str, Any],
+    design_opts: DesignOptions,
+):
     import numpy as np  # noqa: PLC0415
     alpha = float(cfg.get("alpha", 0.05))
     power = float(cfg.get("power", 0.8))
@@ -215,8 +299,9 @@ def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
         link = cfg.get("link", None)
         c = cfg.get("contrast") or {}
         if {"scenario_a", "scenario_b", "sesoi"} <= c.keys():
-            L, delta = contrast_from_scenarios(
-                formula, factors, c["scenario_a"], c["scenario_b"], float(c["sesoi"]),
+            L, delta = _scenario_contrast(
+                formula, factors, c["scenario_a"], c["scenario_b"],
+                float(c["sesoi"]), design_opts,
             )
         elif "L" in c and "delta" in c:
             L = np.asarray(c["L"], dtype=float)
@@ -234,8 +319,9 @@ def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
     if "contrast" in cfg:
         c = cfg["contrast"] or {}
         if {"scenario_a", "scenario_b", "sesoi"} <= c.keys():
-            L, delta = contrast_from_scenarios(
-                formula, factors, c["scenario_a"], c["scenario_b"], float(c["sesoi"]),
+            L, delta = _scenario_contrast(
+                formula, factors, c["scenario_a"], c["scenario_b"],
+                float(c["sesoi"]), design_opts,
             )
         elif "L" in c and "delta" in c:
             L = np.asarray(c["L"], dtype=float)
@@ -257,7 +343,8 @@ def _make_power_cfg(cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]):
 
 
 def _make_multi_response_cfg(
-    cfg: Dict[str, Any], formula: str, factors: Dict[str, Any]
+    cfg: Dict[str, Any], formula: str, factors: Dict[str, Any],
+    design_opts: DesignOptions,
 ) -> MultiResponseOptions:
     """Parse the ``responses:`` YAML block into a :class:`MultiResponseOptions`."""
     raw_responses = cfg.get("responses")
@@ -289,12 +376,14 @@ def _make_multi_response_cfg(
         if "contrast" in r:
             c = r["contrast"] or {}
             if {"scenario_a", "scenario_b", "sesoi"} <= c.keys():
-                L, delta = contrast_from_scenarios(
+                L, delta = _scenario_contrast(
                     eff_formula,
                     factors,
                     c["scenario_a"],
                     c["scenario_b"],
                     float(c["sesoi"]),
+                    design_opts,
+                    sizing_formula=formula,  # the run's candidate is sized by the GLOBAL formula
                 )
             elif "L" in c and "delta" in c:
                 import numpy as np  # local import
@@ -997,18 +1086,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Merge CLI GLM flags into cfg before power config is built (CLI takes priority over YAML)
         cfg = _apply_glm_cli_args(cfg, args)
 
-        _is_multiresponse = bool(args.multi_response) or "responses" in cfg
-        if _is_multiresponse:
-            power_cfg = None
-            multi_cfg = _make_multi_response_cfg(cfg, formula, factors)
-        else:
-            power_cfg = _make_power_cfg(cfg, formula, factors)
-            multi_cfg = None
-
         # Merge CLI split-plot flags into cfg["split_plot"] (CLI takes priority over YAML)
         cfg = _apply_sp_cli_args(cfg, args)
 
+        # Design options come FIRST: a scenario contrast over a formula whose
+        # coding is learned from data must be coded against the candidate set
+        # these very options produce (UX-48).
         design_opts = _make_design_opts(cfg)
+
+        _is_multiresponse = bool(args.multi_response) or "responses" in cfg
+        if _is_multiresponse:
+            power_cfg = None
+            multi_cfg = _make_multi_response_cfg(
+                cfg, formula, factors, design_opts
+            )
+        else:
+            power_cfg = _make_power_cfg(cfg, formula, factors, design_opts)
+            multi_cfg = None
 
         # 4. Validate Output Path
         out_cfg = cfg.get("output", {})
