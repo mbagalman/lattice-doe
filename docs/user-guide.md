@@ -7788,6 +7788,18 @@ All endpoints accept JSON bodies with the same fields as the Python API.
 Constraint expressions (`constraint_expr`) are supported over HTTP;
 Python callables (`constraint_func`) are not serialisable and cannot be used.
 
+> **Security note — run locally, not on untrusted input.** Lattice DOE is
+> designed to run on your own machine with formulas you write yourself.
+> Patsy evaluates model formulas as Python expressions (this is what makes
+> transforms like `bs(x)`, `np.log(x)` and `I(a * b)` work), so a formula
+> string is effectively executable code. Do **not** expose the Streamlit
+> app or the REST API to untrusted users without putting an authentication
+> layer in front of it and restricting who can submit formulas — an
+> attacker who can send an arbitrary `formula` could run arbitrary Python
+> on the host. (The `constraint_expr` DSL is separately AST-sandboxed; this
+> caveat is specifically about the model formula.) For the intended
+> single-user, local workflow there is nothing to configure.
+
 ---
 
 #### 24.3 REST API multi-worker deployment
