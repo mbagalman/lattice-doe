@@ -188,6 +188,93 @@ def _formula_factor_codes(formula: str) -> List[str]:
         return [formula]
 
 
+#: Spline transforms whose coding is FULLY SPECIFIED — hence data-independent
+#: — when the call supplies literal knots and both bounds (UX-55).
+_SPLINE_TRANSFORMS = frozenset({"bs", "cr", "cc"})
+
+
+def _is_literal_node(node: "ast.AST") -> bool:
+    """True for a non-None constant, a signed constant, or a list/tuple of them.
+
+    ``None`` is deliberately NOT a literal here: in every parameter this
+    predicate inspects (``knots=``, ``lower_bound=``, ``upper_bound=``,
+    ``levels=``), an explicit ``None`` means "learn it from the data" — the
+    opposite of a fixed coding contract (UX-59)."""
+    if isinstance(node, ast.Constant):
+        return node.value is not None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        return isinstance(node.operand, ast.Constant) and node.operand.value is not None
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return all(_is_literal_node(e) for e in node.elts)
+    return False
+
+
+def _call_name(node: "ast.Call") -> Optional[str]:
+    fn = node.func
+    if isinstance(fn, ast.Name):
+        return fn.id
+    if isinstance(fn, ast.Attribute):
+        return fn.attr
+    return None
+
+
+def _learned_stateful_calls(code: str) -> set:
+    """Stateful-transform calls in *code* that still have parameters to LEARN.
+
+    ``bs``/``cr``/``cc`` with literal ``knots``, ``lower_bound`` and
+    ``upper_bound`` are fully specified — the coding is identical for any
+    input data, so they are NOT learned (UX-55). A ``constraints=`` argument
+    on cr/cc re-introduces data dependence (the constraint matrix is computed
+    from the data), so it disqualifies. Everything else in
+    :data:`_STATEFUL_TRANSFORMS` — center, standardize, scale, te, and any
+    spline whose knots or bounds are left to the data or supplied as
+    non-literal expressions — counts as learned."""
+    try:
+        tree = ast.parse(code.strip(), mode="eval")
+    except SyntaxError:
+        # Conservative fallback: any call-shaped stateful name is learned.
+        return set(
+            re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(", code)
+        ) & _STATEFUL_TRANSFORMS
+    learned: set = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _call_name(node)
+        if name not in _STATEFUL_TRANSFORMS:
+            continue
+        if name in _SPLINE_TRANSFORMS:
+            kw = {k.arg: k.value for k in node.keywords if k.arg}
+            fully_specified = (
+                all(
+                    k in kw and _is_literal_node(kw[k])
+                    for k in ("knots", "lower_bound", "upper_bound")
+                )
+                and "constraints" not in kw
+            )
+            if fully_specified:
+                continue
+        learned.add(name)
+    return learned
+
+
+def _c_call_with_explicit_levels(code: str) -> bool:
+    """True when *code* is a top-level ``C(..., levels=[...])`` call whose
+    level set is a literal — an explicit, data-independent coding contract
+    (UX-56)."""
+    try:
+        tree = ast.parse(code.strip(), mode="eval")
+    except SyntaxError:
+        return False
+    node = tree.body
+    if not (isinstance(node, ast.Call) and _call_name(node) == "C"):
+        return False
+    for k in node.keywords:
+        if k.arg == "levels" and _is_literal_node(k.value):
+            return True
+    return False
+
+
 def _code_calls(code: str) -> set:
     """Names of functions *called* in a factor-code expression.
 
@@ -252,18 +339,22 @@ def _coding_dependency_reason(
     # Stateful transforms (bs, cr, center, …) LEARN their parameters from the
     # data, so an internal anchor would yield a same-width but numerically
     # different contrast than the realized design coding — silently changing
-    # the estimand (UX-41). Only an actual CALL counts: a factor merely
-    # *named* `scale` codes like any other column (UX-44).
+    # the estimand (UX-41). Only an actual CALL counts (a factor merely
+    # *named* `scale` codes like any other column, UX-44), and only a call
+    # with parameters left to learn: a spline with literal knots and bounds
+    # codes identically on any data, so it is NOT data-dependent (UX-55).
     stateful = sorted(
-        set().union(*code_calls) & _STATEFUL_TRANSFORMS
-    ) if code_calls else []
+        set().union(*(_learned_stateful_calls(c) for c in codes))
+    ) if codes else []
     if stateful:
         return (
             f"Formula uses stateful Patsy transform(s) {stateful} whose "
             "coding parameters (knots, means, scales) are learned from the "
             "data, so the model coding cannot be derived from the factor "
             "specification alone — a guessed anchor would give a same-width "
-            "but numerically different contrast, with nothing to signal it."
+            "but numerically different contrast, with nothing to signal it. "
+            "(A spline with explicit literal knots=, lower_bound= and "
+            "upper_bound= is fully specified and is not affected.)"
         )
 
     # A categorical DERIVED from continuous data cannot be anchored from a
@@ -283,6 +374,12 @@ def _coding_dependency_reason(
             # Terms over categorical factors only: every level combination is
             # enumerable from the spec, so the coding is derivable.
             continue
+        if _c_call_with_explicit_levels(code):
+            # C(..., levels=[...]) with a literal level set is an explicit
+            # coding contract — the columns are fixed regardless of which
+            # values the data realizes (UX-56). A realized value outside the
+            # declared levels fails loudly at transform time.
+            continue
         if _probe is None:
             _probe = _spanning_probe(factors)
         is_cat = _derived_result_is_categorical(code, _probe)
@@ -291,7 +388,9 @@ def _coding_dependency_reason(
                 f"Formula derives categorical levels from continuous "
                 f"factor(s) {cont_refs} (term {code!r}). Which levels exist "
                 "depends on the realized data, so the model coding cannot "
-                "be derived from the factor specification alone."
+                "be derived from the factor specification alone. (An "
+                "explicit literal C(..., levels=[...]) fixes the level set "
+                "and is not affected.)"
             )
     return None
 

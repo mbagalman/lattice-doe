@@ -207,3 +207,150 @@ class TestPageNavigationPersistence:
         # hand them a snippet whose seed/size may not match the real run.
         assert "Pass coding_data=" not in errors
         assert "seed=42" not in errors
+
+    def test_spline_scenario_defaults_are_interior(self):
+        """UX-54: sampled candidates never reach the declared bounds, and a
+        spline cannot extrapolate past its outermost knots — so defaulting
+        Scenario A/B to the bounds made the supported bs() workflow fail out
+        of the box. Data-dependent codings must default strictly inside."""
+        at = self._fresh_app()
+        at.run()
+        at.session_state["formula"] = "~ 1 + bs(x, df=3)"
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+        ]
+        at.switch_page("pages/2_Power_Config.py")
+        at.session_state["power_mode"] = "contrast"
+        at.session_state["contrast_input_mode"] = "scenario"
+        at.run()
+        assert not at.exception
+        a = at.session_state["scen_a_x"]
+        b = at.session_state["scen_b_x"]
+        assert 0.0 < a < b < 1.0, f"defaults must be interior; got A={a}, B={b}"
+
+    def test_plain_formula_scenario_defaults_stay_at_bounds(self):
+        """The interior inset is scoped to data-dependent codings — ordinary
+        formulas keep the full-range defaults users are used to."""
+        at = self._fresh_app()
+        at.run()
+        at.session_state["formula"] = "~ 1 + x"
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+        ]
+        at.switch_page("pages/2_Power_Config.py")
+        at.session_state["power_mode"] = "contrast"
+        at.session_state["contrast_input_mode"] = "scenario"
+        at.run()
+        assert not at.exception
+        assert at.session_state["scen_a_x"] == 0.0
+        assert at.session_state["scen_b_x"] == 1.0
+
+    def test_scenario_defaults_migrate_when_formula_becomes_stateful(self):
+        """UX-61: the interior inset must also apply to an EXISTING session —
+        a user who starts with a linear formula (defaults at the bounds) and
+        then switches to bs() previously kept the boundary defaults and hit
+        the outermost-knots failure anyway. Automatic values migrate; values
+        the user typed do not."""
+        at = self._fresh_app()
+        at.run()
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+        ]
+        at.session_state["formula"] = "~ 1 + x"
+        at.switch_page("pages/2_Power_Config.py")
+        at.session_state["power_mode"] = "contrast"
+        at.session_state["contrast_input_mode"] = "scenario"
+        at.run()
+        assert at.session_state["scen_a_x"] == 0.0  # bound defaults first
+
+        # Switch the same session to a learned spline: autos must migrate.
+        at.session_state["formula"] = "~ 1 + bs(x, df=3)"
+        at.run()
+        assert not at.exception
+        a, b = at.session_state["scen_a_x"], at.session_state["scen_b_x"]
+        assert 0.0 < a < b < 1.0, f"stale bound defaults kept: A={a}, B={b}"
+
+        # A user-entered value must survive the next migration untouched.
+        at.session_state["scen_a_x"] = 0.42
+        at.session_state["formula"] = "~ 1 + x"
+        at.run()
+        assert at.session_state["scen_a_x"] == 0.42
+        assert at.session_state["scen_b_x"] == 1.0  # auto value migrated back
+
+    def test_analysis_page_binds_selected_compound_response(self):
+        """UX-65: for a compound multi-response run the Analysis page must
+        bind sensitivity to the SELECTED response's formula, power config and
+        per-response matrix — the global reconstruction silently analyzes a
+        different model. Exact check: nominal power for y2 equals y2's power
+        in the run report (same L, sigma and basis)."""
+        import numpy as np
+
+        from lattice_doe import DesignOptions, find_multiresponse_design
+        from lattice_doe.config import (
+            MultiResponseOptions, PowerContrastConfig, ResponseSpec,
+        )
+
+        opts = DesignOptions(candidate_points=100, random_state=4, starts=1)
+        cfg1 = PowerContrastConfig(
+            L=np.array([[0.0, 1.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.8, sigma=1.0, max_n=18,
+        )
+        cfg2 = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0, 0.0, -1.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.8, sigma=1.0, max_n=18,
+        )
+        multi = MultiResponseOptions(responses=[
+            ResponseSpec(name="y1", power_cfg=cfg1),
+            ResponseSpec(name="y2", power_cfg=cfg2,
+                         formula="~ 1 + bs(x, df=4)"),
+        ])
+        import warnings as W
+        with W.catch_warnings():
+            W.simplefilter("ignore")
+            result = find_multiresponse_design(
+                "~ 1 + x", {"x": (0.0, 1.0)}, multi, opts,
+            )
+        y2_reported = next(
+            r["power"] for r in result["report"]["responses"]
+            if r["name"] == "y2"
+        )
+
+        at = self._fresh_app()
+        at.run()
+        at.session_state["formula"] = "~ 1 + x"
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+        ]
+        at.session_state["random_state"] = 4
+        at.session_state["candidate_points"] = 100
+        at.session_state["auto_candidate"] = False
+        at.session_state["starts"] = 1
+        at.session_state["result"] = result
+        at.session_state["mr_responses"] = [
+            {"name": "y1", "power_mode": "contrast",
+             "L_text": "0 1", "delta_text": "0.5", "sigma": 1.0},
+            {"name": "y2", "power_mode": "contrast",
+             "L_text": "0 1 0 0 -1", "delta_text": "0.5", "sigma": 1.0,
+             "formula": "~ 1 + bs(x, df=4)"},
+        ]
+        at.switch_page("pages/4_Analysis.py")
+        at.run()
+        assert not at.exception
+
+        sel = next(w for w in at.selectbox if w.key == "analysis_response")
+        sel.set_value("y2").run()
+        assert not at.exception
+
+        btn = next(b for b in at.button if b.key == "btn_sensitivity")
+        btn.click().run()
+        assert not at.exception
+
+        sens = at.session_state["_sensitivity_result"]
+        assert np.isclose(sens["nominal_power"], y2_reported, atol=1e-9), (
+            f"sensitivity analyzed a different model: nominal="
+            f"{sens['nominal_power']} vs y2 reported={y2_reported}"
+        )

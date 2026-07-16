@@ -25,6 +25,13 @@ from scipy.stats import f as scipy_f
 from scipy.stats import ncf as scipy_ncf
 
 from components.power_params import scenario_contrast
+from components.mr_config import build_multi_response_cfg
+
+try:
+    from lattice_doe.utils import safe_name_slug
+except ImportError:  # pragma: no cover - core install without app extra
+    def safe_name_slug(name, existing=None, maxlen=60):  # type: ignore[misc]
+        return str(name)
 from state import init_state, render_sidebar
 
 st.set_page_config(page_title="Run & Results — Lattice DOE", layout="wide")
@@ -39,7 +46,6 @@ try:
         PowerGLMContrastConfig,
         PowerR2Config,
         MultiResponseOptions,
-        ResponseSpec,
     )
     from lattice_doe._request_builder import build_power_cfg, build_design_opts
     _HAS_IOPT = True
@@ -126,62 +132,9 @@ def _build_power_cfg(ss: dict, design_opts: DesignOptions):
 
 
 def _build_multi_response_cfg(ss: dict) -> "MultiResponseOptions":
-    """Build MultiResponseOptions from session-state mr_responses list."""
-    import numpy as np  # noqa: PLC0415
-    specs = []
-    for r in ss.get("mr_responses", []):
-        r_alpha = float(r.get("alpha", ss.get("alpha", 0.05)))
-        r_power = float(r.get("power", ss.get("power_target", 0.80)))
-        r_sigma = float(r.get("sigma", 1.0))
-        r_weight = float(r.get("weight", 1.0))
-        r_formula = r.get("formula", "").strip() or None
-        _r_mode = r.get("power_mode", "contrast")
-        if _r_mode == "glm":
-            L = _parse_matrix(r.get("L_text", ""))
-            delta = _parse_vector(r.get("delta_text", ""))
-            pcfg = build_power_cfg(dict(
-                power_mode="glm", L=L, delta=delta,
-                baseline=float(r.get("glm_baseline", 0.20)),
-                family=r.get("glm_family", "binomial"),
-                link=r.get("glm_link", "").strip() or None,
-                alpha=r_alpha, power=r_power,
-            ))
-        elif _r_mode == "contrast":
-            L = _parse_matrix(r.get("L_text", ""))
-            delta = _parse_vector(r.get("delta_text", ""))
-            pcfg = build_power_cfg(dict(
-                power_mode="contrast", L=L, delta=delta,
-                alpha=r_alpha, power=r_power, sigma=r_sigma,
-            ))
-        else:
-            pcfg = build_power_cfg(dict(
-                power_mode="r2", r2_target=float(r.get("r2_target", 0.15)),
-                alpha=r_alpha, power=r_power,
-            ))
-        specs.append(ResponseSpec(
-            name=str(r.get("name", f"R{len(specs) + 1}")),
-            power_cfg=pcfg,
-            weight=r_weight,
-            formula=r_formula,
-        ))
-    # Parse optional sigma_joint matrix
-    sigma_joint = None
-    _sj_text = ss.get("mr_sigma_joint", "").strip()
-    if _sj_text:
-        try:
-            _sj_rows = []
-            for _line in _sj_text.splitlines():
-                _line = _line.strip()
-                if _line:
-                    _sj_rows.append([float(x) for x in _line.replace(",", " ").split()])
-            sigma_joint = np.array(_sj_rows)
-        except (ValueError, Exception):
-            sigma_joint = None
-    return MultiResponseOptions(
-        responses=specs,
-        power_combination=ss.get("mr_combination", "min"),
-        sigma_joint=sigma_joint,
-    )
+    """Delegates to the shared builder (UX-65) so the Run and Analysis
+    pages can never disagree about the configured responses."""
+    return build_multi_response_cfg(ss)
 
 
 def _build_design_opts(ss: dict) -> DesignOptions:
@@ -541,6 +494,33 @@ col_dl.download_button(
     mime="text/csv",
     use_container_width=True,
 )
+_mm_dl = result.get("model_matrix") if isinstance(result, dict) else None
+if _mm_dl is not None:
+    # The exact basis the power calculation used (UX-57). For formulas
+    # whose coding is learned from the data, refitting the design CSV
+    # re-learns spline knots; analyses must use this matrix instead.
+    col_dl.download_button(
+        "⬇ Download model matrix CSV",
+        data=_mm_dl.to_csv(index=False),
+        file_name="model_matrix.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+    _mms_dl = result.get("model_matrices") if isinstance(result, dict) else None
+    if _mms_dl is not None and result.get("report", {}).get("compound_criterion"):
+        # Compound multi-response: each response was powered on its OWN
+        # formula's basis (UX-63) — offer each authority separately.
+        _mm_slugs: set = set()
+        for _rname, _rmm in _mms_dl.items():
+            _rslug = safe_name_slug(_rname, _mm_slugs)  # names are free-form (UX-67)
+            col_dl.download_button(
+                f"⬇ Model matrix: {_rname}",
+                data=_rmm.to_csv(index=False),
+                file_name=f"model_matrix_{_rslug}.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key=f"dl_mm_{_rslug}",
+            )
 st.dataframe(design_df, use_container_width=True, height=280)
 
 st.markdown("---")

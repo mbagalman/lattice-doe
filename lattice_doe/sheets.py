@@ -58,6 +58,7 @@ from .config import (
     DesignOptions, MultiResponseOptions, ResponseSpec,
 )
 from ._request_builder import build_power_cfg, build_design_opts
+from .utils import safe_name_slug
 
 # ---------------------------------------------------------------------------
 # Soft dependency guard — same pattern as plot_backends.py (Plotly)
@@ -773,6 +774,43 @@ def _write_results(
         ws_buckets.clear()
 
     ws_buckets.update("A1", _df_to_rows(buckets_df_val))
+
+    # ------------------------------------------------------------------
+    # 4. ModelMatrix sheet — the authoritative basis the power calculation
+    #    used (UX-57). For data-dependent codings a refit of the Design
+    #    sheet re-learns spline knots; analyses need this matrix instead.
+    # ------------------------------------------------------------------
+    if result.get("model_matrix") is not None:
+        ws_mm = _get_or_create_sheet(spreadsheet, "ModelMatrix")
+        if clear_results:
+            ws_mm.clear()
+        ws_mm.update("A1", _df_to_rows(result["model_matrix"]))
+
+    # ------------------------------------------------------------------
+    # 5. Compound multi-response (UX-63/UX-66): one worksheet per response
+    #    plus a name-to-worksheet index — a data-dependent response may not
+    #    be reproducible from the Design or global ModelMatrix sheets.
+    #    Worksheet titles are slugged (free-form names may contain
+    #    characters the spreadsheet API rejects); the index keeps the
+    #    original names.
+    # ------------------------------------------------------------------
+    if (
+        result.get("model_matrices") is not None
+        and report.get("compound_criterion")
+    ):
+        _mm_taken: set = {"ModelMatrix", "ModelMatrixIndex"}
+        _mm_index_rows = [["response", "worksheet"]]
+        for _rname, _rmm in result["model_matrices"].items():
+            _title = "MM_" + safe_name_slug(_rname, _mm_taken, maxlen=80)
+            ws_r = _get_or_create_sheet(spreadsheet, _title)
+            if clear_results:
+                ws_r.clear()
+            ws_r.update("A1", _df_to_rows(_rmm))
+            _mm_index_rows.append([_rname, _title])
+        ws_idx = _get_or_create_sheet(spreadsheet, "ModelMatrixIndex")
+        if clear_results:
+            ws_idx.clear()
+        ws_idx.update("A1", _mm_index_rows)
 
 
 # ---------------------------------------------------------------------------

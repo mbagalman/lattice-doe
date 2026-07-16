@@ -342,3 +342,34 @@ class TestNoSpuriousParameterCountWarning:
         pcount = [x for x in w if "parameter count" in str(x.message)]
         assert pcount == [], f"unexpected parameter-count warning(s): " \
                              f"{[str(x.message) for x in pcount]}"
+
+
+class TestSafeNameSlug:
+    """UX-67: response names are free-form and end up in filenames, sheet
+    titles and widget keys; the slug must neutralize every reserved
+    character, resolve collisions deterministically, and never be empty."""
+
+    def test_reserved_characters_neutralized(self):
+        from lattice_doe.utils import safe_name_slug
+
+        assert safe_name_slug("Yield/Day") == "Yield_Day"
+        assert safe_name_slug(r"a\b:c*d?e") == "a_b_c_d_e"
+        assert safe_name_slug('q"<>|[]') == "q______"
+        assert safe_name_slug("tab\tname") == "tab_name"
+
+    def test_collisions_resolved_deterministically(self):
+        from lattice_doe.utils import safe_name_slug
+
+        taken: set = set()
+        assert safe_name_slug("Yield/Day", taken) == "Yield_Day"
+        assert safe_name_slug("Yield:Day", taken) == "Yield_Day_2"
+        assert safe_name_slug("Yield?Day", taken) == "Yield_Day_3"
+
+    def test_truncation_and_empty_fallback(self):
+        from lattice_doe.utils import safe_name_slug
+
+        assert safe_name_slug("x" * 100, maxlen=10) == "x" * 10
+        assert safe_name_slug("... ") == "response"
+        # collision suffix respects maxlen
+        taken = {"x" * 10}
+        assert len(safe_name_slug("x" * 100, taken, maxlen=10)) <= 10

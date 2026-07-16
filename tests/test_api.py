@@ -3447,3 +3447,64 @@ class TestUX7TerminationStatus:
         assert out["report"]["target_met"] is False
         assert out["report"]["termination_reason"] in ("max_n", "max_iter",
                                              "candidate_cap")
+
+
+class TestModelMatrixContract:
+    """UX-53: the result must expose the exact basis power was computed on.
+    For data-dependent codings a refit from design_df re-learns spline knots
+    and silently yields a different basis, so the run must also warn."""
+
+    @pytest.mark.slow
+    def test_stateful_result_exposes_powered_basis_and_warns(self):
+        import warnings as W
+
+        import patsy
+
+        from lattice_doe.candidate import build_search_candidate
+        from lattice_doe.design import build_model_matrix
+
+        formula, factors = "~ 1 + bs(x, df=5)", {"x": (0.0, 1.0)}
+        opts = DesignOptions(candidate_points=200, random_state=7, starts=1)
+        cfg = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0, 0.0, 0.0, -1.0]]),
+            delta=np.array([0.5]),
+            alpha=0.05, power=0.8, sigma=1.0, max_n=40,
+        )
+        with W.catch_warnings(record=True) as caught:
+            W.simplefilter("always")
+            res = find_optimal_design(formula, factors, cfg, opts)
+
+        mm = res["model_matrix"]
+        # 1) It IS the powered matrix.
+        assert np.array_equal(np.asarray(mm), np.asarray(res["_X"]))
+        # 2) It is the CANDIDATE-coded basis, reproducible from the run's
+        #    own candidate...
+        cand, _ = build_search_candidate(formula, factors, opts)
+        di = patsy.incr_dbuilder(formula, lambda: iter([cand]))
+        (X_ref,) = patsy.build_design_matrices([di], res["design_df"])
+        assert np.allclose(np.asarray(mm), np.asarray(X_ref))
+        # 3) ...and genuinely different from a naive design_df refit.
+        X_refit, _ = build_model_matrix(formula, res["design_df"])
+        assert not np.allclose(np.asarray(mm), X_refit)
+        # 4) The run says so, loudly and in the report.
+        assert any("model_matrix" in str(w.message) for w in caught)
+        assert any("model_matrix" in w for w in res["report"]["warnings"])
+
+    def test_plain_result_exposes_matrix_without_warning(self):
+        import warnings as W
+
+        cfg = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.8, sigma=1.0, max_n=30,
+        )
+        opts = DesignOptions(candidate_points=80, random_state=3, starts=1)
+        with W.catch_warnings(record=True) as caught:
+            W.simplefilter("always")
+            res = find_optimal_design(
+                "~ 1 + x + C(g)", {"x": (0.0, 1.0), "g": ["a", "b"]},
+                cfg, opts,
+            )
+        mm = res["model_matrix"]
+        assert list(mm.columns) == ["Intercept", "C(g)[T.b]", "x"]
+        assert mm.shape == (len(res["design_df"]), 3)
+        assert not any("model_matrix" in str(w.message) for w in caught)

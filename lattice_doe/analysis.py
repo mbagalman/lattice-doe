@@ -43,8 +43,14 @@ from .config import (
     MultiResponseOptions,
 )
 from .utils import FactorSpec
-from .model_matrix import build_model_matrix
+from .model_matrix import (
+    align_contrast_to_columns,
+    build_model_matrix,
+    resolve_design_matrix,
+    tested_column_indices,
+)
 from .power import contrast_power, global_r2_power, contrast_power_sp, global_r2_power_sp, glm_contrast_power
+from .power import _r2_df_num
 from .split_plot import build_whole_plot_indicator, htc_factor_cols_from_names
 from .power_curves import (
     power_curve_by_n as _power_curve_by_n_impl,
@@ -188,6 +194,34 @@ def generate_power_curves(
 # power_sensitivity — analytical sweep on a fixed design
 # ---------------------------------------------------------------------------
 
+
+def _tested_power_inputs(
+    X: np.ndarray,
+    names: List[str],
+    formula: str,
+    design_df: pd.DataFrame,
+    power_cfg: Any,
+) -> "Tuple[Any, Optional[int]]":
+    """Align power inputs to the authoritative matrix's columns (UX-62).
+
+    A blocked run's model_matrix is the AUGMENTED model (treatment + block
+    dummies), but ``power_cfg.L`` addresses the treatment columns and the
+    R² test's numerator counts the treatment slopes only. Returns
+    ``(L_eff, r2_df_num)``: the contrast re-addressed by name into the
+    matrix's columns (unchanged for unaugmented matrices), and the
+    treatment-only numerator df for R² mode (None when every column is a
+    tested column, letting global_r2_power derive it as before)."""
+    treat_names = build_model_matrix(formula, design_df)[1]
+    tested_idx = tested_column_indices(list(names), list(treat_names))
+    L_eff = None
+    if isinstance(power_cfg, (PowerContrastConfig, PowerGLMContrastConfig)):
+        L_eff = align_contrast_to_columns(
+            np.asarray(power_cfg.L), list(treat_names), list(names)
+        )
+    r2_df = _r2_df_num(X[:, tested_idx]) if tested_idx is not None else None
+    return L_eff, r2_df
+
+
 def power_sensitivity(
     formula: str,
     factors: FactorSpec,
@@ -203,6 +237,7 @@ def power_sensitivity(
     plot_backend: str = "matplotlib",
     eta_range: Optional[Tuple[float, float]] = None,
     eta_points: int = 20,
+    model_matrix: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
     """Assess how achieved power changes when a key assumption varies.
 
@@ -265,8 +300,10 @@ def power_sensitivity(
     if design_opts is None:
         design_opts = DesignOptions()
 
-    # Rebuild X from the fixed design (no new DOE search needed)
-    X, _p_names = build_model_matrix(formula, design_df)
+    # The fixed design's matrix — honoring the run's coding authority
+    # when supplied, refusing a silent re-code otherwise (UX-57).
+    X, _p_names = resolve_design_matrix(formula, design_df, factors, model_matrix)
+    _L_eff, _r2_df = _tested_power_inputs(X, _p_names, formula, design_df, power_cfg)
     n = int(X.shape[0])
     jitter = design_opts.xtx_jitter
 
@@ -337,6 +374,7 @@ def power_sensitivity(
                 X=X,
                 alpha=power_cfg.alpha,
                 lambda_mode=power_cfg.lambda_mode,
+                df_num=_r2_df,
             )
             rows.append({
                 "r2_target": float(r2),
@@ -352,6 +390,7 @@ def power_sensitivity(
             X=X,
             alpha=power_cfg.alpha,
             lambda_mode=power_cfg.lambda_mode,
+            df_num=_r2_df,
         )
 
         fig = None
@@ -408,7 +447,7 @@ def power_sensitivity(
     rows = []
     for sigma in sigma_vals:
         pwr, lam = contrast_power(
-            L=power_cfg.L,
+            L=_L_eff,
             delta=power_cfg.delta,
             X=X,
             sigma=float(sigma),
@@ -425,7 +464,7 @@ def power_sensitivity(
 
     # Nominal power at the configured sigma (reference line)
     nominal_pwr, _ = contrast_power(
-        L=power_cfg.L,
+        L=_L_eff,
         delta=power_cfg.delta,
         X=X,
         sigma=power_cfg.sigma,
@@ -486,6 +525,7 @@ def power_curve_by_baseline(
     baseline_range: Tuple[float, float] = (0.05, 0.95),
     baseline_points: int = 30,
     design_opts: Optional["DesignOptions"] = None,
+    model_matrix: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Power as a function of GLM baseline event probability or rate.
 
@@ -532,7 +572,8 @@ def power_curve_by_baseline(
     if baseline_points < 1:
         raise ValueError("baseline_points must be >= 1.")
 
-    X, _ = build_model_matrix(formula, design_df)
+    X, _p_names = resolve_design_matrix(formula, design_df, factors, model_matrix)
+    _L_eff, _r2_df = _tested_power_inputs(X, _p_names, formula, design_df, cfg)
     jitter = design_opts.xtx_jitter
 
     baseline_vals = np.linspace(lo, hi, max(1, baseline_points))
@@ -540,6 +581,7 @@ def power_curve_by_baseline(
     for b in baseline_vals:
         _tmp = copy.copy(cfg)
         object.__setattr__(_tmp, "baseline", float(b))
+        object.__setattr__(_tmp, "L", _L_eff)  # aligned to X's columns (UX-62)
         res = glm_contrast_power(_tmp, X, jitter=jitter)
         rows.append({
             "baseline": float(b),
@@ -565,6 +607,7 @@ def min_detectable_effect(
     design_opts: Optional[DesignOptions] = None,
     tol: float = 1e-4,
     max_iter: int = 60,
+    model_matrix: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
     """Find the minimum detectable effect (MDE) for a fixed design.
 
@@ -616,7 +659,8 @@ def min_detectable_effect(
     if design_opts is None:
         design_opts = DesignOptions()
 
-    X, _ = build_model_matrix(formula, design_df)
+    X, _p_names = resolve_design_matrix(formula, design_df, factors, model_matrix)
+    _L_eff, _r2_df = _tested_power_inputs(X, _p_names, formula, design_df, power_cfg)
     n = int(X.shape[0])
     jitter = design_opts.xtx_jitter
 
@@ -625,7 +669,7 @@ def min_detectable_effect(
         # scale→0 means effect→0 (power→alpha); scale→large means power→1.
         def _pwr(scale: float) -> float:
             pwr, _ = contrast_power(
-                L=power_cfg.L,
+                L=_L_eff,
                 delta=power_cfg.delta * scale,
                 X=X,
                 sigma=power_cfg.sigma,
@@ -672,6 +716,7 @@ def min_detectable_effect(
         def _pwr_glm(scale: float) -> float:
             _tmp = copy.copy(power_cfg)
             object.__setattr__(_tmp, "delta", base_delta * scale)
+            object.__setattr__(_tmp, "L", _L_eff)  # aligned to X's columns (UX-62)
             res = glm_contrast_power(_tmp, X, jitter=jitter)
             return float(res.power)
 
@@ -720,6 +765,7 @@ def min_detectable_effect(
                 X=X,
                 alpha=power_cfg.alpha,
                 lambda_mode=power_cfg.lambda_mode,
+                df_num=_r2_df,
             )
             return float(pwr)
 
@@ -1003,6 +1049,7 @@ def robustness_report(
     plot: bool = False,
     figsize: Tuple[float, float] = (10, 4),
     plot_backend: str = "matplotlib",
+    model_matrix: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
     """Multi-axis robustness summary for a fixed design.
 
@@ -1109,7 +1156,8 @@ def robustness_report(
         design_opts = DesignOptions()
 
     # Build the model matrix once from the fixed design — all sweeps reuse X
-    X, _ = build_model_matrix(formula, design_df)
+    X, _p_names = resolve_design_matrix(formula, design_df, factors, model_matrix)
+    _L_eff, _r2_df = _tested_power_inputs(X, _p_names, formula, design_df, power_cfg)
     n = int(X.shape[0])
     jitter = design_opts.xtx_jitter
     mode = "contrast" if isinstance(power_cfg, PowerContrastConfig) else "r2"
@@ -1153,7 +1201,7 @@ def robustness_report(
     # ------------------------------------------------------------------ #
     if mode == "contrast":
         nominal_pwr, _ = contrast_power(
-            L=power_cfg.L,
+            L=_L_eff,
             delta=power_cfg.delta,
             X=X,
             sigma=power_cfg.sigma,
@@ -1166,6 +1214,7 @@ def robustness_report(
             X=X,
             alpha=power_cfg.alpha,
             lambda_mode=power_cfg.lambda_mode,
+            df_num=_r2_df,
         )
 
     # ------------------------------------------------------------------ #
@@ -1176,7 +1225,7 @@ def robustness_report(
     for ev in effect_vals:
         if mode == "contrast":
             pwr, lam = contrast_power(
-                L=power_cfg.L,
+                L=_L_eff,
                 delta=power_cfg.delta * float(ev),  # scale the nominal delta
                 X=X,
                 sigma=power_cfg.sigma,
@@ -1194,6 +1243,7 @@ def robustness_report(
                 X=X,
                 alpha=power_cfg.alpha,
                 lambda_mode=power_cfg.lambda_mode,
+                df_num=_r2_df,
             )
             effect_rows.append({
                 "r2_target": float(ev),
@@ -1212,7 +1262,7 @@ def robustness_report(
         sigma_rows = []
         for sigma in sigma_vals:
             pwr, lam = contrast_power(
-                L=power_cfg.L,
+                L=_L_eff,
                 delta=power_cfg.delta,
                 X=X,
                 sigma=float(sigma),
@@ -1234,7 +1284,7 @@ def robustness_report(
     for alpha in alpha_vals:
         if mode == "contrast":
             pwr, lam = contrast_power(
-                L=power_cfg.L,
+                L=_L_eff,
                 delta=power_cfg.delta,
                 X=X,
                 sigma=power_cfg.sigma,
@@ -1247,6 +1297,7 @@ def robustness_report(
                 X=X,
                 alpha=float(alpha),
                 lambda_mode=power_cfg.lambda_mode,
+                df_num=_r2_df,
             )
         alpha_rows.append({
             "alpha": float(alpha),

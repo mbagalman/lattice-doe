@@ -70,6 +70,34 @@ def records_to_df(records: List[Dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+def df_to_split(df: pd.DataFrame) -> Dict[str, Any]:
+    """Serialize a MODEL MATRIX as {"columns": [...], "data": [[...]]}.
+
+    JSON object member order is not part of the JSON contract, so
+    rows-as-records silently loses coefficient order under a valid
+    round trip (e.g. sort_keys=True) — and a positionally applied contrast
+    then tests a different coefficient (UX-64). JSON arrays DO preserve
+    order, so the split orientation carries it explicitly.
+    """
+    return {
+        "columns": [str(c) for c in df.columns],
+        "data": [
+            [sanitize_value(v) for v in row]
+            for row in df.itertuples(index=False, name=None)
+        ],
+    }
+
+
+def split_to_df(payload: Any) -> pd.DataFrame:
+    """Reconstruct a model matrix from the split orientation.
+
+    Accepts the Pydantic model or a plain dict; column order comes from the
+    explicit ``columns`` array, never from object-key iteration."""
+    columns = payload["columns"] if isinstance(payload, dict) else payload.columns
+    data = payload["data"] if isinstance(payload, dict) else payload.data
+    return pd.DataFrame(list(data), columns=list(columns))
+
+
 def factors_to_spec(
     factors: Dict[str, Any], formula: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -201,12 +229,21 @@ def serialize_report(report: dict) -> dict:
 
 
 def serialize_design_result(result: dict) -> dict:
-    """Convert an find_optimal_design result dict to JSON-safe form."""
-    return {
+    """Convert an find_optimal_design result dict to JSON-safe form.
+
+    ``model_matrix`` is the authoritative basis the power calculation used
+    (UX-53/UX-57); clients analyzing data-dependent codings (splines, derived
+    categoricals) must consume it rather than refitting from ``design_df``,
+    and can pass it back to the sensitivity endpoints as ``model_matrix``.
+    """
+    out = {
         "design_df": df_to_records(result["design_df"]),
         "buckets_df": df_to_records(result["buckets_df"]),
         "report": serialize_report(result["report"]),
     }
+    if result.get("model_matrix") is not None:
+        out["model_matrix"] = df_to_split(result["model_matrix"])
+    return out
 
 
 def pydantic_multi_cfg_to_dataclass(model: Any) -> MultiResponseOptions:
@@ -238,8 +275,18 @@ def serialize_multiresponse_result(result: dict) -> dict:
     joint / split-plot fields, …) lives inside ``report`` and is sanitized
     generically by ``serialize_report``.
     """
-    return {
+    out = {
         "design_df": df_to_records(result["design_df"]),
         "buckets_df": df_to_records(result["buckets_df"]),
         "report": serialize_report(result["report"]),
     }
+    if result.get("model_matrix") is not None:
+        out["model_matrix"] = df_to_split(result["model_matrix"])
+    if result.get("model_matrices") is not None:
+        # Per-response authoritative bases (UX-63): in compound mode each
+        # response's power used its OWN formula's matrix, not the global one.
+        out["model_matrices"] = {
+            name: df_to_split(df)
+            for name, df in result["model_matrices"].items()
+        }
+    return out

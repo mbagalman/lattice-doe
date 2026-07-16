@@ -336,3 +336,39 @@ design:
         err = capsys.readouterr().err
         # Phase lines only appear with --progress (or --verbose).
         assert "optimizing" not in err
+
+
+class TestHostileResponseNames:
+    """UX-67 regression: ResponseSpec accepts names like 'Yield/Day', which
+    used to raise ValueError inside Path.with_name AFTER the design search
+    completed. Files get slugged names; the report maps originals to files."""
+
+    def test_compound_export_with_path_separator_name(self, tmp_path):
+        import json
+
+        cfg = tmp_path / "mr.yml"
+        cfg.write_text(
+            "formula: '~ 1 + x'\n"
+            "factors:\n  x: [0.0, 1.0]\n"
+            "responses:\n"
+            "  - name: y1\n    sigma: 1.0\n"
+            "    contrast: {L: [[0.0, 1.0]], delta: [0.5]}\n"
+            "  - name: 'Yield/Day'\n    sigma: 1.0\n"
+            "    formula: '~ 1 + x + I(x**2)'\n"
+            "    contrast: {L: [[0.0, 1.0, 0.0]], delta: [0.5]}\n"
+            "alpha: 0.05\npower: 0.8\nmax_n: 12\n"
+            "design: {candidate_points: 40, starts: 1}\n",
+            encoding="utf-8",
+        )
+        out = tmp_path / "run"
+        rc = main([
+            "--config", str(cfg), "--out", str(out), "--allow-partial",
+        ])
+        assert rc == 0
+        assert (tmp_path / "run_model_matrix_Yield_Day.csv").exists()
+        report = json.loads(
+            (tmp_path / "run_report.json").read_text(encoding="utf-8")
+        )
+        assert report["model_matrix_files"]["Yield/Day"] == (
+            "run_model_matrix_Yield_Day.csv"
+        )

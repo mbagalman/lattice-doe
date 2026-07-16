@@ -67,6 +67,7 @@ from .config import (
     DesignOptions, MultiResponseOptions, ResponseSpec,
 )
 from .candidate import build_search_candidate
+from .utils import safe_name_slug
 from .contrasts import (
     ContrastCodingError, coding_is_data_dependent, contrast_from_scenarios,
 )
@@ -1201,6 +1202,30 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         design_df.to_csv(design_csv, index=False)
         buckets_df.to_csv(buckets_csv, index=False)
+        # The authoritative model matrix (UX-57): for data-dependent codings
+        # a refit of the design CSV re-learns spline knots / level sets, so
+        # downstream analysis needs THIS basis, not a rebuilt one.
+        _mm = result.get("model_matrix")
+        if _mm is not None:
+            model_matrix_csv = out_path.with_name(out_path.name + "_model_matrix.csv")
+            _mm.to_csv(model_matrix_csv, index=False)
+        # Compound multi-response: each response was powered on its OWN
+        # formula's basis (UX-63) — write one file per response when they
+        # can differ from the global matrix.
+        if result.get("model_matrices") is not None and report.get("compound_criterion"):
+            # Response names are free-form (e.g. "Yield/Day") and would raise
+            # inside Path.with_name — slug them, resolve collisions, and keep
+            # the original-name mapping in the report (UX-67).
+            _mm_slugs: set = set()
+            _mm_files: Dict[str, str] = {}
+            for _rname, _rmm in result["model_matrices"].items():
+                _fname = (
+                    out_path.name
+                    + f"_model_matrix_{safe_name_slug(_rname, _mm_slugs)}.csv"
+                )
+                _rmm.to_csv(out_path.with_name(_fname), index=False)
+                _mm_files[_rname] = _fname
+            report["model_matrix_files"] = _mm_files
         def _json_default(obj: Any) -> Any:
             if isinstance(obj, Path):
                 return str(obj)
@@ -1210,6 +1235,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             json.dump(report, _fh, indent=2, default=_json_default)
 
         logger.info(f"Wrote: {design_csv}")
+        if _mm is not None:
+            logger.info(f"Wrote: {model_matrix_csv}")
         logger.info(f"Wrote: {buckets_csv}")
         logger.info(f"Wrote: {report_json}")
 
@@ -1264,6 +1291,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     formula=formula,
                     factors=factors,
                     power_cfg=power_cfg,
+                    model_matrix=result.get("model_matrix"),
                 )
                 s = rob["summary"]
                 t = rob["thresholds"]

@@ -362,3 +362,21 @@ class MultiResponseOptionsModel(StrictRequestModel):
             "Only valid when all responses share the same formula and use contrast mode."
         ),
     )
+
+
+class MatrixSplitModel(BaseModel):
+    """A model matrix with EXPLICIT column order.
+
+    JSON object member order is not contractual, so rows-as-records can
+    silently permute coefficients under a valid round trip (sort_keys=True);
+    a positionally applied contrast then tests a different coefficient
+    (UX-64). JSON arrays preserve order, so columns travel as an array and
+    rows as arrays aligned to it.
+    """
+
+    columns: List[str] = Field(
+        ..., description="Parameter names, in the order the rows are laid out."
+    )
+    data: List[List[float]] = Field(
+        ..., description="Matrix rows, each aligned to `columns`."
+    )

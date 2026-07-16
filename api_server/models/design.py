@@ -11,6 +11,7 @@ from .common import StrictRequestModel
 from api_server.models.common import (
     DesignOptionsModel,
     FactorSpec,
+    MatrixSplitModel,
     MultiResponseOptionsModel,
     PowerCfgModel,
 )
@@ -91,6 +92,16 @@ class DesignResponse(BaseModel):
     )
     buckets_df: List[Dict[str, Any]] = Field(
         ..., description="Unique run frequencies."
+    )
+    model_matrix: Optional[MatrixSplitModel] = Field(
+        default=None,
+        description=(
+            "The authoritative model matrix (n x p records, parameter-"
+            "named columns) the power calculation used. For formulas "
+            "whose coding is learned from the data, analyze against "
+            "this (and pass it to the sensitivity endpoints) instead of "
+            "refitting from design_df (UX-57)."
+        ),
     )
     report: ReportModel
 
@@ -187,5 +198,25 @@ class MultiResponseDesignResponse(BaseModel):
     )
     buckets_df: List[Dict[str, Any]] = Field(
         ..., description="Unique run-frequency buckets."
+    )
+    model_matrix: Optional[MatrixSplitModel] = Field(
+        default=None,
+        description=(
+            "The authoritative model matrix (n x p records, parameter-"
+            "named columns) the power calculation used. For formulas "
+            "whose coding is learned from the data, analyze against "
+            "this (and pass it to the sensitivity endpoints) instead of "
+            "refitting from design_df (UX-57)."
+        ),
+    )
+    model_matrices: Optional[Dict[str, MatrixSplitModel]] = Field(
+        default=None,
+        description=(
+            "Per-response authoritative model matrices, ordered as "
+            "configured. In compound mode (per-response formulas) each "
+            "response's power used its own matrix — analyze that "
+            "response against model_matrices[name], not model_matrix "
+            "(UX-63)."
+        ),
     )
     report: MultiResponseReportModel

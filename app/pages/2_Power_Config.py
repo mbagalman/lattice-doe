@@ -375,16 +375,56 @@ to find the index of each parameter.
             hcols[1].markdown("**Scenario A**")
             hcols[2].markdown("**Scenario B**")
 
+            # When the formula's coding is learned from the run's candidate
+            # set (splines etc.), that candidate is sampled strictly INSIDE
+            # the declared bounds, and a spline cannot extrapolate past its
+            # outermost knots — so scenario defaults AT the bounds are
+            # guaranteed to fail at run time (UX-54). Default such runs to
+            # interior values instead (10% in from each bound).
+            _interior_defaults = False
+            if _HAS_IOPT and formula.strip():
+                try:
+                    from lattice_doe.contrasts import coding_is_data_dependent
+
+                    _interior_defaults = (
+                        coding_is_data_dependent(formula, _factors_to_spec(factors))
+                        is not None
+                    )
+                except Exception:
+                    _interior_defaults = False
+            if _interior_defaults:
+                st.caption(
+                    "Continuous scenario defaults start 10% inside the "
+                    "factor bounds: this formula's coding is learned from "
+                    "sampled candidate data, which never quite reaches them."
+                )
+
             for f in factors:
                 fname = f["name"] or "(unnamed)"
                 cols = st.columns([2, 2.5, 2.5])
                 cols[0].markdown(f"`{fname}`")
 
                 if f["type"] == "Continuous":
-                    if f"scen_a_{fname}" not in st.session_state:
-                        st.session_state[f"scen_a_{fname}"] = f["low"]
-                    if f"scen_b_{fname}" not in st.session_state:
-                        st.session_state[f"scen_b_{fname}"] = f["high"]
+                    _lo, _hi = float(f["low"]), float(f["high"])
+                    _inset = 0.1 * (_hi - _lo) if _interior_defaults else 0.0
+                    # Track which values WE set, so a later formula change can
+                    # migrate stale automatic defaults (bounds <-> interior)
+                    # without ever clobbering a user-entered value (UX-61).
+                    _auto = st.session_state.setdefault("_scen_auto_defaults", {})
+                    for _key, _default in (
+                        (f"scen_a_{fname}", _lo + _inset),
+                        (f"scen_b_{fname}", _hi - _inset),
+                    ):
+                        if _key not in st.session_state:
+                            st.session_state[_key] = _default
+                            _auto[_key] = _default
+                        elif (
+                            _key in _auto
+                            and st.session_state[_key] == _auto[_key]
+                            and _auto[_key] != _default
+                        ):
+                            st.session_state[_key] = _default
+                            _auto[_key] = _default
                     cols[1].number_input(
                         f"A:{fname}",
                         key=f"scen_a_{fname}",

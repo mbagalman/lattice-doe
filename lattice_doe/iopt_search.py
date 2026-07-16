@@ -1176,6 +1176,20 @@ def augment_design(
     No new I-optimal search is performed — the augmentation is a greedy
     one-point-at-a-time exchange that is fast relative to a full design rebuild.
 
+    Coding-authority contract (UX-53/UX-58)
+    ----------------------------------------
+    One model coding is learned — from the existing design rows and the fresh
+    candidate together — and BOTH matrices are transformed against it. This
+    guarantees (a) a single basis inside the exchange scores even when the
+    formula has data-learned parameters (spline knots, derived categorical
+    levels), and (b) that existing rows sitting on the factor bounds, which a
+    sampled candidate never reaches, remain transformable. Note that for
+    data-dependent codings this augmentation basis is therefore NOT the
+    original design run's basis (which was learned from that run's candidate
+    alone); to keep a single basis across the whole workflow, make the coding
+    explicit in the formula (``bs(x, knots=[...], lower_bound=...,
+    upper_bound=...)``; ``C(..., levels=[...])``).
+
     Common use cases
     ----------------
     - Preliminary data already exists and additional runs must be added
@@ -1237,14 +1251,32 @@ def augment_design(
     # the single definition of the candidate set a run with these design_opts
     # selects from (UX-48).
     cand, candidate_points = build_search_candidate(formula, factors, design_opts)
-    X_cand, _ = build_model_matrix(formula, cand)
+
+    # ONE coding for both matrices: the DesignInfo is learned from the
+    # EXISTING design rows and the candidate together, then both frames are
+    # transformed against it. Coding each frame separately would vstack two
+    # different bases when the formula has data-learned parameters (spline
+    # knots, derived categorical levels) — same widths, silently inconsistent
+    # scores (UX-53). The existing rows MUST be part of the scan: a sampled
+    # candidate stays strictly inside the declared bounds, so a normal seed
+    # design containing boundary points would otherwise fall outside the
+    # learned spline knots and fail to transform at all (UX-58).
+    import patsy as _patsy
+
+    _factor_cols = [c for c in design_df.columns if c in cand.columns]
+    _aug_di = _patsy.incr_dbuilder(
+        formula, lambda: iter([design_df[_factor_cols], cand])
+    )
+    (X_cand,) = _patsy.build_design_matrices([_aug_di], cand)
+    X_cand = np.asarray(X_cand)
     N_cand = X_cand.shape[0]
 
     # Pre-compute candidate moment matrix once (used by I-criterion only)
     Mcand = X_cand.T @ X_cand if criterion == "I" else None
 
     # Initialise X_current from the existing (fixed) design
-    X_current, _ = build_model_matrix(formula, design_df)
+    (X_current,) = _patsy.build_design_matrices([_aug_di], design_df)
+    X_current = np.asarray(X_current)
 
     new_rows: List[pd.DataFrame] = []
     for _step in range(m):

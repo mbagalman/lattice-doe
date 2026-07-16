@@ -501,8 +501,10 @@ For ordinary formulas — main effects, `:` and `*` interactions, `C(...)` on a 
 
 Some formulas, though, have a coding that *cannot* be known from the factor spec, because it is learned from the actual data rows:
 
-- **Stateful transforms** — `bs`, `cr`, `cc`, `te`, `center`, `standardize`, `scale`. A spline's knots are placed at quantiles of the observed values; `center` subtracts the observed mean. Feed the same formula different rows and you get columns that are the same in number but different in value.
-- **Categoricals derived from continuous factors** — for example `C(I(x // 1))`, where which levels exist depends on which values of `x` were realized.
+- **Stateful transforms with learned parameters** — `bs`, `cr`, `cc`, `te`, `center`, `standardize`, `scale`. A spline's knots are placed at quantiles of the observed values; `center` subtracts the observed mean. Feed the same formula different rows and you get columns that are the same in number but different in value.
+- **Categoricals derived from continuous factors** — for example `C(I(x // 1))` or `I(np.where(x < 0.5, "lo", "hi"))`, where which levels exist depends on which values of `x` were realized.
+
+> **The clean way out: specify the coding explicitly.** A spline with literal knots and bounds — `bs(x, knots=[0.3, 0.6], lower_bound=0.0, upper_bound=1.0)` — codes identically on any data, so *none* of this section applies to it: the scenario builder previews it, split-plot runs accept it, and a downstream refit reproduces the powered basis exactly. The same goes for a derived categorical with an explicit level set: `C(I(x > 0.5), levels=[False, True])`. Prefer these forms whenever you can choose the knots and levels yourself.
 
 In both cases a contrast built from a guessed anchor would be the right *width* but the wrong *numbers* — a silently incorrect estimand rather than a loud failure. So `contrast_from_scenarios` refuses, raising `ContrastCodingError` (a `ValueError` subclass), unless you name the coding authority explicitly with `coding_data`.
 
@@ -568,7 +570,7 @@ result = find_optimal_design(
 )
 ```
 
-The return value is a dict with three keys.
+The return value is a dict with four keys.
 
 **`result["design_df"]`** is a DataFrame with `n` rows, one per experimental run. Each row gives the factor settings for that run:
 
@@ -583,6 +585,14 @@ The return value is a dict with three keys.
 ```
 
 For this problem the design has `n = 70` runs. You will notice that all runs are at concentrations very close to either 0.0 or 2.0 mol/L, with none in the middle range. This is not a coincidence: for a linear slope model, the I-optimal design maximises information about the slope by placing runs at the extreme ends of the range. A middle-of-the-range run contributes less information per run about the slope than an extreme-range run, so the exchange algorithm discards it.
+
+**`result["model_matrix"]`** is the design's model matrix (`n × p` DataFrame, columns named after the model parameters), coded from the run's own data — the exact basis the power calculation used. Every mode carries it: ordinary, blocked (augmented-model columns), split-plot (the GLS matrix), and multi-response (the global-formula matrix). For ordinary formulas this is the same matrix any refit of `design_df` would produce. For formulas whose coding is learned from the data (splines with learned knots, derived categorical levels — see §3.3), it is **not**: refitting from the exported `design_df` re-learns the spline knots from those `n` rows, giving a same-shaped but numerically different basis than the one that was powered. In that case analyze against `result["model_matrix"]`, or make the coding explicit in the formula (`bs(x, knots=[...], lower_bound=..., upper_bound=...)`; `C(..., levels=[...])`) so any refit reproduces it. The run emits a `RuntimeWarning` (also recorded in `report["warnings"]`) whenever this caveat applies.
+
+For blocked designs the matrix is the **augmented** model (treatment columns plus block dummies), and `report["nuisance_columns"]` names the dummies. You do not need to adjust your contrast for this: the analysis functions re-address `L` into the augmented columns by name and use the treatment-only numerator df for R² tests — the same alignment `find_optimal_design` itself applies — so their nominal power matches the run's achieved power exactly.
+
+**Multi-response results additionally carry `result["model_matrices"]`** — one matrix per response, in configured order. For ordinary multi-response runs these all equal `model_matrix`; in **compound** mode (per-response formulas) each response's power was computed on its *own* formula's matrix over the shared design rows, so `model_matrices[name]` — not the global `model_matrix` — is that response's authority. The data-dependent-coding check runs over every response formula, and the warning names the affected responses. The CLI writes one `_model_matrix_<response>.csv` per response for compound runs (free-form response names are slugged for filenames; `report["model_matrix_files"]` maps original names to files), the app offers per-response downloads, the REST multi-response payload includes `model_matrices`, and the Excel/Google Sheets connectors write one `MM_<slug>` sheet per response plus a `ModelMatrixIndex` sheet mapping original names to sheet titles. On the app's Analysis page, a multi-response run shows a response selector, and sensitivity/MDE bind to the selected response's formula, power configuration and matrix.
+
+The matrix travels with the result everywhere: the CLI writes `<basename>_model_matrix.csv`, the app's Run page offers it as a download, and the REST design responses include a `model_matrix` field. Over the wire, matrices use the split orientation `{"columns": [...], "data": [[...]]}` — JSON object member order is not contractual, so rows-as-records could silently permute coefficients under a valid re-serialization (`sort_keys=True`), and a positionally applied contrast would then test a different coefficient. Reconstruct using the explicit `columns` array (the sensitivity/MDE endpoints accept the same shape back). The fixed-design analysis functions — `power_sensitivity`, `power_curve_by_baseline`, `min_detectable_effect`, `robustness_report` (and the REST sensitivity/MDE endpoints) — accept `model_matrix=` and **refuse** a data-dependent formula without it rather than silently rebuilding a different basis; the app's Analysis page passes it automatically.
 
 **`result["buckets_df"]`** groups identical-or-near-identical run settings and shows replication counts. For continuous factors, floating-point values rarely match exactly even when the design intends repetition, so buckets often show count = 1 per row. The pattern in the factor values (concentrations clustered near 0 and near 2) is still clearly visible.
 

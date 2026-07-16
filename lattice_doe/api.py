@@ -25,7 +25,7 @@ compare_criteria) live in ``analysis.py`` and are re-exported via
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Dict, List, Optional, Union, Any, Literal, Callable
+from typing import Dict, List, Optional, Tuple, Union, Any, Literal, Callable, cast
 import math
 import time
 import numpy as np
@@ -37,7 +37,8 @@ from .config import glm_fisher_weight
 from .candidate import (
     build_candidate, build_split_plot_candidate, build_search_candidate,
 )
-from .model_matrix import build_model_matrix
+from .contrasts import coding_is_data_dependent
+from .model_matrix import build_model_matrix, align_contrast_to_columns
 from .iopt_search import build_i_opt_design_with_idx, build_split_plot_design, build_compound_design
 from .split_plot import (
     build_whole_plot_indicator, htc_factor_cols_from_names,
@@ -177,22 +178,142 @@ def _termination_fields(
     }
 
 
-def _mr_envelope(design_df: "pd.DataFrame", report: Dict[str, Any]) -> Dict[str, Any]:
+def _attach_model_matrix(
+    result: Dict[str, Any],
+    X: "np.ndarray",
+    col_names: Optional[List[str]],
+    formula: str,
+    factors: "FactorSpec",
+    run_warnings: Optional[List[str]] = None,
+    warn: bool = True,
+) -> Dict[str, Any]:
+    """Attach the authoritative model matrix and its coding caveat (UX-53).
+
+    Every public result — single-response, split-plot, blocked, and the
+    multi-response envelope — passes through here (UX-57): power was computed
+    on *X*, coded from the run's own data, and for data-dependent codings a
+    downstream refit from ``design_df`` re-learns those parameters and yields
+    a numerically different basis.
+
+    *col_names* is used when its length matches; otherwise generic ``x0..``
+    names are substituted. When *run_warnings* is given the caveat is appended
+    there (the caller folds it into the report later); otherwise it is
+    appended directly to ``result["report"]["warnings"]``.
+    """
+    X = np.asarray(X)
+    cols = (
+        list(col_names)
+        if col_names is not None and len(col_names) == X.shape[1]
+        else [f"x{j}" for j in range(X.shape[1])]
+    )
+    result["model_matrix"] = pd.DataFrame(
+        X, columns=cols, index=result["design_df"].index
+    )
+    coding_note = coding_is_data_dependent(formula, factors) if warn else None
+    if coding_note is not None:
+        msg = (
+            "The model coding is learned from the run's own data: "
+            + coding_note
+            + " Rebuilding the model matrix from design_df (e.g. a patsy/"
+            "statsmodels refit of the exported design) re-learns those "
+            "parameters and yields a numerically different basis than the "
+            "one this power calculation used. Analyze against "
+            "result['model_matrix'], or make the coding explicit in the "
+            "formula (bs(x, knots=[...], lower_bound=..., upper_bound=...); "
+            "C(..., levels=[...]))."
+        )
+        warnings.warn(msg, RuntimeWarning)
+        if run_warnings is not None:
+            run_warnings.append(msg)
+        else:
+            result["report"].setdefault("warnings", []).append(msg)
+    return result
+
+
+def _names_for(formula: str, design_df: "pd.DataFrame", width: int) -> Optional[List[str]]:
+    """Parameter names for a width-*width* matrix of *formula* over *design_df*.
+
+    Names do not depend on learned coding values, so deriving them from the
+    design rows is safe; the width check guards the level-subset case. Returns
+    None when the names cannot be derived or do not match."""
+    try:
+        _, names = build_model_matrix(formula, design_df)
+    except Exception:
+        return None
+    return list(names) if len(names) == width else None
+
+
+def _mr_envelope(
+    design_df: "pd.DataFrame",
+    report: Dict[str, Any],
+    X: "Optional[np.ndarray]" = None,
+    formula: Optional[str] = None,
+    factors: "Optional[FactorSpec]" = None,
+    responses: "Optional[List[Tuple[str, str, np.ndarray, Optional[List[str]]]]]" = None,
+) -> Dict[str, Any]:
     """Wrap a multi-response result in the unified envelope (UX-6).
 
     Both ``find_optimal_design`` and ``find_multiresponse_design`` return
-    exactly ``{"design_df", "buckets_df", "report"}``. The multi-response
-    metadata that used to live at the top level (``n``, ``achieved_power``,
-    ``responses``, joint/split-plot fields, …) now lives inside ``report``, so
-    every consumer reads ``result["design_df"]`` and ``result["report"][...]``
-    regardless of mode. This is a hard switch: the former ``design`` /
-    ``buckets`` / flat keys are gone.
+    the same envelope (``design_df``, ``model_matrix``, ``buckets_df``,
+    ``report``). The multi-response metadata that used to live at the top
+    level (``n``, ``achieved_power``, ``responses``, joint/split-plot fields,
+    …) now lives inside ``report``, so every consumer reads
+    ``result["design_df"]`` and ``result["report"][...]`` regardless of mode.
+
+    ``X`` is the GLOBAL-formula model matrix; it becomes ``model_matrix``.
+    *responses* is ``[(name, effective_formula, X_k, names_k), ...]`` — the
+    per-response bases each response's power was actually computed on. They
+    become ``model_matrices[name]`` (ordered as configured), which is the
+    authority for a response whose formula differs from the global one
+    (compound mode, UX-63): the global matrix is NOT what such a response
+    was powered on. The data-dependent-coding check runs over EVERY
+    effective formula, and one consolidated warning names the affected
+    responses.
     """
-    return {
+    env: Dict[str, Any] = {
         "design_df": design_df,
         "buckets_df": _buckets_df(design_df),
         "report": report,
     }
+    if X is not None and formula is not None and factors is not None:
+        _attach_model_matrix(
+            env, X, _names_for(formula, design_df, np.asarray(X).shape[1]),
+            formula, factors,
+            warn=responses is None,  # consolidated per-response warning below
+        )
+    if responses is not None and factors is not None:
+        mats: Dict[str, pd.DataFrame] = {}
+        _note_cache: Dict[str, Optional[str]] = {}
+        affected: List[Tuple[str, str]] = []
+        for name, f_k, X_k, names_k in responses:
+            X_k = np.asarray(X_k)
+            cols = (
+                list(names_k)
+                if names_k is not None and len(names_k) == X_k.shape[1]
+                else [f"x{j}" for j in range(X_k.shape[1])]
+            )
+            mats[name] = pd.DataFrame(X_k, columns=cols, index=design_df.index)
+            if f_k not in _note_cache:
+                _note_cache[f_k] = coding_is_data_dependent(f_k, factors)
+            if _note_cache[f_k] is not None:
+                affected.append((name, f_k))
+        env["model_matrices"] = mats
+        if affected:
+            _resp_desc = "; ".join(f"'{n}' ({f!r})" for n, f in affected)
+            msg = (
+                "The model coding for response(s) "
+                + _resp_desc
+                + " is learned from the run's own data. Rebuilding a model "
+                "matrix from design_df re-learns those parameters and yields "
+                "a numerically different basis than the one each response's "
+                "power calculation used. Analyze each response against "
+                "result['model_matrices'][name], or make the coding explicit "
+                "in the formula (bs(x, knots=[...], lower_bound=..., "
+                "upper_bound=...); C(..., levels=[...]))."
+            )
+            warnings.warn(msg, RuntimeWarning)
+            env["report"].setdefault("warnings", []).append(msg)
+    return env
 
 
 def _candidate_cap_warning(max_n: int, capped_max_n: int, n_cand: int) -> str:
@@ -254,7 +375,17 @@ def find_optimal_design(
     Returns
     -------
     dict with keys:
-      - design_df (DataFrame)     : chosen design (n x k)
+      - design_df (DataFrame)     : chosen design (n x k), factor space
+      - model_matrix (DataFrame)  : the design's model matrix (n x p), coded
+        from the run's candidate set — the exact basis this power calculation
+        used. When the formula's coding is learned from the data (spline
+        knots, derived categorical levels), re-deriving the matrix from
+        design_df re-learns those parameters and yields a numerically
+        different basis (UX-53); downstream analysis must use this matrix, or
+        the formula must fix its parameters explicitly (``bs(x, knots=[...],
+        lower_bound=..., upper_bound=...)``, ``C(..., levels=[...])``). A
+        RuntimeWarning (also recorded in ``report["warnings"]``) flags such
+        formulas.
       - buckets_df (DataFrame)    : frequency of unique rows
       - report (dict)             : iteration info, dfs, power, λ, diagnostics, etc.
     """
@@ -397,22 +528,13 @@ def find_optimal_design(
         q = power_cfg.L.shape[0]
         if power_cfg.delta.shape != (q,):
             raise ValueError(f"delta must be shape ({q},), got {power_cfg.delta.shape}.")
-        # Align L to the augmented (blocked) model matrix by column name.
-        # Patsy orders categorical terms (including the block dummies) before
-        # numeric terms, so the block columns are not necessarily trailing and
-        # positional zero-padding would aim contrast rows at the wrong effects.
+        # Align L to the augmented (blocked) model matrix by column name —
+        # shared with the fixed-design analysis functions so the two can
+        # never disagree (UX-62).
         if is_blocked and p_block_cols > 0:
-            _aug_pos = {name: j for j, name in enumerate(_aug_col_names)}
-            _missing = [nm for nm in _treat_col_names if nm not in _aug_pos]
-            if _missing:
-                raise ValueError(
-                    f"Treatment model columns {_missing} were not found in the "
-                    f"augmented blocked model matrix (columns: {_aug_col_names}); "
-                    "cannot align the contrast matrix L to the blocked design."
-                )
-            L_eff = np.zeros((q, p_full))
-            for _j, _nm in enumerate(_treat_col_names):
-                L_eff[:, _aug_pos[_nm]] = power_cfg.L[:, _j]
+            L_eff = align_contrast_to_columns(
+                power_cfg.L, list(_treat_col_names), list(_aug_col_names)
+            )
         else:
             L_eff = power_cfg.L
     else:
@@ -420,7 +542,7 @@ def find_optimal_design(
 
     # GLM power reads L from its config object; give it the aligned L when blocked.
     if mode == "glm" and L_eff is not None and L_eff is not power_cfg.L:
-        glm_cfg_eff = replace(power_cfg, L=L_eff)
+        glm_cfg_eff: Any = replace(cast(PowerGLMContrastConfig, power_cfg), L=L_eff)
     else:
         glm_cfg_eff = power_cfg
 
@@ -494,7 +616,7 @@ def find_optimal_design(
                 )
                 try:
                     pr_ = contrast_power_sp(
-                        L_eff, power_cfg.delta, X_, Z_,
+                        cast(np.ndarray, L_eff), power_cfg.delta, X_, Z_,
                         sigma_sp=sigma_sp, eta=sp_opts.eta, alpha=power_cfg.alpha,
                         df_method=sp_opts.df_method, jitter=design_opts.xtx_jitter,
                         htc_factor_cols=_htc_cols,
@@ -769,6 +891,15 @@ def find_optimal_design(
                 force=True,
             )
 
+        # Same four-key contract as every other mode (UX-57): the split-plot
+        # GLS matrix is the basis power used, and it comes from separately
+        # built WP/SP pools — a design_df refit re-learns any data-dependent
+        # coding from just these n rows.
+        _attach_model_matrix(
+            best, best["_X"],
+            _names_for(formula, best["design_df"], np.asarray(best["_X"]).shape[1]),
+            formula, factors,
+        )
         best.pop("_n_wp", None)
         best.pop("_X", None)
         return best
@@ -914,7 +1045,7 @@ def find_optimal_design(
             df_num = int(np.linalg.matrix_rank(power_cfg.L))
         elif mode == "contrast":
             power, lam = contrast_power(
-                L=L_eff, delta=power_cfg.delta, X=X,
+                L=cast(np.ndarray, L_eff), delta=power_cfg.delta, X=X,
                 sigma=power_cfg.sigma, alpha=power_cfg.alpha,
                 jitter=design_opts.xtx_jitter,
             )
@@ -988,7 +1119,7 @@ def find_optimal_design(
                     df_num = int(np.linalg.matrix_rank(power_cfg.L))
                 elif mode == "contrast":
                     power, lam = contrast_power(
-                        L=L_eff, delta=power_cfg.delta, X=X,
+                        L=cast(np.ndarray, L_eff), delta=power_cfg.delta, X=X,
                         sigma=power_cfg.sigma, alpha=power_cfg.alpha,
                         jitter=design_opts.xtx_jitter,
                     )
@@ -1144,7 +1275,7 @@ def find_optimal_design(
                 df_num_v = int(np.linalg.matrix_rank(power_cfg.L))
             elif mode == "contrast":
                 power_v, lam_v = contrast_power(
-                    L=L_eff, delta=power_cfg.delta, X=X_v,
+                    L=cast(np.ndarray, L_eff), delta=power_cfg.delta, X=X_v,
                     sigma=power_cfg.sigma, alpha=power_cfg.alpha,
                     jitter=design_opts.xtx_jitter,
                 )
@@ -1266,6 +1397,32 @@ def find_optimal_design(
     if np.isnan(best["report"]["achieved_power"]):
          raise RuntimeError(f"Result validation failed: Final reported power is NaN.")
     # --- End validation ---
+
+    # --- Expose the authoritative model matrix (UX-53/UX-57) ---
+    # Blocked runs power the AUGMENTED model (treatment + block dummies), so
+    # their parameter names come from the augmented formula (UX-60).
+    if is_blocked:
+        _mm_names: Optional[List[str]] = (
+            list(_aug_col_names)
+            if len(_aug_col_names) == final_X.shape[1]
+            else _names_for(aug_formula, best["design_df"], final_X.shape[1])
+        )
+    else:
+        _mm_names = (
+            list(_treat_col_names)
+            if len(_treat_col_names) == final_X.shape[1]
+            else None
+        )
+    _attach_model_matrix(
+        best, final_X, _mm_names, formula, factors, run_warnings=_run_warnings,
+    )
+    if is_blocked and _mm_names is not None:
+        # Tested-versus-nuisance metadata (UX-62): the block dummies are
+        # adjustment columns, never tested predictors. Analysis functions
+        # separate them by name; this records the split for external readers.
+        best["report"]["nuisance_columns"] = [
+            c for c in _mm_names if c not in list(_treat_col_names)
+        ]
 
     # --- Enrich final report with run-metadata ---
     best["report"].update({
@@ -1768,7 +1925,13 @@ def find_multiresponse_design(
                 it_count=it,
                 max_iter=max_iter,
             ),
-        })
+        }, X=best["_X"], formula=formula, factors=factors,
+            responses=[
+                (r.name, formula, best["_X"],
+                 _names_for(formula, best["_design_df"],
+                            np.asarray(best["_X"]).shape[1]))
+                for r in multi_cfg.responses
+            ])
 
     # =========================================================================
     # OLS compound-criterion path (responses with different formulas)
@@ -1988,7 +2151,12 @@ def find_multiresponse_design(
                 it_count=it_c,
                 max_iter=max_iter,
             ),
-        })
+        }, X=X_cand[best_c["_idx"], :], formula=formula, factors=factors,
+            responses=[
+                (r.name, r.formula if r.formula is not None else formula,
+                 candidates_list[_k][best_c["_idx"], :], p_names_list[_k])
+                for _k, r in enumerate(multi_cfg.responses)
+            ])
 
     # =========================================================================
     # OLS path (shared formula)
@@ -2300,7 +2468,12 @@ def find_multiresponse_design(
             target_power=target,
             force=True,
         )
-    return _mr_envelope(best["_design_df"], _report)
+    return _mr_envelope(best["_design_df"], _report,
+                        X=best["_X"], formula=formula, factors=factors,
+                        responses=[
+                            (r.name, formula, best["_X"], list(p_names_global))
+                            for r in multi_cfg.responses
+                        ])
 
 
 __all__ = ["find_optimal_design", "find_multiresponse_design"]

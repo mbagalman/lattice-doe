@@ -860,3 +860,63 @@ class TestExcelGLMSupport:
                 for r in range(1, ws.max_row + 1)
             ]
             assert "baseline" in col_a_values
+
+
+class TestCompoundMatrixExcelExport:
+    """UX-66: the Excel writer must export every compound per-response
+    matrix as a safely named sheet plus a name-to-sheet index (sheet titles
+    cap at 31 chars and forbid path separators)."""
+
+    @staticmethod
+    def _compound_result():
+        design_df = pd.DataFrame({"x1": [0.1, 0.5]})
+        return {
+            "design_df": design_df,
+            "buckets_df": pd.DataFrame({"x1": [0.1], "count": [2]}),
+            "report": {"n": 2, "compound_criterion": True,
+                       "achieved_power": 0.5, "warnings": []},
+            "model_matrix": pd.DataFrame({"Intercept": [1.0, 1.0],
+                                          "x1": [0.1, 0.5]}),
+            "model_matrices": {
+                "y1": pd.DataFrame({"Intercept": [1.0, 1.0],
+                                    "x1": [0.1, 0.5]}),
+                "Yield/Day": pd.DataFrame({"Intercept": [1.0, 1.0],
+                                           "bs(x1)[0]": [0.2, 0.3]}),
+            },
+        }
+
+    def test_per_response_sheets_and_index(self):
+        import openpyxl
+
+        from lattice_doe.excel_template import _write_output_sheets
+
+        res = self._compound_result()
+        wb = openpyxl.Workbook()
+        _write_output_sheets(wb, res, res["report"],
+                             res["design_df"], res["buckets_df"])
+
+        for expected in ("ModelMatrix", "MM_y1", "MM_Yield_Day",
+                         "ModelMatrixIndex"):
+            assert expected in wb.sheetnames, wb.sheetnames
+
+        idx = wb["ModelMatrixIndex"]
+        rows = [tuple(c.value for c in r) for r in idx.iter_rows()]
+        assert ("response", "sheet") == rows[0]
+        assert ("Yield/Day", "MM_Yield_Day") in rows   # original name kept
+
+        mm2 = wb["MM_Yield_Day"]
+        header = [c.value for c in next(mm2.iter_rows())]
+        assert header == ["Intercept", "bs(x1)[0]"]
+
+    def test_non_compound_writes_no_extra_sheets(self):
+        import openpyxl
+
+        from lattice_doe.excel_template import _write_output_sheets
+
+        res = self._compound_result()
+        res["report"]["compound_criterion"] = False
+        wb = openpyxl.Workbook()
+        _write_output_sheets(wb, res, res["report"],
+                             res["design_df"], res["buckets_df"])
+        assert "ModelMatrixIndex" not in wb.sheetnames
+        assert not any(n.startswith("MM_") for n in wb.sheetnames)

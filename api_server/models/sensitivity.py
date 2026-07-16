@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from .common import StrictRequestModel
 
 from api_server.models.common import DesignOptionsModel, FactorSpec, PowerCfgModel
+from api_server.models.common import MatrixSplitModel
 
 
 class SensitivityRequest(StrictRequestModel):
@@ -20,6 +21,16 @@ class SensitivityRequest(StrictRequestModel):
     design_df: List[Dict[str, Any]] = Field(
         ...,
         description="Fixed design matrix as rows-of-records (from a prior /design call).",
+    )
+    model_matrix: Optional[MatrixSplitModel] = Field(
+        default=None,
+        description=(
+            "The design run's authoritative model matrix "
+            "(result['model_matrix'] records). REQUIRED when the "
+            "formula's coding is learned from the data (splines, "
+            "derived categoricals): rebuilding from design_df would "
+            "silently evaluate a different basis (UX-57)."
+        ),
     )
     sigma_range: Tuple[float, float] = Field(
         (0.5, 2.0),
@@ -49,6 +60,16 @@ class MdeRequest(StrictRequestModel):
     design_df: List[Dict[str, Any]] = Field(
         ...,
         description="Fixed design matrix as rows-of-records.",
+    )
+    model_matrix: Optional[MatrixSplitModel] = Field(
+        default=None,
+        description=(
+            "The design run's authoritative model matrix "
+            "(result['model_matrix'] records). REQUIRED when the "
+            "formula's coding is learned from the data (splines, "
+            "derived categoricals): rebuilding from design_df would "
+            "silently evaluate a different basis (UX-57)."
+        ),
     )
     formula: str
     factors: Dict[str, FactorSpec]

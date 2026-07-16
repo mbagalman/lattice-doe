@@ -45,6 +45,7 @@ from .config import (
     DesignOptions, MultiResponseOptions, ResponseSpec,
 )
 from ._request_builder import build_power_cfg, build_design_opts
+from .utils import safe_name_slug
 
 # ---------------------------------------------------------------------------
 # Soft dependency guard
@@ -570,6 +571,47 @@ def _write_df_to_sheet(wb: Any, sheet_name: str, df: pd.DataFrame) -> None:
     _set_column_widths(ws, [max(len(str(c)), 10) + 2 for c in df.columns])
 
 
+
+def _write_output_sheets(
+    wb: Any,
+    result: Dict[str, Any],
+    report: Dict[str, Any],
+    design_df: pd.DataFrame,
+    buckets_df: pd.DataFrame,
+) -> None:
+    """Write every result sheet into *wb* (shared by run and tests).
+
+    Beyond Results/Design/Buckets, this carries the coding authorities:
+    ``ModelMatrix`` is the basis the power calculation used (UX-57 — for
+    data-dependent codings a refit of the Design sheet re-learns spline
+    knots), and for COMPOUND multi-response runs one sheet per response
+    (UX-63/UX-66), because each response was powered on its own formula's
+    basis and a data-dependent response may not be reproducible from any
+    other sheet. Sheet titles cap at 31 characters and forbid several
+    separators, so free-form response names are slugged; the
+    ``ModelMatrixIndex`` sheet maps original names to sheet titles.
+    """
+    _write_results_sheet(wb, report)
+    _write_df_to_sheet(wb, "Design", design_df)
+    _write_df_to_sheet(wb, "Buckets", buckets_df)
+    if result.get("model_matrix") is not None:
+        _write_df_to_sheet(wb, "ModelMatrix", result["model_matrix"])
+    if (
+        result.get("model_matrices") is not None
+        and report.get("compound_criterion")
+    ):
+        _mm_taken: set = set(wb.sheetnames)
+        _mm_index_rows = []
+        for _rname, _rmm in result["model_matrices"].items():
+            _sheet = "MM_" + safe_name_slug(_rname, _mm_taken, maxlen=27)
+            _write_df_to_sheet(wb, _sheet, _rmm)
+            _mm_index_rows.append((_rname, _sheet))
+        _write_df_to_sheet(
+            wb, "ModelMatrixIndex",
+            pd.DataFrame(_mm_index_rows, columns=["response", "sheet"]),
+        )
+
+
 def _write_results_sheet(wb: Any, report: Dict[str, Any]) -> None:
     """Write the run report dict as a key/value table to the Results sheet."""
     if "Results" in wb.sheetnames:
@@ -889,9 +931,7 @@ def excel_run(
     # 3. Write output sheets back into the workbook
     # ------------------------------------------------------------------
     try:
-        _write_results_sheet(wb, report)
-        _write_df_to_sheet(wb, "Design", design_df)
-        _write_df_to_sheet(wb, "Buckets", buckets_df)
+        _write_output_sheets(wb, result, report, design_df, buckets_df)
         wb.save(path)
     except Exception as e:
         raise ExcelError(f"Failed to write results to workbook: {e}") from e

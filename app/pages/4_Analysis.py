@@ -365,18 +365,67 @@ factor_spec = _factors_to_spec(factors)
 
 design_opts = _build_design_opts(ss)
 
-# Try to reconstruct the power config from session state. Design options come
-# first: a scenario contrast over a formula whose coding is learned from data
-# is coded against the candidate set those options produce (UX-48).
-try:
-    power_cfg = _build_power_cfg(ss, design_opts)
-    _cfg_ok = True
-except Exception as exc:
-    st.warning(
-        f"Could not reconstruct power configuration from current settings: {exc}\n\n"
-        "Re-check the contrast/R\u00b2 inputs on **Step 2** and re-run on **Step 3**."
-    )
-    _cfg_ok = False
+# Multi-response run: bind ALL analyses to one selected response (UX-65).
+# In compound mode each response was powered on its OWN formula, power
+# configuration and model matrix — reconstructing the global configuration
+# would silently analyze a different model.
+_is_mr_result = bool(
+    isinstance(result, dict) and result.get("report", {}).get("responses")
+)
+if _is_mr_result:
+    try:
+        from components.mr_config import build_multi_response_cfg
+
+        _mr_cfg = build_multi_response_cfg(ss)
+        _resp_names = [r_.name for r_ in _mr_cfg.responses]
+        _sel_resp = st.selectbox(
+            "Analyze response",
+            _resp_names,
+            key="analysis_response",
+            help=(
+                "This was a multi-response run. Sensitivity and MDE evaluate "
+                "ONE response's model: the selected response's formula, power "
+                "configuration and authoritative model matrix are used."
+            ),
+        )
+        _spec = next(r_ for r_ in _mr_cfg.responses if r_.name == _sel_resp)
+        power_cfg = _spec.power_cfg
+        if _spec.formula:
+            formula = _spec.formula
+        _analysis_mm = (result.get("model_matrices") or {}).get(
+            _sel_resp, result.get("model_matrix")
+        )
+        if hasattr(_spec.power_cfg, "baseline"):
+            _analysis_mode = "glm"
+        elif hasattr(_spec.power_cfg, "L"):
+            _analysis_mode = "contrast"
+        else:
+            _analysis_mode = "r2"
+        _cfg_ok = True
+    except Exception as exc:
+        st.warning(
+            f"Could not reconstruct the multi-response configuration: {exc}\n\n"
+            "Re-check the responses on **Step 2** and re-run on **Step 3**."
+        )
+        _cfg_ok = False
+        _analysis_mm = None
+        _analysis_mode = "contrast"
+else:
+    # Single-response run: reconstruct the global power config. Design
+    # options come first: a scenario contrast over a formula whose coding is
+    # learned from data is coded against the candidate set those options
+    # produce (UX-48).
+    try:
+        power_cfg = _build_power_cfg(ss, design_opts)
+        _cfg_ok = True
+    except Exception as exc:
+        st.warning(
+            f"Could not reconstruct power configuration from current settings: {exc}\n\n"
+            "Re-check the contrast/R\u00b2 inputs on **Step 2** and re-run on **Step 3**."
+        )
+        _cfg_ok = False
+    _analysis_mm = result.get("model_matrix") if isinstance(result, dict) else None
+    _analysis_mode = ss.get("power_mode", "contrast")
 
 # ===========================================================================
 # F1 — Sensitivity analysis
@@ -391,12 +440,18 @@ st.markdown(
 if not _cfg_ok:
     st.warning("Fix power configuration on Step 2 to enable sensitivity analysis.")
 else:
-    is_contrast = ss["power_mode"] == "contrast"
+    is_contrast = _analysis_mode == "contrast"
     design_df = result["design_df"]
 
-    if is_contrast:
+    if _analysis_mode == "glm":
+        st.info(
+            "The selected response uses a GLM power configuration; the "
+            "\u03c3/R\u00b2 sensitivity sweeps do not apply. Use the MDE "
+            "section below."
+        )
+    elif is_contrast:
         col1, col2, col3 = st.columns(3)
-        sigma_nom = float(ss.get("sigma", 1.0))
+        sigma_nom = float(getattr(power_cfg, "sigma", ss.get("sigma", 1.0)))
         with col1:
             sigma_min = st.number_input(
                 "\u03c3 min", min_value=1e-4, value=sigma_nom * 0.5, format="%.4g",
@@ -412,7 +467,7 @@ else:
         sweep_label = f"\u03c3 range [{sigma_min:.3g}, {sigma_max:.3g}], {sigma_pts} points"
     else:
         col1, col2, col3 = st.columns(3)
-        r2_nom = float(ss.get("r2_target", 0.15))
+        r2_nom = float(getattr(power_cfg, "r2_target", ss.get("r2_target", 0.15)))
         with col1:
             r2_min = st.number_input(
                 "R\u00b2 min", min_value=0.001, max_value=0.99, value=max(0.01, r2_nom * 0.3),
@@ -427,7 +482,7 @@ else:
             r2_pts = st.slider("Points", 5, 50, 25, key="sens_r2_pts")
         sweep_label = f"R\u00b2 range [{r2_min:.3f}, {r2_max:.3f}], {r2_pts} points"
 
-    if st.button("Run sensitivity", key="btn_sensitivity"):
+    if _analysis_mode != "glm" and st.button("Run sensitivity", key="btn_sensitivity"):
         try:
             with st.spinner("Running sensitivity sweep\u2026"):
                 if is_contrast:
@@ -439,6 +494,7 @@ else:
                         sigma_range=(float(sigma_min), float(sigma_max)),
                         sigma_points=int(sigma_pts),
                         design_opts=design_opts,
+                        model_matrix=_analysis_mm,
                     )
                 else:
                     sens = power_sensitivity(
@@ -449,6 +505,7 @@ else:
                         r2_range=(float(r2_min), float(r2_max)),
                         r2_points=int(r2_pts),
                         design_opts=design_opts,
+                        model_matrix=_analysis_mm,
                     )
             ss["_sensitivity_result"] = sens
             ss["_sensitivity_contrast"] = is_contrast
@@ -551,6 +608,7 @@ else:
                     power_cfg=power_cfg,
                     target_power=float(mde_power),
                     design_opts=design_opts,
+                    model_matrix=_analysis_mm,
                 )
             ss["_mde_result"] = mde_result
         except Exception as exc:
@@ -796,6 +854,7 @@ if _sp_report is not None:
                     design_opts=design_opts,
                     eta_range=(float(eta_min), float(eta_max)),
                     eta_points=int(eta_pts),
+                    model_matrix=_analysis_mm,
                 )
             ss["_sp_eta_result"] = sens_sp
         except Exception as exc:

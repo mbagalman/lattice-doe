@@ -1007,3 +1007,61 @@ class TestCR34ExtGLM:
         assert isinstance(y1_cfg, PowerGLMContrastConfig)
         assert y1_cfg.baseline == pytest.approx(3.0)
         assert y1_cfg.family == "poisson"
+
+
+class TestCompoundMatrixExport:
+    """UX-66: compound multi-response runs must export every per-response
+    matrix — a data-dependent response may not be reproducible from the
+    Design or global ModelMatrix sheets — plus a name-to-worksheet index
+    (response names are free-form and get slugged for worksheet titles)."""
+
+    @staticmethod
+    def _compound_result():
+        res = _minimal_result()
+        res["report"]["compound_criterion"] = True
+        res["model_matrix"] = pd.DataFrame({"Intercept": [1.0, 1.0],
+                                            "x1": [0.1, 0.5]})
+        res["model_matrices"] = {
+            "y1": pd.DataFrame({"Intercept": [1.0, 1.0], "x1": [0.1, 0.5]}),
+            "Yield/Day": pd.DataFrame({"Intercept": [1.0, 1.0],
+                                       "bs(x1)[0]": [0.2, 0.3]}),
+        }
+        return res
+
+    def test_writes_per_response_worksheets_and_index(self):
+        mg = _make_mock_gspread()
+        sh = MagicMock()
+        ws = MagicMock()
+        sh.worksheet.return_value = ws
+
+        with patch.object(sheets_module, "gspread", mg, create=True):
+            sheets_module._write_results(sh, self._compound_result())
+
+        requested = [c.args[0] for c in sh.worksheet.call_args_list]
+        assert "ModelMatrix" in requested
+        assert "MM_y1" in requested
+        assert "MM_Yield_Day" in requested        # slugged, no separator
+        assert "ModelMatrixIndex" in requested
+
+        # the index carries the ORIGINAL names alongside the worksheet titles
+        idx_updates = [
+            c.args[1] for c in ws.update.call_args_list
+            if c.args and isinstance(c.args[1], list)
+            and c.args[1] and c.args[1][0] == ["response", "worksheet"]
+        ]
+        assert idx_updates, "ModelMatrixIndex content missing"
+        assert ["Yield/Day", "MM_Yield_Day"] in idx_updates[0]
+
+    def test_non_compound_result_writes_no_extra_sheets(self):
+        mg = _make_mock_gspread()
+        sh = MagicMock()
+        sh.worksheet.return_value = MagicMock()
+
+        res = _minimal_result()
+        res["model_matrix"] = pd.DataFrame({"Intercept": [1.0, 1.0]})
+        with patch.object(sheets_module, "gspread", mg, create=True):
+            sheets_module._write_results(sh, res)
+
+        requested = [c.args[0] for c in sh.worksheet.call_args_list]
+        assert "ModelMatrixIndex" not in requested
+        assert not any(t.startswith("MM_") for t in requested)

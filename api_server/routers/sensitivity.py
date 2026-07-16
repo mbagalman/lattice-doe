@@ -23,6 +23,7 @@ from api_server.serialization import (
     pydantic_power_cfg_to_dataclass,
     records_to_df,
     sanitize_float,
+    split_to_df,
 )
 
 router = APIRouter()
@@ -32,6 +33,10 @@ def _sync_sensitivity(request: SensitivityRequest) -> dict:
     power_cfg = pydantic_power_cfg_to_dataclass(request.power_cfg)
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
     design_df = records_to_df(request.design_df)
+    model_matrix = (
+        split_to_df(request.model_matrix)
+        if request.model_matrix is not None else None
+    )
     result = power_sensitivity(
         formula=request.formula,
         factors=factors_to_spec(request.factors, request.formula),
@@ -42,6 +47,7 @@ def _sync_sensitivity(request: SensitivityRequest) -> dict:
         r2_range=request.r2_range,
         r2_points=request.r2_points,
         design_opts=design_opts,
+        model_matrix=model_matrix,
     )
     mode = "contrast" if isinstance(power_cfg, PowerContrastConfig) else "r2"
     df = result["data"]
@@ -57,6 +63,10 @@ def _sync_mde(request: MdeRequest) -> dict:
     power_cfg = pydantic_power_cfg_to_dataclass(request.power_cfg)
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
     design_df = records_to_df(request.design_df)
+    model_matrix = (
+        split_to_df(request.model_matrix)
+        if request.model_matrix is not None else None
+    )
     result = min_detectable_effect(
         design_df=design_df,
         formula=request.formula,
@@ -64,6 +74,7 @@ def _sync_mde(request: MdeRequest) -> dict:
         power_cfg=power_cfg,
         target_power=request.target_power,
         design_opts=design_opts,
+        model_matrix=model_matrix,
     )
     return {
         "mde": float(result["mde"]),

@@ -408,8 +408,45 @@ def model_matrix_preview(
     return X.shape[1], list(col_names)
 
 
+
+def safe_name_slug(
+    name: str,
+    existing: "Optional[set]" = None,
+    maxlen: int = 60,
+) -> str:
+    """A filesystem/sheet-safe identifier for a user-supplied label (UX-67).
+
+    Response names are free-form (``ResponseSpec`` accepts ``"Yield/Day"``),
+    but they end up inside filenames, Excel sheet titles and widget keys,
+    where path separators and other reserved characters raise or corrupt the
+    target. Reserved characters become ``_``, leading/trailing dots and
+    spaces are stripped, the result is truncated to *maxlen*, and an empty
+    result falls back to ``"response"``.
+
+    When *existing* (a set of already-taken slugs) is given, collisions are
+    resolved deterministically by appending ``_2``, ``_3``, … in call order,
+    and the chosen slug is added to the set. Callers keep the ORIGINAL name
+    alongside the slug (e.g. in report metadata) so nothing is lost.
+    """
+    cleaned = "".join(
+        "_" if (c in '\\/:*?"<>|[]\'' or ord(c) < 32) else c
+        for c in str(name)
+    ).strip(". ")
+    cleaned = cleaned[:maxlen].strip(". ") or "response"
+    if existing is None:
+        return cleaned
+    slug = cleaned
+    k = 2
+    while slug in existing:
+        suffix = f"_{k}"
+        slug = cleaned[: maxlen - len(suffix)] + suffix
+        k += 1
+    existing.add(slug)
+    return slug
+
 __all__ = [
     "validate_factors",
+    "safe_name_slug",
     "initial_n_guess",
     "model_matrix_preview",
     "normalize_factors",
