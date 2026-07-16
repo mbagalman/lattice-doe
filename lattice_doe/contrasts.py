@@ -63,6 +63,35 @@ PY_CODING_REMEDY = (
     "(result['design_df']), or construct L explicitly."
 )
 
+#: Python-facing default remedies for scenario_contrast_for_run's refusals;
+#: interfaces override them with wording their users can act on (UX-46).
+#: Every default must only recommend arguments THIS function accepts —
+#: PY_CODING_REMEDY's "pass coding_data=" advice belongs to
+#: contrast_from_scenarios and would raise TypeError here.
+PY_NO_DESIGN_OPTS_REMEDY = (
+    "Pass design_opts= with the run's DesignOptions so the contrast is "
+    "coded against the candidate set that run will search, or call "
+    "contrast_from_scenarios(..., coding_data=...) directly with a "
+    "realized candidate set or design, or construct L explicitly."
+)
+PY_RUN_CODING_REMEDY = (
+    "Construct L explicitly, or call "
+    "contrast_from_scenarios(..., coding_data=...) directly with a "
+    "realized candidate set or design."
+)
+PY_SPLIT_PLOT_REMEDY = (
+    "This run uses split-plot options, and a split-plot search learns its "
+    "coding from separately built whole-plot/sub-plot pools — no candidate "
+    "set built up front can be its authority. Construct L explicitly, or "
+    "use a formula whose coding does not depend on the data."
+)
+PY_GROWTH_REMEDY = (
+    "allow_candidate_growth lets the search rebuild the candidate set "
+    "mid-run and re-derive the coding while L stays fixed, so the contrast "
+    "would silently stop matching the model. Disable candidate growth, or "
+    "construct L explicitly."
+)
+
 
 class ContrastCodingError(ValueError):
     """The model coding cannot be reproduced from the factor spec alone.
@@ -779,8 +808,84 @@ def contrast_from_scenarios(
     return L, delta
 
 
+def scenario_contrast_for_run(
+    formula: str,
+    factors: FactorSpec,
+    scenario_a: Scenario,
+    scenario_b: Scenario,
+    sesoi: float,
+    *,
+    design_opts: Optional[Any] = None,
+    sizing_formula: Optional[str] = None,
+    remedies: Optional[Dict[str, str]] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Scenario contrast coded against the run's own candidate set.
+
+    THE one decision tree for every interface (UX-48/50/59; previously
+    duplicated between the CLI and the Streamlit app, which let the two
+    drift): when the formula's coding is learned from realized data, the
+    coding authority must be the candidate set the run will actually
+    search — built here from the run's own *design_opts* — and
+    configurations whose run cannot honor that authority are refused up
+    front:
+
+    * no *design_opts* (a preview with no run configured) — nothing built
+      here can be the authority;
+    * split-plot runs — their coding comes from separately built
+      whole-plot/sub-plot pools, not the ordinary candidate set;
+    * candidate growth — the search may rebuild the candidate set mid-run
+      and re-derive the coding while L stays fixed.
+
+    ``sizing_formula`` is the formula the run sizes its candidate set by.
+    It matters in multi-response mode, where a response may carry its own
+    *formula* but the run builds ONE candidate set from the global formula
+    — sizing here by the response's formula would break the
+    shared-authority invariant the moment candidate sizing starts reading
+    the formula.
+
+    ``remedies`` maps ``"preview"`` / ``"split_plot"`` / ``"growth"`` /
+    ``"coding"`` to interface-specific advice (UX-46); unset keys fall
+    back to the Python-facing defaults. The *reason* half of every error
+    passes through unchanged.
+    """
+    r = remedies or {}
+    reason = coding_is_data_dependent(formula, factors)
+    coding_data = None
+    if reason is not None:
+        if design_opts is None:
+            raise ContrastCodingError(
+                reason, r.get("preview", PY_NO_DESIGN_OPTS_REMEDY)
+            )
+        if design_opts.split_plot is not None:
+            raise ContrastCodingError(
+                reason, r.get("split_plot", PY_SPLIT_PLOT_REMEDY)
+            )
+        if design_opts.allow_candidate_growth:
+            raise ContrastCodingError(
+                reason, r.get("growth", PY_GROWTH_REMEDY)
+            )
+        from .candidate import build_search_candidate
+
+        coding_data, _ = build_search_candidate(
+            sizing_formula or formula, factors, design_opts,
+        )
+    try:
+        return contrast_from_scenarios(
+            formula, factors, scenario_a, scenario_b, sesoi,
+            coding_data=coding_data,
+        )
+    except ContrastCodingError as exc:
+        # Rewrap even without an override: contrast_from_scenarios' own
+        # remedy recommends its coding_data= parameter, which this function
+        # does not accept — the advice must fit the API that raised it.
+        raise ContrastCodingError(
+            exc.reason, r.get("coding", PY_RUN_CODING_REMEDY)
+        ) from exc
+
+
 __all__ = [
     "contrast_from_scenarios",
     "coding_is_data_dependent",
+    "scenario_contrast_for_run",
     "ContrastCodingError",
 ]

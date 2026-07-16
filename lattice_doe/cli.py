@@ -66,11 +66,8 @@ from .config import (
     PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
     DesignOptions, MultiResponseOptions, ResponseSpec,
 )
-from .candidate import build_search_candidate
 from .utils import safe_name_slug
-from .contrasts import (
-    ContrastCodingError, coding_is_data_dependent, contrast_from_scenarios,
-)
+from .contrasts import scenario_contrast_for_run
 from ._request_builder import build_power_cfg, build_design_opts
 
 logger = logging.getLogger("lattice")
@@ -122,36 +119,22 @@ def _scenario_contrast(
 ) -> Any:
     """Build L and delta for a scenario pair, coded against this run's data.
 
-    When the formula's coding is learned from realized data, the authority is
-    the candidate set the search will actually select from — generated here
-    from the very same ``design_opts``. Reconstructing it by hand (a guessed
-    seed or candidate size) yields a same-width but numerically different L,
-    with no error to signal it (UX-48).
-
-    ``sizing_formula`` is the formula the design run sizes its candidate set
-    by. It matters in multi-response mode, where a response may carry its own
-    *formula* but ``find_multiresponse_design`` builds ONE candidate from the
-    global one — sizing here by the response's formula would break the
-    shared-authority invariant the moment candidate sizing starts reading the
-    formula (today it does not, by accident of implementation).
+    The authority and refusal logic is the SHARED decision tree in
+    ``contrasts.scenario_contrast_for_run`` — one implementation for every
+    interface, so the CLI and the app can never drift on which runs may use
+    a scenario contrast (UX-48/50). Only the remedy wording is CLI-specific
+    (UX-46).
     """
-    reason = coding_is_data_dependent(formula, factors)
-    coding_data = None
-    if reason is not None:
-        if design_opts.split_plot is not None:
-            raise ContrastCodingError(reason, _CLI_SPLIT_PLOT_REMEDY)
-        if design_opts.allow_candidate_growth:
-            raise ContrastCodingError(reason, _CLI_GROWTH_REMEDY)
-        coding_data, _ = build_search_candidate(
-            sizing_formula or formula, factors, design_opts,
-        )
-    try:
-        return contrast_from_scenarios(
-            formula, factors, scenario_a, scenario_b, sesoi,
-            coding_data=coding_data,
-        )
-    except ContrastCodingError as exc:
-        raise ContrastCodingError(exc.reason, _CLI_CODING_REMEDY) from exc
+    return scenario_contrast_for_run(
+        formula, factors, scenario_a, scenario_b, sesoi,
+        design_opts=design_opts,
+        sizing_formula=sizing_formula,
+        remedies={
+            "split_plot": _CLI_SPLIT_PLOT_REMEDY,
+            "growth": _CLI_GROWTH_REMEDY,
+            "coding": _CLI_CODING_REMEDY,
+        },
+    )
 
 
 def _ensure_utf8_output() -> None:

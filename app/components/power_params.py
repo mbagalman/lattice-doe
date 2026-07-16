@@ -77,32 +77,28 @@ def scenario_contrast(design_opts: Any = None, **kwargs: Any) -> Tuple[Any, Any]
     **kwargs
         Forwarded to ``contrast_from_scenarios``.
 
+    The authority and refusal logic is the SHARED decision tree in
+    ``lattice_doe.contrasts.scenario_contrast_for_run`` — one
+    implementation for every interface, so the app and the CLI can never
+    drift on which runs may use a scenario contrast (UX-48/50). Only the
+    remedy wording here is app-specific (UX-46).
+
     lattice_doe is imported lazily: the pages import this module
     unconditionally and must still render their "not installed" notice when
     the package is absent.
     """
-    from lattice_doe.candidate import build_search_candidate
-    from lattice_doe.contrasts import (
-        ContrastCodingError,
-        coding_is_data_dependent,
-        contrast_from_scenarios,
-    )
+    from lattice_doe.contrasts import scenario_contrast_for_run
 
-    reason = coding_is_data_dependent(kwargs["formula"], kwargs["factors"])
-    if reason is not None:
-        if design_opts is None:
-            raise ContrastCodingError(reason, UI_PREVIEW_REMEDY)
-        if design_opts.split_plot is not None:
-            raise ContrastCodingError(reason, UI_SPLIT_PLOT_REMEDY)
-        if design_opts.allow_candidate_growth:
-            raise ContrastCodingError(reason, UI_GROWTH_REMEDY)
-        kwargs["coding_data"], _ = build_search_candidate(
-            kwargs["formula"], kwargs["factors"], design_opts,
-        )
-    try:
-        return contrast_from_scenarios(**kwargs)
-    except ContrastCodingError as exc:
-        raise ContrastCodingError(exc.reason, UI_CODING_REMEDY) from exc
+    return scenario_contrast_for_run(
+        design_opts=design_opts,
+        remedies={
+            "preview": UI_PREVIEW_REMEDY,
+            "split_plot": UI_SPLIT_PLOT_REMEDY,
+            "growth": UI_GROWTH_REMEDY,
+            "coding": UI_CODING_REMEDY,
+        },
+        **kwargs,
+    )
 
 
 # The one authoring contract for target power (UX-72). Every widget that
