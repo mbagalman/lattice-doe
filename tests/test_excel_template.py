@@ -1012,6 +1012,124 @@ class TestCompoundMatrixExcelExport:
         assert ("Yield", "MM_Yield_2") in idx_rows   # dodged the collision
         assert all(sheet in wb.sheetnames for _, sheet in idx_rows)
 
+    def test_edited_index_cannot_delete_user_sheets(self):
+        """UX-75: ModelMatrixIndex cells are ordinary user-editable content
+        and must never authorize deletion — ownership comes from the
+        workbook's custom document property instead."""
+        import openpyxl
+
+        from lattice_doe.excel_template import _write_output_sheets
+
+        res = self._compound_result()
+        wb = openpyxl.Workbook()
+        _write_output_sheets(wb, res, res["report"],
+                             res["design_df"], res["buckets_df"])
+
+        user = wb.create_sheet("MM_UserNotes")
+        user["A1"] = "irreplaceable analysis notes"
+        wb["ModelMatrixIndex"].append(("notes", "MM_UserNotes"))  # hand edit
+
+        _write_output_sheets(wb, res, res["report"],
+                             res["design_df"], res["buckets_df"])
+        assert "MM_UserNotes" in wb.sheetnames
+        assert wb["MM_UserNotes"]["A1"].value == "irreplaceable analysis notes"
+        # our own sheets were still legitimately replaced
+        assert "MM_y1" in wb.sheetnames
+
+    def test_unrelated_user_index_survives_plain_export(self):
+        """UX-75: a user's own sheet that happens to be titled
+        ModelMatrixIndex is not ours to delete on a non-compound export."""
+        import openpyxl
+
+        from lattice_doe.excel_template import _write_output_sheets
+
+        wb = openpyxl.Workbook()
+        own = wb.create_sheet("ModelMatrixIndex")
+        own["A1"] = "my personal index of things"
+
+        res = self._compound_result()
+        res["report"]["compound_criterion"] = False
+        res["model_matrices"] = None
+        _write_output_sheets(wb, res, res["report"],
+                             res["design_df"], res["buckets_df"])
+        assert "ModelMatrixIndex" in wb.sheetnames
+        assert wb["ModelMatrixIndex"]["A1"].value == (
+            "my personal index of things"
+        )
+
+    def test_ownership_marker_survives_save_and_load(self):
+        """UX-75: the custom document property must round-trip through a
+        real save/load cycle, or repeat exports into a saved workbook would
+        have no deletion authority and could never reconcile."""
+        import io
+
+        import openpyxl
+
+        from lattice_doe.excel_template import _write_output_sheets
+
+        res = self._compound_result()
+        res["model_matrices"] = {"Yield": pd.DataFrame({"Intercept": [1.0]})}
+        wb = openpyxl.Workbook()
+        _write_output_sheets(wb, res, res["report"],
+                             res["design_df"], res["buckets_df"])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        wb2 = openpyxl.load_workbook(buf)
+
+        res2 = self._compound_result()
+        res2["model_matrices"] = {"yield": pd.DataFrame({"Intercept": [2.0]})}
+        _write_output_sheets(wb2, res2, res2["report"],
+                             res2["design_df"], res2["buckets_df"])
+        mm = [n for n in wb2.sheetnames if n.startswith("MM_")]
+        assert mm == ["MM_yield"], mm      # old sheet reconciled after reload
+        assert all(sheet in wb2.sheetnames
+                   for _, sheet in self._idx_rows(wb2))
+
+    def test_legacy_pre_marker_workbook_warns_and_leaves_residue(self):
+        """UX-79: sheets from a release without the ownership marker can
+        never be verified ours, so they are left untouched — permanently —
+        and the export says so instead of silently accumulating stale
+        siblings next to current ones."""
+        import openpyxl
+
+        from lattice_doe.excel_template import _write_output_sheets
+
+        wb = openpyxl.Workbook()                       # NO ownership marker
+        legacy = wb.create_sheet("MM_Yield")
+        legacy["A1"] = "Intercept"
+        legacy["A2"] = 0.5
+        legacy_idx = wb.create_sheet("ModelMatrixIndex")
+        legacy_idx.append(("response", "sheet"))
+        legacy_idx.append(("Yield", "MM_Yield"))
+
+        res = self._compound_result()
+        res["model_matrices"] = {
+            "Yield": pd.DataFrame({"Intercept": [9.0]}),
+        }
+        with pytest.warns(RuntimeWarning,
+                          match="predates ownership tracking.*MM_Yield"):
+            _write_output_sheets(wb, res, res["report"],
+                                 res["design_df"], res["buckets_df"])
+
+        assert wb["MM_Yield"]["A2"].value == 0.5       # legacy untouched
+        assert ("Yield", "MM_Yield_2") in self._idx_rows(wb)
+        assert wb["MM_Yield_2"]["A2"].value == 9.0
+
+        # index and new sheets are now marker-tracked: the next export
+        # replaces current output without warning again
+        import warnings as W
+        res2 = self._compound_result()
+        res2["model_matrices"] = {
+            "Yield": pd.DataFrame({"Intercept": [10.0]}),
+        }
+        with W.catch_warnings():
+            W.simplefilter("error", RuntimeWarning)
+            _write_output_sheets(wb, res2, res2["report"],
+                                 res2["design_df"], res2["buckets_df"])
+        assert wb["MM_Yield"]["A2"].value == 0.5
+        assert wb["MM_Yield_2"]["A2"].value == 10.0
+
     def test_non_compound_repeat_export_clears_stale_compound_output(self):
         """UX-73: output sheets must describe THIS result only. After a
         compound export, re-exporting a non-compound result into the same

@@ -47,6 +47,7 @@ Install
 """
 from __future__ import annotations
 
+import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -646,40 +647,114 @@ def _get_or_create_sheet(
         return spreadsheet.add_worksheet(title=title, rows=1000, cols=20)
 
 
+# Ownership mark for generated worksheets (UX-78): sheet-scoped Google
+# DEVELOPER METADATA, stored outside cell content entirely. Index cells
+# are ordinary user-editable data, and even a real sheet ID copied into a
+# cell (IDs are visible in the sheet URL) proves only which sheet a row
+# points at — never that Lattice DOE created it — so nothing read from
+# cells may authorize deletion.
+_LATTICE_METADATA_KEY = "latticeDOE_generated"
+
+# Header of the generated ModelMatrixIndex worksheet — purely
+# informational; it carries no authority of any kind.
+_MM_INDEX_HEADER = ["response", "worksheet"]
+
+
+def _owned_sheet_ids(spreadsheet: "gspread.Spreadsheet") -> set:
+    """IDs of worksheets carrying the Lattice DOE ownership mark (UX-78).
+
+    The mark is only honored when its VALUE equals the carrying sheet's own
+    ID: Google's "duplicate sheet" copies developer metadata onto the copy,
+    so a user's duplicate of a generated sheet would otherwise inherit the
+    mark — the self-referential value pins the mark to the exact worksheet
+    it was created on (a copy has a different ID and fails the check).
+    """
+    meta = spreadsheet.fetch_sheet_metadata()
+    sheets = meta.get("sheets", []) if isinstance(meta, dict) else []
+    owned: set = set()
+    for sheet in sheets:
+        sheet_id = sheet.get("properties", {}).get("sheetId")
+        for dm in sheet.get("developerMetadata") or []:
+            if (
+                dm.get("metadataKey") == _LATTICE_METADATA_KEY
+                and str(dm.get("metadataValue")) == str(sheet_id)
+                and sheet_id is not None
+            ):
+                owned.add(sheet_id)
+    return owned
+
+
+def _mark_generated_sheets(
+    spreadsheet: "gspread.Spreadsheet", sheet_ids: List[Any],
+) -> None:
+    """Attach the ownership mark to freshly written worksheets (UX-78)."""
+    requests = [
+        {"createDeveloperMetadata": {"developerMetadata": {
+            "metadataKey": _LATTICE_METADATA_KEY,
+            "metadataValue": str(sid),
+            "location": {"sheetId": sid},
+            "visibility": "DOCUMENT",
+        }}}
+        for sid in sheet_ids
+    ]
+    if requests:
+        spreadsheet.batch_update({"requests": requests})
+
+
 def _reconcile_previous_matrix_sheets(
     spreadsheet: "gspread.Spreadsheet",
-    delete: bool = True,
-) -> set:
-    """Collect — and with *delete*, remove — a previous export's MM output.
+) -> None:
+    """Delete the generated worksheets a previous export marked as ours.
 
-    ``ModelMatrixIndex`` records the per-response worksheets WE wrote, so
-    only titles it lists with the ``MM_`` prefix are touched; the user's
-    own worksheets survive even if an edited index names them (UX-73).
-    Returns the set of listed titles still present (empty after deleting),
-    which the caller may reuse in place when it is not allowed to delete.
+    Deletion authority is the sheet-scoped developer metadata exclusively
+    (UX-78); the worksheet must also still sit in our namespace (``MM_*``
+    or ``ModelMatrixIndex``), so a generated sheet the user renamed —
+    implicitly claiming it — is left alone. Output from releases that
+    predate the mark can never be verified ours, so it is never deleted:
+    the export warns about it instead (UX-79) and new titles dodge the
+    orphans by suffixing.
+    """
+    owned = _owned_sheet_ids(spreadsheet)
+    _warn_about_legacy_output(spreadsheet, owned)
+    for ws in list(spreadsheet.worksheets()):
+        if ws.id not in owned:
+            continue
+        if ws.title == "ModelMatrixIndex" or ws.title.startswith("MM_"):
+            spreadsheet.del_worksheet(ws)
+
+
+def _warn_about_legacy_output(
+    spreadsheet: "gspread.Spreadsheet", owned: set,
+) -> None:
+    """Warn when output from a pre-ownership-tracking release is present.
+
+    Those worksheets cannot be told apart from user data, so they are left
+    untouched permanently (UX-79) — this warning is the migration path.
+    Detection is conservative: an UNMARKED worksheet at the reserved index
+    title whose header matches a generated layout; anything else is
+    presumed user data and not mentioned at all.
     """
     try:
         ws_idx = spreadsheet.worksheet("ModelMatrixIndex")
     except gspread.exceptions.WorksheetNotFound:
-        return set()
-    listed = set()
-    for row in ws_idx.get_all_values()[1:]:
-        title = row[1] if len(row) > 1 else ""
-        if isinstance(title, str) and title.startswith("MM_"):
-            listed.add(title)
-    kept: set = set()
-    for title in sorted(listed):
-        try:
-            ws = spreadsheet.worksheet(title)
-        except gspread.exceptions.WorksheetNotFound:
-            continue
-        if delete:
-            spreadsheet.del_worksheet(ws)
-        else:
-            kept.add(title)
-    if delete:
-        spreadsheet.del_worksheet(ws_idx)
-    return kept
+        return
+    if ws_idx.id in owned:
+        return
+    rows = ws_idx.get_all_values()
+    if not rows or [str(c) for c in rows[0][:2]] != ["response", "worksheet"]:
+        return
+    stale = [str(r[1]) for r in rows[1:]
+             if len(r) > 1 and str(r[1]).startswith("MM_")]
+    warnings.warn(
+        "This spreadsheet contains model-matrix worksheets from a Lattice "
+        "DOE version that predates ownership tracking"
+        + (f" ({', '.join(stale)})" if stale else "")
+        + ". They cannot be verified as Lattice DOE output, so they were "
+        "left untouched and may hold OUTDATED matrices — delete them "
+        "manually if unwanted. Sheets written from now on are tracked and "
+        "replaced automatically.",
+        RuntimeWarning,
+    )
 
 
 def _df_to_rows(df: "pd.DataFrame") -> List[List[Any]]:
@@ -738,10 +813,14 @@ def _write_results(
     buckets_sheet : str, default "Buckets"
         Name of the buckets sheet.
     clear_results : bool, default True
-        Clear existing content in each output sheet before writing. This
-        also permits replacing the per-response worksheets a previous
-        export recorded in ``ModelMatrixIndex``; with ``False`` those are
-        kept and reused in place (UX-73).
+        Clear existing content in the ordinary result sheets (Results,
+        Design, Buckets) before writing. The generated authority sheets —
+        ``ModelMatrix``, the per-response ``MM_*`` worksheets and
+        ``ModelMatrixIndex`` — are ALWAYS fully cleared and replaced
+        regardless of this flag (UX-76): Google updates only the supplied
+        rectangle, so a stale larger matrix would otherwise contaminate a
+        smaller new one, and stale index rows would be misread as
+        ownership records.
     """
     # Both modes use the unified envelope (UX-6); MR is distinguished by a
     # multi-response-only key in its report.
@@ -815,32 +894,36 @@ def _write_results(
     ws_buckets.update("A1", _df_to_rows(buckets_df_val))
 
     # ------------------------------------------------------------------
-    # 4. Reconcile a previous export's per-response output (UX-73): the
-    #    worksheets our own ModelMatrixIndex lists are OURS, and a repeat
-    #    export whose response names changed (even by case — Google
+    # 4. Reconcile a previous export's per-response output (UX-73): a
+    #    repeat export whose response names changed (even by case — Google
     #    rejects titles differing only by case) would otherwise collide
-    #    with them or leave the index pointing at the wrong worksheet.
-    #    When clear_results permits overwriting, they are deleted outright;
-    #    otherwise they are kept and offered for in-place reuse below.
+    #    with the old worksheets or leave the index pointing at the wrong
+    #    one. Only worksheets carrying our developer-metadata ownership
+    #    mark are deleted (UX-78); this runs regardless of clear_results,
+    #    which governs the ordinary result sheets above, not the generated
+    #    authority sheets.
     # ------------------------------------------------------------------
-    _reusable = _reconcile_previous_matrix_sheets(
-        spreadsheet, delete=clear_results
-    )
+    _reconcile_previous_matrix_sheets(spreadsheet)
 
     # ------------------------------------------------------------------
     # 5. ModelMatrix sheet — the authoritative basis the power calculation
     #    used (UX-57). For data-dependent codings a refit of the Design
     #    sheet re-learns spline knots; analyses need this matrix instead.
+    #    Authority sheets are ALWAYS fully cleared before writing (UX-76):
+    #    Google updates only the supplied rectangle, so a smaller matrix
+    #    over a larger stale one would otherwise keep the old rows/columns.
     # ------------------------------------------------------------------
     if result.get("model_matrix") is not None:
         ws_mm = _get_or_create_sheet(spreadsheet, "ModelMatrix")
-        if clear_results:
-            ws_mm.clear()
+        ws_mm.clear()
         ws_mm.update("A1", _df_to_rows(result["model_matrix"]))
-    elif clear_results:
-        # Do not pair the new Design with a previous export's basis.
+    else:
+        # Do not pair the new Design with a previous export's basis. The
+        # reserved title is emptied, not deleted — without an ownership
+        # marker for it, deletion could destroy a user's own worksheet;
+        # exports have always owned writing rights to this fixed name.
         try:
-            spreadsheet.del_worksheet(spreadsheet.worksheet("ModelMatrix"))
+            spreadsheet.worksheet("ModelMatrix").clear()
         except gspread.exceptions.WorksheetNotFound:
             pass
 
@@ -850,37 +933,39 @@ def _write_results(
     #    be reproducible from the Design or global ModelMatrix sheets.
     #    Worksheet titles are slugged (free-form names may contain
     #    characters the spreadsheet API rejects); the index keeps the
-    #    original names. Collisions with FOREIGN worksheets are checked on
-    #    the complete title (UX-73): Google treats titles differing only by
-    #    case as duplicates, so a bare-slug check lets a create call fail —
-    #    or the index desync — behind our back. Our own surviving output
-    #    (clear_results=False) is instead reused in place, case-insensitively.
+    #    original names and is purely informational. Ownership lives in
+    #    sheet-scoped developer metadata (UX-78) — never in cells.
+    #    Collisions with surviving worksheets are checked on the complete
+    #    title (UX-73): Google treats titles differing only by case as
+    #    duplicates, so a bare-slug check lets a create call fail — or the
+    #    index desync — behind our back.
     # ------------------------------------------------------------------
     if (
         result.get("model_matrices") is not None
         and report.get("compound_criterion")
     ):
-        _existing = {ws.title for ws in spreadsheet.worksheets()}
-        _mm_taken: set = (_existing - _reusable) | {"ModelMatrixIndex"}
-        _mm_index_rows = [["response", "worksheet"]]
+        _mm_taken: set = (
+            {ws.title for ws in spreadsheet.worksheets()}
+            | {"ModelMatrixIndex"}
+        )
+        _mm_index_rows = [list(_MM_INDEX_HEADER)]
+        _written_ids: List[Any] = []
         for _rname, _rmm in result["model_matrices"].items():
             _title = "MM_" + safe_name_slug(
                 _rname, _mm_taken, maxlen=80, prefix="MM_"
             )
-            if _title not in _existing:
-                _folded = _title.casefold()
-                _title = next(
-                    (t for t in _reusable if t.casefold() == _folded), _title
-                )
             ws_r = _get_or_create_sheet(spreadsheet, _title)
-            if clear_results:
-                ws_r.clear()
+            ws_r.clear()   # always — a rectangle update cannot be trusted
             ws_r.update("A1", _df_to_rows(_rmm))
             _mm_index_rows.append([_rname, _title])
+            _written_ids.append(ws_r.id)
         ws_idx = _get_or_create_sheet(spreadsheet, "ModelMatrixIndex")
-        if clear_results:
-            ws_idx.clear()
+        ws_idx.clear()
         ws_idx.update("A1", _mm_index_rows)
+        _written_ids.append(ws_idx.id)
+        # Mark everything just written as ours OUTSIDE cell content, so
+        # the next export's reconcile has real deletion authority (UX-78).
+        _mark_generated_sheets(spreadsheet, _written_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -1215,7 +1300,10 @@ def sheets_run(
     buckets_sheet : str, default "Buckets"
         Name of the worksheet to write the run-frequency buckets to.
     clear_results : bool, default True
-        Clear existing content in each output sheet before writing.
+        Clear existing content in the ordinary result sheets (Results,
+        Design, Buckets) before writing. Generated matrix sheets
+        (``ModelMatrix``, ``MM_*``, ``ModelMatrixIndex``) are always fully
+        cleared and replaced regardless of this flag (UX-76).
 
     Returns
     -------

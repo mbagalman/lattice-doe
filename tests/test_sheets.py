@@ -38,20 +38,35 @@ def _make_mock_gspread():
 
 
 class _FakeWorksheet:
-    """In-memory worksheet: a title plus the last-written rectangle."""
+    """In-memory worksheet with REAL update semantics (UX-76).
 
-    def __init__(self, title):
+    ``update("A1", rows)`` overwrites only the supplied rectangle — exactly
+    like the Google API — so cells outside it from earlier writes remain.
+    A fake that simply replaced all rows masked the stale-data
+    contamination the connector must guard against by clearing first."""
+
+    def __init__(self, title, sheet_id):
         self.title = title
+        self.id = sheet_id            # immutable, like Google's sheetId
         self.rows: list = []
+        self.metadata: list = []      # sheet-scoped developer metadata
 
-    def update(self, _addr, rows):
-        self.rows = rows
+    def update(self, addr, rows):
+        assert addr == "A1", f"fake only models A1 anchors, got {addr!r}"
+        for r, new_row in enumerate(rows):
+            while len(self.rows) <= r:
+                self.rows.append([])
+            row = self.rows[r]
+            for c, val in enumerate(new_row):
+                while len(row) <= c:
+                    row.append("")
+                row[c] = val
 
     def clear(self):
         self.rows = []
 
     def get_all_values(self):
-        return self.rows
+        return [list(r) for r in self.rows]
 
 
 class _FakeSpreadsheet:
@@ -60,11 +75,13 @@ class _FakeSpreadsheet:
     Lookups are exact, but creating a title that differs from an existing
     one only by case fails hard — the real API rejects it, so a writer that
     only compares bare slugs (not complete titles) errors here instead of
-    silently desyncing the index."""
+    silently desyncing the index. Worksheets carry immutable IDs, the
+    ownership verifier the reconcile step requires (UX-75)."""
 
     def __init__(self, mock_gspread):
         self._mg = mock_gspread
         self._sheets: list = []
+        self._next_id = 101
 
     def worksheets(self):
         return list(self._sheets)
@@ -80,12 +97,31 @@ class _FakeSpreadsheet:
             raise AssertionError(
                 f"Google rejects duplicate worksheet title: {title!r}"
             )
-        w = _FakeWorksheet(title)
+        w = _FakeWorksheet(title, self._next_id)
+        self._next_id += 1
         self._sheets.append(w)
         return w
 
     def del_worksheet(self, ws):
         self._sheets.remove(ws)
+
+    def fetch_sheet_metadata(self):
+        return {"sheets": [
+            {"properties": {"sheetId": w.id, "title": w.title},
+             "developerMetadata": [dict(m) for m in w.metadata]}
+            for w in self._sheets
+        ]}
+
+    def batch_update(self, body):
+        for req in body.get("requests", []):
+            dm = req["createDeveloperMetadata"]["developerMetadata"]
+            sid = dm["location"]["sheetId"]
+            target = next((w for w in self._sheets if w.id == sid), None)
+            assert target is not None, f"unknown sheetId {sid}"
+            target.metadata.append({
+                "metadataKey": dm["metadataKey"],
+                "metadataValue": dm.get("metadataValue"),
+            })
 
     def titles(self):
         return [w.title for w in self._sheets]
@@ -382,12 +418,22 @@ class TestWriteResults:
 
         assert sh.add_worksheet.call_count == 3
 
+    @staticmethod
+    def _ordinary_sheets_only(sh, ws, mg):
+        """Mock lookup: ordinary sheets exist, generated ones do not."""
+        def _lookup(title):
+            if title in ("ModelMatrix", "ModelMatrixIndex"):
+                raise mg.exceptions.WorksheetNotFound(title)
+            return ws
+        sh.worksheet.side_effect = _lookup
+        sh.add_worksheet.return_value = MagicMock()
+        sh.fetch_sheet_metadata.return_value = {"sheets": []}
+
     def test_write_clears_sheets_when_clear_results_true(self):
         mg = _make_mock_gspread()
         sh = MagicMock()
         ws = MagicMock()
-        ws.get_all_values.return_value = []   # "existing" index is empty
-        sh.worksheet.return_value = ws
+        self._ordinary_sheets_only(sh, ws, mg)
 
         with patch.object(sheets_module, "gspread", mg, create=True):
             sheets_module._write_results(sh, _minimal_result(), clear_results=True)
@@ -398,21 +444,19 @@ class TestWriteResults:
         mg = _make_mock_gspread()
         sh = MagicMock()
         ws = MagicMock()
-        ws.get_all_values.return_value = []
-        sh.worksheet.return_value = ws
+        self._ordinary_sheets_only(sh, ws, mg)
 
         with patch.object(sheets_module, "gspread", mg, create=True):
             sheets_module._write_results(sh, _minimal_result(), clear_results=False)
 
-        ws.clear.assert_not_called()
-        sh.del_worksheet.assert_not_called()   # UX-73: False must not delete
+        ws.clear.assert_not_called()           # ordinary sheets honor the flag
+        sh.del_worksheet.assert_not_called()   # nothing verifiable to delete
 
     def test_design_df_written_with_headers(self):
         mg = _make_mock_gspread()
         sh = MagicMock()
         ws = MagicMock()
-        ws.get_all_values.return_value = []
-        sh.worksheet.return_value = ws
+        self._ordinary_sheets_only(sh, ws, mg)
 
         result = _minimal_result(
             design_df=pd.DataFrame({"x1": [0.1, 0.5], "x2": [-1.0, 1.0]})
@@ -1093,6 +1137,7 @@ class TestCompoundMatrixExport:
         ws.get_all_values.return_value = []
         sh.worksheet.return_value = ws
         sh.worksheets.return_value = []
+        sh.fetch_sheet_metadata.return_value = {"sheets": []}
 
         with patch.object(sheets_module, "gspread", mg, create=True):
             sheets_module._write_results(sh, self._compound_result())
@@ -1103,7 +1148,8 @@ class TestCompoundMatrixExport:
         assert "MM_Yield_Day" in requested        # slugged, no separator
         assert "ModelMatrixIndex" in requested
 
-        # the index carries the ORIGINAL names alongside the worksheet titles
+        # the index carries the ORIGINAL names alongside the worksheet
+        # titles; ownership lives in developer metadata, not in cells
         idx_updates = [
             c.args[1] for c in ws.update.call_args_list
             if c.args and isinstance(c.args[1], list)
@@ -1111,6 +1157,15 @@ class TestCompoundMatrixExport:
         ]
         assert idx_updates, "ModelMatrixIndex content missing"
         assert ["Yield/Day", "MM_Yield_Day"] in idx_updates[0]
+        # everything written was marked ours via developer metadata
+        assert sh.batch_update.called
+        _reqs = sh.batch_update.call_args.args[0]["requests"]
+        assert all(
+            r["createDeveloperMetadata"]["developerMetadata"]["metadataKey"]
+            == "latticeDOE_generated"
+            for r in _reqs
+        )
+        assert len(_reqs) == 3      # two MM_ sheets + the index
 
     def test_non_compound_result_writes_no_extra_sheets(self):
         # Empty spreadsheet: every lookup misses, so every write creates.
@@ -1137,6 +1192,7 @@ class TestCompoundMatrixExport:
         ws.get_all_values.return_value = []
         sh.worksheet.return_value = ws
         sh.worksheets.return_value = []
+        sh.fetch_sheet_metadata.return_value = {"sheets": []}
 
         res = self._compound_result()
         res["model_matrices"] = {
@@ -1177,6 +1233,21 @@ class TestRepeatExportReconciliation:
         with patch.object(sheets_module, "gspread", mg, create=True):
             sheets_module._write_results(sp, res, **kw)
 
+    @staticmethod
+    def _owned(sp, title):
+        return any(m["metadataKey"] == "latticeDOE_generated"
+                   for m in sp.worksheet(title).metadata)
+
+    def _index_consistent(self, sp):
+        """Every index row names a live, metadata-owned worksheet."""
+        rows = sp.worksheet("ModelMatrixIndex").get_all_values()
+        assert rows[0] == ["response", "worksheet"]
+        for _name, title in rows[1:]:
+            assert title in sp.titles(), f"dangling index entry {title!r}"
+            assert self._owned(sp, title), f"{title!r} not marked ours"
+        assert self._owned(sp, "ModelMatrixIndex")
+        return rows
+
     def test_case_changed_rerun_replaces_previous_worksheets(self):
         mg = _make_mock_gspread()
         sp = _FakeSpreadsheet(mg)
@@ -1186,26 +1257,26 @@ class TestRepeatExportReconciliation:
         self._export(sp, mg, self._compound_result({"yield": 2.0, "Other": 1.0}))
         mm = sorted(t for t in sp.titles() if t.startswith("MM_"))
         assert mm == ["MM_Other", "MM_yield"], mm
-        idx = sp.worksheet("ModelMatrixIndex").get_all_values()
-        assert idx == [["response", "worksheet"],
-                       ["yield", "MM_yield"], ["Other", "MM_Other"]]
+        rows = self._index_consistent(sp)
+        assert rows[1:] == [["yield", "MM_yield"], ["Other", "MM_Other"]]
         # the replaced worksheet carries the SECOND export's matrix
         assert sp.worksheet("MM_yield").rows == [["Intercept"], [2.0], [2.0]]
 
-    def test_clear_results_false_reuses_previous_worksheet_in_place(self):
+    def test_clear_results_false_still_replaces_generated_sheets(self):
+        """UX-76: clear_results governs the ordinary result sheets only —
+        the generated authority sheets are always fully replaced, or a
+        stale larger matrix would contaminate a smaller new one."""
         mg = _make_mock_gspread()
         sp = _FakeSpreadsheet(mg)
         self._export(sp, mg, self._compound_result({"Yield": 1.0, "Other": 1.0}))
 
         self._export(sp, mg, self._compound_result({"yield": 2.0, "Other": 3.0}),
                      clear_results=False)
-        # nothing deleted; the case-variant worksheet is reused in place and
-        # the index records the ACTUAL title the output lives under
-        assert "MM_Yield" in sp.titles()
-        assert "MM_yield" not in sp.titles()
-        idx = sp.worksheet("ModelMatrixIndex").get_all_values()
-        assert ["yield", "MM_Yield"] in idx
-        assert sp.worksheet("MM_Yield").rows == [["Intercept"], [2.0], [2.0]]
+        assert "MM_yield" in sp.titles()
+        assert "MM_Yield" not in sp.titles()
+        rows = self._index_consistent(sp)
+        assert rows[1:] == [["yield", "MM_yield"], ["Other", "MM_Other"]]
+        assert sp.worksheet("MM_yield").rows == [["Intercept"], [2.0], [2.0]]
         assert sp.worksheet("MM_Other").rows == [["Intercept"], [3.0], [3.0]]
 
     def test_users_own_worksheet_never_deleted_and_forces_suffix(self):
@@ -1215,10 +1286,8 @@ class TestRepeatExportReconciliation:
 
         self._export(sp, mg, self._compound_result({"Yield": 1.0, "Other": 1.0}))
         assert "mm_yield" in sp.titles()               # survived reconcile
-        idx = sp.worksheet("ModelMatrixIndex").get_all_values()
-        assert ["Yield", "MM_Yield_2"] in idx          # dodged the collision
-        for _name, title in idx[1:]:
-            assert title in sp.titles()
+        rows = self._index_consistent(sp)
+        assert ["Yield", "MM_Yield_2"] in rows[1:]
 
     def test_non_compound_rerun_removes_stale_compound_output(self):
         mg = _make_mock_gspread()
@@ -1229,4 +1298,144 @@ class TestRepeatExportReconciliation:
         self._export(sp, mg, _minimal_result())   # no compound, no basis
         assert not any(t.startswith("MM_") for t in sp.titles())
         assert "ModelMatrixIndex" not in sp.titles()
-        assert "ModelMatrix" not in sp.titles()
+        # the reserved ModelMatrix title is EMPTIED, not deleted — there is
+        # no ownership marker for it, so deletion could hit a user sheet
+        assert sp.worksheet("ModelMatrix").rows == []
+
+    def test_edited_index_cannot_delete_user_worksheets(self):
+        """UX-75/UX-78: index cells are user-editable content and must
+        carry NO deletion authority — not even a row holding the user
+        sheet's real, URL-visible sheet ID (a live ID proves identity,
+        never that Lattice DOE created the sheet). Ownership lives in
+        sheet-scoped developer metadata."""
+        mg = _make_mock_gspread()
+        sp = _FakeSpreadsheet(mg)
+        self._export(sp, mg, self._compound_result({"Yield": 1.0}))
+
+        user = sp.add_worksheet(title="MM_UserNotes", rows=10, cols=5)
+        user.rows = [["irreplaceable analysis notes"]]
+        idx = sp.worksheet("ModelMatrixIndex")
+        idx.rows.append(["notes", "MM_UserNotes", str(user.id)])  # REAL id
+        idx.rows.append(["notes2", "MM_UserNotes", ""])
+
+        self._export(sp, mg, self._compound_result({"Yield": 2.0}))
+        assert "MM_UserNotes" in sp.titles()
+        assert sp.worksheet("MM_UserNotes").rows == [
+            ["irreplaceable analysis notes"]
+        ]
+        # our own sheet was still legitimately replaced
+        assert sp.worksheet("MM_Yield").rows == [["Intercept"], [2.0], [2.0]]
+        self._index_consistent(sp)
+
+    def test_duplicated_generated_sheet_is_not_ours(self):
+        """UX-78 hardening: Google's "duplicate sheet" copies developer
+        metadata onto the copy, so a user's duplicate of a generated sheet
+        inherits the mark. The mark's value is the original sheet's own ID,
+        so the copy (different ID) must fail ownership verification."""
+        mg = _make_mock_gspread()
+        sp = _FakeSpreadsheet(mg)
+        self._export(sp, mg, self._compound_result({"Yield": 1.0}))
+
+        original = sp.worksheet("MM_Yield")
+        copy = sp.add_worksheet(title="MM_snapshot", rows=10, cols=5)
+        copy.rows = [list(r) for r in original.rows]
+        copy.metadata = [dict(m) for m in original.metadata]  # as Google does
+
+        self._export(sp, mg, self._compound_result({"Yield": 2.0}))
+        assert "MM_snapshot" in sp.titles(), "user's duplicate was deleted"
+        assert sp.worksheet("MM_snapshot").rows == [
+            ["Intercept"], [1.0], [1.0],
+        ]
+
+    def test_renamed_generated_sheet_is_left_alone(self):
+        """UX-78: a generated sheet the user RENAMED out of the MM_
+        namespace was implicitly claimed — the ownership mark travels with
+        the sheet, but deletion additionally requires our namespace."""
+        mg = _make_mock_gspread()
+        sp = _FakeSpreadsheet(mg)
+        self._export(sp, mg, self._compound_result({"Yield": 1.0}))
+        sp.worksheet("MM_Yield").title = "MyKeeper"    # user renames
+
+        self._export(sp, mg, self._compound_result({"Yield": 2.0}))
+        assert "MyKeeper" in sp.titles()
+        assert sp.worksheet("MyKeeper").rows == [["Intercept"], [1.0], [1.0]]
+        self._index_consistent(sp)
+
+    def test_legacy_pre_metadata_output_warns_and_is_left(self):
+        """UX-79: output from a release without ownership tracking can
+        never be verified ours, so it is left untouched — permanently —
+        and the export says so instead of silently accumulating stale
+        siblings next to current ones."""
+        mg = _make_mock_gspread()
+        sp = _FakeSpreadsheet(mg)
+        legacy = sp.add_worksheet(title="MM_Yield", rows=10, cols=5)
+        legacy.rows = [["Intercept"], [0.5], [0.5]]
+        legacy_idx = sp.add_worksheet(title="ModelMatrixIndex",
+                                      rows=10, cols=5)
+        legacy_idx.rows = [["response", "worksheet", "sheet_id"],
+                           ["Yield", "MM_Yield", str(legacy.id)]]
+
+        with pytest.warns(RuntimeWarning,
+                          match="predates ownership tracking.*MM_Yield"):
+            self._export(sp, mg, self._compound_result({"Yield": 9.0}))
+
+        # legacy sheet untouched; current output written beside it
+        assert sp.worksheet("MM_Yield").rows == [["Intercept"], [0.5], [0.5]]
+        rows = self._index_consistent(sp)
+        assert ["Yield", "MM_Yield_2"] in rows[1:]
+        assert sp.worksheet("MM_Yield_2").rows == [["Intercept"], [9.0], [9.0]]
+
+        # the index was adopted (reserved title, now marked ours): the
+        # NEXT export replaces everything current without warning again
+        import warnings as W
+        with W.catch_warnings():
+            W.simplefilter("error", RuntimeWarning)
+            self._export(sp, mg, self._compound_result({"Yield": 10.0}))
+        assert sp.worksheet("MM_Yield").rows == [["Intercept"], [0.5], [0.5]]
+        assert sp.worksheet("MM_Yield_2").rows == [
+            ["Intercept"], [10.0], [10.0],
+        ]
+
+    def test_unrelated_user_index_survives_non_compound_export(self):
+        """UX-75: a user's own worksheet that happens to be titled
+        ModelMatrixIndex is not ours to delete."""
+        mg = _make_mock_gspread()
+        sp = _FakeSpreadsheet(mg)
+        own = sp.add_worksheet(title="ModelMatrixIndex", rows=10, cols=5)
+        own.rows = [["my personal", "index"], ["of", "things"]]
+
+        self._export(sp, mg, _minimal_result())
+        assert "ModelMatrixIndex" in sp.titles()
+        assert sp.worksheet("ModelMatrixIndex").rows == [
+            ["my personal", "index"], ["of", "things"],
+        ]
+
+    def test_smaller_second_matrix_leaves_no_stale_cells(self):
+        """UX-76: Google updates only the supplied rectangle, so reusing a
+        worksheet without clearing leaves the old matrix's extra rows and
+        columns — and stale index rows would later be read as ownership
+        records. Generated sheets must be fully cleared even with
+        clear_results=False."""
+        mg = _make_mock_gspread()
+        sp = _FakeSpreadsheet(mg)
+        big = _minimal_result()
+        big["model_matrix"] = pd.DataFrame({
+            "Intercept": [1.0, 1.0, 1.0], "a": [2.0, 2.0, 2.0],
+            "b": [3.0, 3.0, 3.0],
+        })
+        self._export(sp, mg, big)
+
+        small = _minimal_result()
+        small["model_matrix"] = pd.DataFrame({"Intercept": [9.0]})
+        self._export(sp, mg, small, clear_results=False)
+        assert sp.worksheet("ModelMatrix").rows == [["Intercept"], [9.0]], (
+            "stale rows/columns from the larger matrix contaminated the sheet"
+        )
+
+        # index shrinkage: three responses, then two — no trailing rows
+        self._export(sp, mg, self._compound_result(
+            {"y1": 1.0, "y2": 1.0, "y3": 1.0}))
+        self._export(sp, mg, self._compound_result({"y1": 1.0, "y2": 1.0}),
+                     clear_results=False)
+        rows = self._index_consistent(sp)
+        assert len(rows) == 3, f"trailing stale index rows: {rows}"

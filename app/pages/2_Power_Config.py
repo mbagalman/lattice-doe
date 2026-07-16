@@ -22,6 +22,7 @@ import streamlit as st
 
 from state import init_state, render_sidebar
 from components.power_params import (
+    POWER_TARGET_FORMAT,
     POWER_TARGET_MAX,
     POWER_TARGET_MIN,
     render_power_params,
@@ -714,7 +715,8 @@ with st.expander("Multi-response (optional)"):
                     r["power"] = c_power.number_input(
                         "Target power", value=r.get("power", 0.80),
                         min_value=POWER_TARGET_MIN,
-                        max_value=POWER_TARGET_MAX, format="%.2f",
+                        max_value=POWER_TARGET_MAX,
+                        format=POWER_TARGET_FORMAT,
                         key=f"mr_power_{i}",
                     )
                     r["weight"] = c_weight.number_input(

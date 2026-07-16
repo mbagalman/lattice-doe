@@ -18,6 +18,7 @@ import streamlit as st
 
 from components.design_config import build_design_opts_from_state
 from components.power_params import (
+    POWER_TARGET_FORMAT,
     POWER_TARGET_MAX,
     POWER_TARGET_MIN,
     scenario_contrast,
@@ -620,7 +621,7 @@ else:
         max_value=POWER_TARGET_MAX,
         value=min(max(_target_power, POWER_TARGET_MIN), POWER_TARGET_MAX),
         step=0.01,
-        format="%.2f",
+        format=POWER_TARGET_FORMAT,
         key="mde_power_target",
         help="Power level at which to find the minimum detectable effect.",
     )

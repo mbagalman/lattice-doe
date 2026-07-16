@@ -112,8 +112,12 @@ def scenario_contrast(design_opts: Any = None, **kwargs: Any) -> Tuple[Any, Any]
 # differently-bounded widget that later re-displays it
 # (StreamlitValueBelowMinError). The config layer accepts any value in
 # the open interval (0, 1); these clip only the unusable extremes.
+# The display format is part of the contract (UX-77): the bounds permit
+# four-decimal targets, and a two-decimal display would render the valid
+# 0.9999 as the impossible-looking "1.00".
 POWER_TARGET_MIN = 0.01
 POWER_TARGET_MAX = 0.9999
+POWER_TARGET_FORMAT = "%.4f"
 
 
 def render_power_params() -> None:
@@ -140,7 +144,7 @@ def render_power_params() -> None:
             min_value=POWER_TARGET_MIN,
             max_value=POWER_TARGET_MAX,
             step=0.01,
-            format="%.2f",
+            format=POWER_TARGET_FORMAT,
             key="power_target",
             help="Desired probability of detecting the effect. Typical value: 0.80.",
         )

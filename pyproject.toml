@@ -57,7 +57,7 @@ viz = [
 extras = [
   "tqdm>=4.65,<5",
   "xlsxwriter>=3.0,<4",
-  "openpyxl>=3.0"
+  "openpyxl>=3.1"
 ]
 # Optional dependencies for the Streamlit web front-end
 app = [
@@ -107,7 +107,7 @@ all = [
   # extras
   "tqdm>=4.65,<5",
   "xlsxwriter>=3.0,<4",
-  "openpyxl>=3.0",
+  "openpyxl>=3.1",
   # app
   "streamlit>=1.30",
   "plotly>=5.0",

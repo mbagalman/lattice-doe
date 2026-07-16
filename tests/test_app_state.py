@@ -540,6 +540,32 @@ class TestPageNavigationPersistence:
         assert opts.split_plot.df_method == "conservative"
         assert opts.split_plot.eta == 1.5
 
+    def test_target_power_display_contract(self):
+        """UX-77: the shared bounds permit four-decimal targets, so the
+        shared display format must render them faithfully — a two-decimal
+        format shows the valid 0.9999 as an impossible-looking '1.00'.
+        Every target widget must render through the shared constant."""
+        import sys
+
+        sys.path.insert(0, str(_APP_DIR)) if str(_APP_DIR) not in sys.path else None
+        pytest.importorskip("streamlit")
+        from components.power_params import (
+            POWER_TARGET_FORMAT, POWER_TARGET_MAX, POWER_TARGET_MIN,
+        )
+
+        assert POWER_TARGET_FORMAT % POWER_TARGET_MAX == "0.9999"
+        assert float(POWER_TARGET_FORMAT % POWER_TARGET_MAX) < 1.0
+        assert POWER_TARGET_FORMAT % POWER_TARGET_MIN == "0.0100"
+        # every target widget renders through the shared format (a site
+        # that stops using it would also leave an unused import for lint)
+        for rel in ("components/power_params.py",
+                    "pages/2_Power_Config.py",
+                    "pages/4_Analysis.py"):
+            src = (_APP_DIR / rel).read_text(encoding="utf-8")
+            assert "format=POWER_TARGET_FORMAT" in src, (
+                f"{rel} does not render the target through the shared format"
+            )
+
     def test_analysis_target_power_follows_selected_response(self):
         """UX-71: each response can carry its own target power; MDE (and the
         target reference lines) must use the bound response's power_cfg.power,

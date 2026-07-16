@@ -34,6 +34,7 @@ Install
 """
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -591,21 +592,27 @@ def _write_output_sheets(
     separators, so free-form response names are slugged; the
     ``ModelMatrixIndex`` sheet maps original names to sheet titles.
 
-    Output sheets always describe THIS result only: per-response sheets a
-    previous export recorded in ``ModelMatrixIndex`` are deleted up front
-    (UX-73). Without that, a repeat export whose response names changed —
-    even by case only, which Excel titles do not distinguish — leaves the
-    old sheet in place, the backend silently renames the new one around it,
-    and the rewritten index points at a sheet that does not exist.
+    Output sheets always describe THIS result only: generated sheets from a
+    previous export are deleted up front (UX-73). Without that, a repeat
+    export whose response names changed — even by case only, which Excel
+    titles do not distinguish — leaves the old sheet in place, the backend
+    silently renames the new one around it, and the rewritten index points
+    at a sheet that does not exist.
+
+    Deletion authority is the ``latticeDOE_generated_sheets`` custom
+    document property, NOT the ``ModelMatrixIndex`` cells (UX-75): index
+    cells are ordinary user-editable content, so a listed title proves
+    nothing about who owns the sheet — an edited index must never aim the
+    cleanup at the user's own data. The index is purely informational.
     """
     _reconcile_previous_matrix_sheets(wb)
     _write_results_sheet(wb, report)
     _write_df_to_sheet(wb, "Design", design_df)
     _write_df_to_sheet(wb, "Buckets", buckets_df)
+    _generated: set = set()
     if result.get("model_matrix") is not None:
         _write_df_to_sheet(wb, "ModelMatrix", result["model_matrix"])
-    elif "ModelMatrix" in wb.sheetnames:
-        del wb["ModelMatrix"]  # do not pair the new Design with an old basis
+        _generated.add("ModelMatrix")
     if (
         result.get("model_matrices") is not None
         and report.get("compound_criterion")
@@ -622,33 +629,112 @@ def _write_output_sheets(
             )
             _write_df_to_sheet(wb, _sheet, _rmm)
             _mm_index_rows.append((_rname, _sheet))
+            _generated.add(_sheet)
         _write_df_to_sheet(
             wb, "ModelMatrixIndex",
             pd.DataFrame(_mm_index_rows, columns=["response", "sheet"]),
         )
+        _generated.add("ModelMatrixIndex")
+    _record_generated_sheets(wb, _generated)
+
+
+# The workbook-defined ownership marker (UX-75): a custom document property
+# listing the sheet titles Lattice DOE generated. Unlike worksheet cells it
+# is not casually editable, so it — and only it — authorizes deleting a
+# sheet on the next export. Titles never contain "|" (safe_name_slug strips
+# it and the fixed names don't use it), so it is a safe join delimiter.
+_GENERATED_SHEETS_PROP = "latticeDOE_generated_sheets"
+
+
+def _read_generated_sheets(wb: Any) -> set:
+    """Titles a previous export recorded as generated (empty if none).
+
+    Defensive on purpose: no marker (first export, a workbook written by a
+    pre-marker version, or openpyxl < 3.1 without ``custom_doc_props``)
+    means no deletion authority — never guess ownership from content.
+    """
+    try:
+        props = wb.custom_doc_props
+        value = props[_GENERATED_SHEETS_PROP].value
+    except (AttributeError, KeyError, TypeError):
+        return set()
+    if not isinstance(value, str) or not value:
+        return set()
+    return {t for t in value.split("|") if t}
+
+
+def _record_generated_sheets(wb: Any, titles: set) -> None:
+    """Record *titles* as this export's generated sheets (see UX-75)."""
+    try:
+        from openpyxl.packaging.custom import StringProperty
+
+        props = wb.custom_doc_props
+        if _GENERATED_SHEETS_PROP in props.names:
+            del props[_GENERATED_SHEETS_PROP]
+        props.append(StringProperty(
+            name=_GENERATED_SHEETS_PROP, value="|".join(sorted(titles)),
+        ))
+    except (AttributeError, ImportError):
+        # openpyxl < 3.1: no marker support; the next export simply has no
+        # deletion authority (safe — stale sheets are dodged by suffixing).
+        pass
 
 
 def _reconcile_previous_matrix_sheets(wb: Any) -> None:
-    """Delete per-response sheets a previous export listed in its index.
+    """Delete the generated sheets recorded by a previous export (UX-73).
 
-    Only titles the index attributes to us (``MM_`` prefix) are deleted —
-    the index is the record of what WE wrote, so the user's own sheets
-    survive even if an edited index names them. The index sheet itself is
-    removed too; a compound result rewrites it, any other result must not
-    leave it dangling.
+    Authority is the workbook's ownership marker exclusively (UX-75) —
+    ``ModelMatrixIndex`` cells are user-editable and prove nothing. Each
+    recorded title must also still LOOK like ours (``MM_`` prefix or one of
+    the fixed generated names) so even a corrupted marker cannot reach
+    arbitrary sheets. Workbooks from releases that predate the marker lose
+    nothing: their sheets are never deleted, the export warns about them
+    (UX-79), and new titles dodge the orphans by suffixing.
     """
-    if "ModelMatrixIndex" not in wb.sheetnames:
-        return
-    ws_idx = wb["ModelMatrixIndex"]
-    for _row in ws_idx.iter_rows(min_row=2, max_col=2, values_only=True):
-        _title = _row[1] if len(_row) > 1 else None
+    owned = _read_generated_sheets(wb)
+    _warn_about_legacy_sheets(wb, owned)
+    for _title in sorted(owned):
         if (
-            isinstance(_title, str)
-            and _title.startswith("MM_")
+            (_title in ("ModelMatrix", "ModelMatrixIndex")
+             or _title.startswith("MM_"))
             and _title in wb.sheetnames
         ):
             del wb[_title]
-    del wb["ModelMatrixIndex"]
+
+
+def _warn_about_legacy_sheets(wb: Any, owned: set) -> None:
+    """Warn when output from a pre-marker release is present (UX-79).
+
+    Those sheets cannot be told apart from user data, so they are left
+    untouched permanently — this warning is the migration path. Detection
+    is conservative: an UNMARKED sheet at the reserved index title whose
+    header matches the generated layout; anything else is presumed user
+    data and not mentioned at all.
+    """
+    if "ModelMatrixIndex" not in wb.sheetnames:
+        return
+    if "ModelMatrixIndex" in owned:
+        return
+    ws_idx = wb["ModelMatrixIndex"]
+    header = next(ws_idx.iter_rows(min_row=1, max_row=1, values_only=True), ())
+    if tuple(header[:2]) != ("response", "sheet"):
+        return
+    stale = [
+        str(row[1])
+        for row in ws_idx.iter_rows(min_row=2, max_col=2, values_only=True)
+        if len(row) > 1 and isinstance(row[1], str)
+        and row[1].startswith("MM_")
+    ]
+    warnings.warn(
+        "This workbook contains model-matrix sheets from a Lattice DOE "
+        "version that predates ownership tracking"
+        + (f" ({', '.join(stale)})" if stale else "")
+        + ". They cannot be verified as Lattice DOE output, so they were "
+        "left untouched and may hold OUTDATED matrices — delete them "
+        "manually if unwanted. Sheets written from now on are tracked and "
+        "replaced automatically.",
+        RuntimeWarning,
+    )
 
 
 def _write_results_sheet(wb: Any, report: Dict[str, Any]) -> None:
