@@ -37,6 +37,60 @@ def _make_mock_gspread():
     return mg
 
 
+class _FakeWorksheet:
+    """In-memory worksheet: a title plus the last-written rectangle."""
+
+    def __init__(self, title):
+        self.title = title
+        self.rows: list = []
+
+    def update(self, _addr, rows):
+        self.rows = rows
+
+    def clear(self):
+        self.rows = []
+
+    def get_all_values(self):
+        return self.rows
+
+
+class _FakeSpreadsheet:
+    """In-memory spreadsheet enforcing Google's title rules (UX-73).
+
+    Lookups are exact, but creating a title that differs from an existing
+    one only by case fails hard — the real API rejects it, so a writer that
+    only compares bare slugs (not complete titles) errors here instead of
+    silently desyncing the index."""
+
+    def __init__(self, mock_gspread):
+        self._mg = mock_gspread
+        self._sheets: list = []
+
+    def worksheets(self):
+        return list(self._sheets)
+
+    def worksheet(self, title):
+        for w in self._sheets:
+            if w.title == title:
+                return w
+        raise self._mg.exceptions.WorksheetNotFound(title)
+
+    def add_worksheet(self, title, rows, cols):
+        if any(w.title.casefold() == title.casefold() for w in self._sheets):
+            raise AssertionError(
+                f"Google rejects duplicate worksheet title: {title!r}"
+            )
+        w = _FakeWorksheet(title)
+        self._sheets.append(w)
+        return w
+
+    def del_worksheet(self, ws):
+        self._sheets.remove(ws)
+
+    def titles(self):
+        return [w.title for w in self._sheets]
+
+
 def _minimal_result(design_df=None, buckets_df=None):
     """Minimal result dict matching find_optimal_design() output."""
     if design_df is None:
@@ -332,6 +386,7 @@ class TestWriteResults:
         mg = _make_mock_gspread()
         sh = MagicMock()
         ws = MagicMock()
+        ws.get_all_values.return_value = []   # "existing" index is empty
         sh.worksheet.return_value = ws
 
         with patch.object(sheets_module, "gspread", mg, create=True):
@@ -343,17 +398,20 @@ class TestWriteResults:
         mg = _make_mock_gspread()
         sh = MagicMock()
         ws = MagicMock()
+        ws.get_all_values.return_value = []
         sh.worksheet.return_value = ws
 
         with patch.object(sheets_module, "gspread", mg, create=True):
             sheets_module._write_results(sh, _minimal_result(), clear_results=False)
 
         ws.clear.assert_not_called()
+        sh.del_worksheet.assert_not_called()   # UX-73: False must not delete
 
     def test_design_df_written_with_headers(self):
         mg = _make_mock_gspread()
         sh = MagicMock()
         ws = MagicMock()
+        ws.get_all_values.return_value = []
         sh.worksheet.return_value = ws
 
         result = _minimal_result(
@@ -1032,7 +1090,9 @@ class TestCompoundMatrixExport:
         mg = _make_mock_gspread()
         sh = MagicMock()
         ws = MagicMock()
+        ws.get_all_values.return_value = []
         sh.worksheet.return_value = ws
+        sh.worksheets.return_value = []
 
         with patch.object(sheets_module, "gspread", mg, create=True):
             sheets_module._write_results(sh, self._compound_result())
@@ -1053,15 +1113,120 @@ class TestCompoundMatrixExport:
         assert ["Yield/Day", "MM_Yield_Day"] in idx_updates[0]
 
     def test_non_compound_result_writes_no_extra_sheets(self):
+        # Empty spreadsheet: every lookup misses, so every write creates.
         mg = _make_mock_gspread()
         sh = MagicMock()
-        sh.worksheet.return_value = MagicMock()
+        sh.worksheet.side_effect = mg.exceptions.WorksheetNotFound("missing")
+        sh.add_worksheet.return_value = MagicMock()
 
         res = _minimal_result()
         res["model_matrix"] = pd.DataFrame({"Intercept": [1.0, 1.0]})
         with patch.object(sheets_module, "gspread", mg, create=True):
             sheets_module._write_results(sh, res)
 
+        created = [c.kwargs["title"] for c in sh.add_worksheet.call_args_list]
+        assert "ModelMatrixIndex" not in created
+        assert not any(t.startswith("MM_") for t in created)
+
+    def test_case_only_response_names_get_distinct_worksheets(self):
+        """UX-69: case-only response names must map to casefold-distinct
+        worksheet titles."""
+        mg = _make_mock_gspread()
+        sh = MagicMock()
+        ws = MagicMock()
+        ws.get_all_values.return_value = []
+        sh.worksheet.return_value = ws
+        sh.worksheets.return_value = []
+
+        res = self._compound_result()
+        res["model_matrices"] = {
+            "Yield": pd.DataFrame({"Intercept": [1.0, 1.0]}),
+            "yield": pd.DataFrame({"Intercept": [1.0, 1.0]}),
+        }
+        with patch.object(sheets_module, "gspread", mg, create=True):
+            sheets_module._write_results(sh, res)
+
         requested = [c.args[0] for c in sh.worksheet.call_args_list]
-        assert "ModelMatrixIndex" not in requested
-        assert not any(t.startswith("MM_") for t in requested)
+        mm = [t for t in requested if t.startswith("MM_")]
+        assert len({t.casefold() for t in mm}) == len(mm), mm
+        assert "MM_yield_2" in mm
+
+
+class TestRepeatExportReconciliation:
+    """UX-73: repeat exports into the same spreadsheet must replace the
+    per-response worksheets the previous export recorded in its index.
+    Google rejects titles differing only by case, so a case-changed
+    response name would otherwise fail to create its worksheet — or leave
+    the index pointing at the previous export's output. The fake
+    spreadsheet enforces that rejection, so a bare-slug collision check
+    fails these tests loudly instead of desyncing silently."""
+
+    @staticmethod
+    def _compound_result(name_to_cell):
+        res = _minimal_result()
+        res["report"]["compound_criterion"] = True
+        res["model_matrix"] = pd.DataFrame({"Intercept": [1.0, 1.0]})
+        res["model_matrices"] = {
+            name: pd.DataFrame({"Intercept": [v, v]})
+            for name, v in name_to_cell.items()
+        }
+        return res
+
+    @staticmethod
+    def _export(sp, mg, res, **kw):
+        with patch.object(sheets_module, "gspread", mg, create=True):
+            sheets_module._write_results(sp, res, **kw)
+
+    def test_case_changed_rerun_replaces_previous_worksheets(self):
+        mg = _make_mock_gspread()
+        sp = _FakeSpreadsheet(mg)
+        self._export(sp, mg, self._compound_result({"Yield": 1.0, "Other": 1.0}))
+        assert "MM_Yield" in sp.titles()
+
+        self._export(sp, mg, self._compound_result({"yield": 2.0, "Other": 1.0}))
+        mm = sorted(t for t in sp.titles() if t.startswith("MM_"))
+        assert mm == ["MM_Other", "MM_yield"], mm
+        idx = sp.worksheet("ModelMatrixIndex").get_all_values()
+        assert idx == [["response", "worksheet"],
+                       ["yield", "MM_yield"], ["Other", "MM_Other"]]
+        # the replaced worksheet carries the SECOND export's matrix
+        assert sp.worksheet("MM_yield").rows == [["Intercept"], [2.0], [2.0]]
+
+    def test_clear_results_false_reuses_previous_worksheet_in_place(self):
+        mg = _make_mock_gspread()
+        sp = _FakeSpreadsheet(mg)
+        self._export(sp, mg, self._compound_result({"Yield": 1.0, "Other": 1.0}))
+
+        self._export(sp, mg, self._compound_result({"yield": 2.0, "Other": 3.0}),
+                     clear_results=False)
+        # nothing deleted; the case-variant worksheet is reused in place and
+        # the index records the ACTUAL title the output lives under
+        assert "MM_Yield" in sp.titles()
+        assert "MM_yield" not in sp.titles()
+        idx = sp.worksheet("ModelMatrixIndex").get_all_values()
+        assert ["yield", "MM_Yield"] in idx
+        assert sp.worksheet("MM_Yield").rows == [["Intercept"], [2.0], [2.0]]
+        assert sp.worksheet("MM_Other").rows == [["Intercept"], [3.0], [3.0]]
+
+    def test_users_own_worksheet_never_deleted_and_forces_suffix(self):
+        mg = _make_mock_gspread()
+        sp = _FakeSpreadsheet(mg)
+        sp.add_worksheet(title="mm_yield", rows=10, cols=5)  # user's, unindexed
+
+        self._export(sp, mg, self._compound_result({"Yield": 1.0, "Other": 1.0}))
+        assert "mm_yield" in sp.titles()               # survived reconcile
+        idx = sp.worksheet("ModelMatrixIndex").get_all_values()
+        assert ["Yield", "MM_Yield_2"] in idx          # dodged the collision
+        for _name, title in idx[1:]:
+            assert title in sp.titles()
+
+    def test_non_compound_rerun_removes_stale_compound_output(self):
+        mg = _make_mock_gspread()
+        sp = _FakeSpreadsheet(mg)
+        self._export(sp, mg, self._compound_result({"Yield": 1.0, "Other": 1.0}))
+        assert any(t.startswith("MM_") for t in sp.titles())
+
+        self._export(sp, mg, _minimal_result())   # no compound, no basis
+        assert not any(t.startswith("MM_") for t in sp.titles())
+        assert "ModelMatrixIndex" not in sp.titles()
+        assert "ModelMatrix" not in sp.titles()

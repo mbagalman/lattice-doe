@@ -26,6 +26,7 @@ from scipy.stats import ncf as scipy_ncf
 
 from components.power_params import scenario_contrast
 from components.mr_config import build_multi_response_cfg
+from components.design_config import build_design_opts_from_state
 
 try:
     from lattice_doe.utils import safe_name_slug
@@ -47,7 +48,7 @@ try:
         PowerR2Config,
         MultiResponseOptions,
     )
-    from lattice_doe._request_builder import build_power_cfg, build_design_opts
+    from lattice_doe._request_builder import build_power_cfg
     _HAS_IOPT = True
 except ImportError:
     _HAS_IOPT = False
@@ -138,32 +139,9 @@ def _build_multi_response_cfg(ss: dict) -> "MultiResponseOptions":
 
 
 def _build_design_opts(ss: dict) -> DesignOptions:
-    _do_d: dict = dict(
-        criterion=ss["criterion"],
-        starts=int(ss["starts"]),
-        random_state=int(ss["random_state"]),
-        auto_candidate=bool(ss["auto_candidate"]),
-        n_blocks=int(ss.get("n_blocks", 0)),
-        block_factor_name=ss.get("block_factor_name", "Block"),
-        preallocate_categorical=bool(ss.get("preallocate_categorical", False)),
-        alloc_min_per_cell=int(ss.get("alloc_min_per_cell", 1)),
-        alloc_max_per_cell=int(ss.get("alloc_max_per_cell", 0)),
-        constraint_expr=ss.get("constraint_expr", "").strip() or None,
-    )
-    if not ss["auto_candidate"]:
-        _do_d["candidate_points"] = int(ss["candidate_points"])
-    # Split-plot options
-    if ss.get("split_plot_enabled", False):
-        htc_names = ss.get("sp_htc_factors") or []
-        if htc_names:
-            _do_d["split_plot"] = dict(
-                htc_factors=list(htc_names),
-                n_whole_plots=int(ss.get("sp_n_whole_plots", 4)),
-                eta=float(ss.get("sp_eta", 1.0)),
-                subplots_per_wp=int(ss.get("sp_subplots_per_wp", 0)),
-                df_method=str(ss.get("sp_df_method", "auto")),
-            )
-    return build_design_opts(_do_d)
+    """Delegates to the shared builder (UX-70) so the Run and Analysis
+    pages can never drift on what a run's options contain."""
+    return build_design_opts_from_state(ss)
 
 
 def _jsonify(obj):
@@ -336,6 +314,8 @@ with col_clear:
     if ss.get("result") is not None:
         if st.button("Clear result", use_container_width=True):
             ss["result"] = None
+            ss["result_design_opts"] = None
+            ss["result_run_id"] = None
             ss["run_error"] = None
             st.rerun()
 
@@ -383,11 +363,22 @@ if run_clicked and not _issues and _HAS_IOPT:
                 ss["_last_power_cfg"] = power_cfg
             _status.update(label="Design complete", state="complete")
         ss["result"] = result
+        # Preserve the EXACT options this run used (UX-70): the Analysis page
+        # analyzes the fixed design with these, so later widget edits cannot
+        # silently change the df method / split-plot structure it assumes.
+        ss["result_design_opts"] = design_opts
+        # Mint a per-run identity (UX-74): report values (n, power, elapsed)
+        # can repeat when the same configuration is re-run, so the Analysis
+        # page keys its cached results to this token, not to those values.
+        ss["_run_seq"] = int(ss.get("_run_seq", 0)) + 1
+        ss["result_run_id"] = ss["_run_seq"]
         ss["run_error"] = None
         st.rerun()
     except Exception as exc:
         ss["run_error"] = str(exc)
         ss["result"] = None
+        ss["result_design_opts"] = None
+        ss["result_run_id"] = None
 
 if ss.get("run_error"):
     st.error(f"Run failed: {ss['run_error']}")

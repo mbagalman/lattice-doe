@@ -373,3 +373,44 @@ class TestSafeNameSlug:
         # collision suffix respects maxlen
         taken = {"x" * 10}
         assert len(safe_name_slug("x" * 100, taken, maxlen=10)) <= 10
+
+    def test_case_only_collisions_resolved(self):
+        """UX-69: Windows filenames and Excel sheet titles are
+        case-insensitive — Yield and yield are distinct valid response names
+        and must not produce case-only-different slugs."""
+        from lattice_doe.utils import safe_name_slug
+
+        taken: set = set()
+        assert safe_name_slug("Yield", taken) == "Yield"
+        assert safe_name_slug("yield", taken) == "yield_2"
+        assert safe_name_slug("YIELD", taken) == "YIELD_3"
+
+    def test_mixed_case_seeds_respected(self):
+        from lattice_doe.utils import safe_name_slug
+
+        taken = {"MM_Taken"}
+        assert safe_name_slug("mm_taken", taken) == "mm_taken_2"
+
+    def test_prefix_collisions_checked_on_complete_name(self):
+        """UX-73: when the slug is embedded in a longer sheet title
+        (MM_<slug>), collisions exist between COMPLETE names — checking the
+        bare slug against prefixed titles misses them, and the spreadsheet
+        backend then renames the sheet behind the caller's back."""
+        from lattice_doe.utils import safe_name_slug
+
+        # bare-slug comparison does NOT collide ...
+        assert safe_name_slug("yield", {"MM_Yield"}) == "yield"
+        # ... prefixed comparison must (Excel titles ignore case)
+        taken = {"MM_Yield"}
+        assert safe_name_slug("yield", taken, prefix="MM_") == "yield_2"
+        assert "MM_yield_2" in taken       # recorded as the complete title
+        # repeat calls keep resolving against complete titles
+        assert safe_name_slug("Yield", taken, prefix="MM_") == "Yield_3"
+
+    def test_prefix_still_bounds_slug_length_alone(self):
+        from lattice_doe.utils import safe_name_slug
+
+        taken = {"MM_" + "a" * 10}
+        slug = safe_name_slug("A" * 30, taken, maxlen=10, prefix="MM_")
+        assert slug == "A" * 8 + "_2"      # suffix fits inside maxlen
+        assert len(slug) == 10

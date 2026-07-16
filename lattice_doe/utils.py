@@ -413,6 +413,7 @@ def safe_name_slug(
     name: str,
     existing: "Optional[set]" = None,
     maxlen: int = 60,
+    prefix: str = "",
 ) -> str:
     """A filesystem/sheet-safe identifier for a user-supplied label (UX-67).
 
@@ -423,10 +424,25 @@ def safe_name_slug(
     spaces are stripped, the result is truncated to *maxlen*, and an empty
     result falls back to ``"response"``.
 
-    When *existing* (a set of already-taken slugs) is given, collisions are
+    When *existing* (a set of already-taken names) is given, collisions are
     resolved deterministically by appending ``_2``, ``_3``, … in call order,
-    and the chosen slug is added to the set. Callers keep the ORIGINAL name
-    alongside the slug (e.g. in report metadata) so nothing is lost.
+    and the chosen name is added to the set. Collision comparison is
+    CASE-INSENSITIVE (``casefold``): Windows filenames and Excel worksheet
+    titles do not distinguish case, so the distinct response names ``Yield``
+    and ``yield`` must not map to case-only-different slugs — that silently
+    overwrites files and desyncs sheet indexes (UX-69). Elements already in
+    *existing* may be any case; returned slugs keep the original casing.
+    Callers keep the ORIGINAL name alongside the slug (e.g. in report
+    metadata) so nothing is lost.
+
+    When the slug is embedded in a longer name (Excel/Sheets titles are
+    ``MM_<slug>``), pass that *prefix*: collisions are then checked — and
+    recorded in *existing* — on the COMPLETE ``prefix + slug`` name, so the
+    set may be seeded directly with existing worksheet titles. Checking the
+    bare slug against prefixed titles misses the collision, and the
+    spreadsheet backend then renames the sheet behind the caller's back
+    while the index records the requested title (UX-73). *maxlen* still
+    bounds the slug alone; the returned value never includes *prefix*.
     """
     cleaned = "".join(
         "_" if (c in '\\/:*?"<>|[]\'' or ord(c) < 32) else c
@@ -435,13 +451,18 @@ def safe_name_slug(
     cleaned = cleaned[:maxlen].strip(". ") or "response"
     if existing is None:
         return cleaned
+
+    def _taken(candidate: str) -> bool:
+        folded = (prefix + candidate).casefold()
+        return any(folded == e.casefold() for e in existing)
+
     slug = cleaned
     k = 2
-    while slug in existing:
+    while _taken(slug):
         suffix = f"_{k}"
         slug = cleaned[: maxlen - len(suffix)] + suffix
         k += 1
-    existing.add(slug)
+    existing.add(prefix + slug)
     return slug
 
 __all__ = [

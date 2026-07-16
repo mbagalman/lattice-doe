@@ -354,3 +354,422 @@ class TestPageNavigationPersistence:
             f"sensitivity analyzed a different model: nominal="
             f"{sens['nominal_power']} vs y2 reported={y2_reported}"
         )
+
+    def test_switching_response_clears_stale_analysis_results(self):
+        """UX-68: cached sensitivity/MDE/comparison/eta results belong to one
+        (run, response, mode) context. Switching the selected response must
+        clear them — otherwise the page shows results computed for the
+        PREVIOUS response (and mode mixes can crash the renderers)."""
+        import numpy as np
+
+        from lattice_doe import DesignOptions, find_multiresponse_design
+        from lattice_doe.config import (
+            MultiResponseOptions, PowerContrastConfig, ResponseSpec,
+        )
+
+        opts = DesignOptions(candidate_points=100, random_state=4, starts=1)
+        cfg1 = PowerContrastConfig(
+            L=np.array([[0.0, 1.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.8, sigma=1.0, max_n=18,
+        )
+        cfg2 = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0, 0.0, -1.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.8, sigma=2.0, max_n=18,
+        )
+        multi = MultiResponseOptions(responses=[
+            ResponseSpec(name="y1", power_cfg=cfg1),
+            ResponseSpec(name="y2", power_cfg=cfg2,
+                         formula="~ 1 + bs(x, df=4)"),
+        ])
+        import warnings as W
+        with W.catch_warnings():
+            W.simplefilter("ignore")
+            result = find_multiresponse_design(
+                "~ 1 + x", {"x": (0.0, 1.0)}, multi, opts,
+            )
+
+        at = self._fresh_app()
+        at.run()
+        at.session_state["formula"] = "~ 1 + x"
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+        ]
+        at.session_state["result"] = result
+        at.session_state["mr_responses"] = [
+            {"name": "y1", "power_mode": "contrast",
+             "L_text": "0 1", "delta_text": "0.5", "sigma": 1.0},
+            {"name": "y2", "power_mode": "contrast",
+             "L_text": "0 1 0 0 -1", "delta_text": "0.5", "sigma": 2.0,
+             "formula": "~ 1 + bs(x, df=4)"},
+        ]
+        at.switch_page("pages/4_Analysis.py")
+        at.run()
+        assert not at.exception
+
+        # Run sensitivity for y1 and confirm it cached.
+        btn = next(b for b in at.button if b.key == "btn_sensitivity")
+        btn.click().run()
+        assert not at.exception
+        assert "_sensitivity_result" in at.session_state
+        y1_sigma_min = at.session_state["sens_sigma_min"]
+
+        # Switch to y2: the y1 results and response-derived widget defaults
+        # must be gone, and nothing stale may render.
+        sel = next(w for w in at.selectbox if w.key == "analysis_response")
+        sel.set_value("y2").run()
+        assert not at.exception
+        assert "_sensitivity_result" not in at.session_state
+        assert "_mde_result" not in at.session_state
+        # sweep range re-defaults from y2's sigma (2.0), not y1's (1.0)
+        assert at.session_state["sens_sigma_min"] != y1_sigma_min
+
+        # A NEW run must also invalidate, even with the same response chosen.
+        btn = next(b for b in at.button if b.key == "btn_sensitivity")
+        btn.click().run()
+        assert "_sensitivity_result" in at.session_state
+        result2 = dict(result)
+        result2["report"] = dict(result["report"])
+        result2["report"]["elapsed_sec"] = (
+            float(result["report"].get("elapsed_sec", 0.0)) + 999.0
+        )
+        at.session_state["result"] = result2
+        at.run()
+        assert not at.exception
+        assert "_sensitivity_result" not in at.session_state
+
+    def test_eta_sweep_uses_the_runs_split_plot_options(self):
+        """UX-70: the Analysis page's options reconstruction dropped the
+        split-plot settings, so eta sensitivity silently fell back to the
+        sp_only df method with no HTC factors and overstated power. The page
+        must analyze with the EXACT options the run used (preserved by the
+        Run page), matching a direct computation to 1e-9."""
+        import warnings as W
+
+        import numpy as np
+
+        from lattice_doe import DesignOptions, find_optimal_design
+        from lattice_doe.analysis import power_sensitivity
+        from lattice_doe.config import PowerContrastConfig, SplitPlotOptions
+
+        factors = {"x": (0.0, 1.0), "w": ["a", "b"]}
+        formula = "~ 1 + C(w) + x"
+        run_opts = DesignOptions(
+            candidate_points=60, random_state=2, starts=1,
+            split_plot=SplitPlotOptions(
+                htc_factors=["w"], n_whole_plots=4,
+                df_method="conservative",
+            ),
+        )
+        cfg = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.8, sigma=1.0, max_n=24,
+        )
+        with W.catch_warnings():
+            W.simplefilter("ignore")
+            result = find_optimal_design(formula, factors, cfg, run_opts)
+
+        correct = power_sensitivity(
+            formula=formula, factors=factors, power_cfg=cfg,
+            design_df=result["design_df"], design_opts=run_opts,
+            eta_range=(0.5, 2.0), eta_points=20,
+            model_matrix=result["model_matrix"],
+        )["eta_sweep"]
+
+        at = self._fresh_app()
+        at.run()
+        at.session_state["formula"] = formula
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+            {"id": "f2", "name": "w", "type": "Categorical",
+             "levels": ["a", "b"]},
+        ]
+        at.session_state["power_mode"] = "contrast"
+        at.session_state["contrast_input_mode"] = "matrix"
+        at.session_state["L_text"] = "0 1 0"
+        at.session_state["delta_text"] = "0.5"
+        at.session_state["result"] = result
+        # what the Run page preserves at run time (UX-70)
+        at.session_state["result_design_opts"] = run_opts
+        at.switch_page("pages/4_Analysis.py")
+        at.run()
+        assert not at.exception
+
+        # Match the direct computation's sweep grid via the widgets. The
+        # points slider keeps its default of 20 (AppTest slider set_value
+        # does not propagate reliably), so the reference above uses 20 too.
+        next(w for w in at.number_input if w.key == "sp_eta_min").set_value(0.5)
+        next(w for w in at.number_input if w.key == "sp_eta_max").set_value(2.0)
+        at.run()
+        assert not at.exception
+
+        btn = next(b for b in at.button if b.key == "btn_eta_sweep")
+        btn.click().run()
+        assert not at.exception
+        page_sweep = at.session_state["_sp_eta_result"]["eta_sweep"]
+        assert np.allclose(
+            np.asarray(page_sweep["power"]),
+            np.asarray(correct["power"]), atol=1e-9,
+        ), (
+            f"page eta sweep {list(page_sweep['power'])} != correct "
+            f"{list(correct['power'])} — split-plot options were dropped"
+        )
+
+    def test_design_opts_fallback_builder_includes_split_plot(self):
+        """UX-70 (fallback path): reconstructing options from session state —
+        for sessions predating the preserved-options contract — must include
+        the split-plot settings the old Analysis-page copy dropped."""
+        import sys
+
+        sys.path.insert(0, str(_APP_DIR)) if str(_APP_DIR) not in sys.path else None
+        pytest.importorskip("streamlit")
+        from components.design_config import build_design_opts_from_state
+
+        ss = {
+            "criterion": "I", "starts": 2, "random_state": 1,
+            "auto_candidate": False, "candidate_points": 80,
+            "split_plot_enabled": True,
+            "sp_htc_factors": ["w"], "sp_n_whole_plots": 4,
+            "sp_eta": 1.5, "sp_subplots_per_wp": 0,
+            "sp_df_method": "conservative",
+        }
+        opts = build_design_opts_from_state(ss)
+        assert opts.split_plot is not None
+        assert opts.split_plot.htc_factors == ["w"]
+        assert opts.split_plot.df_method == "conservative"
+        assert opts.split_plot.eta == 1.5
+
+    def test_analysis_target_power_follows_selected_response(self):
+        """UX-71: each response can carry its own target power; MDE (and the
+        target reference lines) must use the bound response's power_cfg.power,
+        not the global widget — and switching responses must re-default the
+        MDE widget to the newly selected response's target."""
+        import numpy as np
+
+        from lattice_doe import DesignOptions, find_multiresponse_design
+        from lattice_doe.config import (
+            MultiResponseOptions, PowerContrastConfig, ResponseSpec,
+        )
+
+        opts = DesignOptions(candidate_points=100, random_state=4, starts=1)
+        cfg1 = PowerContrastConfig(
+            L=np.array([[0.0, 1.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.80, sigma=1.0, max_n=18,
+        )
+        cfg2 = PowerContrastConfig(
+            L=np.array([[0.0, 1.0, 0.0, 0.0, -1.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.90, sigma=1.0, max_n=18,
+        )
+        multi = MultiResponseOptions(responses=[
+            ResponseSpec(name="y1", power_cfg=cfg1),
+            ResponseSpec(name="y2", power_cfg=cfg2,
+                         formula="~ 1 + bs(x, df=4)"),
+        ])
+        import warnings as W
+        with W.catch_warnings():
+            W.simplefilter("ignore")
+            result = find_multiresponse_design(
+                "~ 1 + x", {"x": (0.0, 1.0)}, multi, opts,
+            )
+
+        at = self._fresh_app()
+        at.run()
+        at.session_state["formula"] = "~ 1 + x"
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+        ]
+        at.session_state["result"] = result
+        at.session_state["power_target"] = 0.70   # global differs from BOTH
+        at.session_state["mr_responses"] = [
+            {"name": "y1", "power_mode": "contrast", "power": 0.80,
+             "L_text": "0 1", "delta_text": "0.5", "sigma": 1.0},
+            {"name": "y2", "power_mode": "contrast", "power": 0.90,
+             "L_text": "0 1 0 0 -1", "delta_text": "0.5", "sigma": 1.0,
+             "formula": "~ 1 + bs(x, df=4)"},
+        ]
+        at.switch_page("pages/4_Analysis.py")
+        at.run()
+        assert not at.exception
+
+        mde_w = next(w for w in at.number_input if w.key == "mde_power_target")
+        assert mde_w.value == pytest.approx(0.80), "y1's own target, not 0.70"
+
+        sel = next(w for w in at.selectbox if w.key == "analysis_response")
+        sel.set_value("y2").run()
+        assert not at.exception
+        mde_w = next(w for w in at.number_input if w.key == "mde_power_target")
+        assert mde_w.value == pytest.approx(0.90), (
+            "switching responses must re-default MDE to y2's target"
+        )
+
+    def test_full_target_range_is_usable_for_mde(self):
+        """UX-72: per-response configuration accepts targets in
+        [0.01, 0.9999], and the selected response's target seeds the MDE
+        widget — so the MDE widget must share those bounds. With the old
+        0.50–0.999 bounds a valid target of 0.40 raised
+        StreamlitValueBelowMinError and took down the whole Analysis page."""
+        import numpy as np
+
+        from lattice_doe import DesignOptions, find_multiresponse_design
+        from lattice_doe.config import (
+            MultiResponseOptions, PowerContrastConfig, ResponseSpec,
+        )
+
+        opts = DesignOptions(candidate_points=100, random_state=4, starts=1)
+        cfg_hi = PowerContrastConfig(
+            L=np.array([[0.0, 1.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.9999, sigma=1.0, max_n=30,
+        )
+        cfg_low = PowerContrastConfig(
+            L=np.array([[0.0, 1.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.40, sigma=1.0, max_n=30,
+        )
+        multi = MultiResponseOptions(responses=[
+            ResponseSpec(name="y1", power_cfg=cfg_hi),
+            ResponseSpec(name="y2", power_cfg=cfg_low),
+        ])
+        import warnings as W
+        with W.catch_warnings():
+            W.simplefilter("ignore")
+            result = find_multiresponse_design(
+                "~ 1 + x", {"x": (0.0, 1.0)}, multi, opts,
+            )
+
+        at = self._fresh_app()
+        at.run()
+        at.session_state["formula"] = "~ 1 + x"
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+        ]
+        at.session_state["result"] = result
+        at.session_state["mr_responses"] = [
+            {"name": "y1", "power_mode": "contrast", "power": 0.9999,
+             "L_text": "0 1", "delta_text": "0.5", "sigma": 1.0},
+            {"name": "y2", "power_mode": "contrast", "power": 0.40,
+             "L_text": "0 1", "delta_text": "0.5", "sigma": 1.0},
+        ]
+        at.switch_page("pages/4_Analysis.py")
+        at.run()
+        assert not at.exception, "target 0.9999 must render"
+        mde_w = next(w for w in at.number_input if w.key == "mde_power_target")
+        assert mde_w.value == pytest.approx(0.9999, abs=1e-12)
+
+        sel = next(w for w in at.selectbox if w.key == "analysis_response")
+        sel.set_value("y2").run()
+        assert not at.exception, "target 0.40 must render"
+        mde_w = next(w for w in at.number_input if w.key == "mde_power_target")
+        assert mde_w.value == pytest.approx(0.40, abs=1e-12)
+
+    def test_replacement_run_with_identical_report_invalidates_caches(self):
+        """UX-74: (n, achieved_power, elapsed_sec) are report VALUES, not a
+        run identity — a re-run of the same configuration repeats them, so
+        cached analyses survived a replacement run. The guard must key on
+        the run token the Run page mints per completed run."""
+        import copy
+
+        import numpy as np
+
+        from lattice_doe import DesignOptions, find_multiresponse_design
+        from lattice_doe.config import (
+            MultiResponseOptions, PowerContrastConfig, ResponseSpec,
+        )
+
+        opts = DesignOptions(candidate_points=100, random_state=4, starts=1)
+        cfg = PowerContrastConfig(
+            L=np.array([[0.0, 1.0]]), delta=np.array([0.5]),
+            alpha=0.05, power=0.8, sigma=1.0, max_n=18,
+        )
+        multi = MultiResponseOptions(responses=[
+            ResponseSpec(name="y1", power_cfg=cfg),
+            ResponseSpec(name="y2", power_cfg=cfg),
+        ])
+        import warnings as W
+        with W.catch_warnings():
+            W.simplefilter("ignore")
+            result = find_multiresponse_design(
+                "~ 1 + x", {"x": (0.0, 1.0)}, multi, opts,
+            )
+
+        at = self._fresh_app()
+        at.run()
+        at.session_state["formula"] = "~ 1 + x"
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+        ]
+        at.session_state["result"] = result
+        at.session_state["result_run_id"] = 1     # minted by the Run page
+        at.session_state["mr_responses"] = [
+            {"name": "y1", "power_mode": "contrast",
+             "L_text": "0 1", "delta_text": "0.5", "sigma": 1.0},
+            {"name": "y2", "power_mode": "contrast",
+             "L_text": "0 1", "delta_text": "0.5", "sigma": 1.0},
+        ]
+        at.switch_page("pages/4_Analysis.py")
+        at.run()
+        assert not at.exception
+
+        btn = next(b for b in at.button if b.key == "btn_sensitivity")
+        btn.click().run()
+        assert not at.exception
+        assert "_sensitivity_result" in at.session_state
+
+        # A replacement run whose report values are ALL equal (deep copy):
+        # only the freshly minted token distinguishes it.
+        at.session_state["result"] = copy.deepcopy(result)
+        at.session_state["result_run_id"] = 2
+        at.run()
+        assert not at.exception
+        assert "_sensitivity_result" not in at.session_state, (
+            "equal report values masked the replacement run"
+        )
+
+    def test_generate_design_mints_run_token(self):
+        """UX-74 (minting site): each completed run on the Run page must
+        carry a fresh token — including a re-run of the SAME configuration,
+        whose report values repeat — and clearing the result must retire
+        it. Exercises the real Generate/Clear buttons end to end."""
+        at = self._fresh_app()
+        at.run()
+        at.session_state["formula"] = "~ 1 + x"
+        at.session_state["factors"] = [
+            {"id": "f1", "name": "x", "type": "Continuous",
+             "low": 0.0, "high": 1.0},
+        ]
+        at.session_state["power_mode"] = "contrast"
+        at.session_state["contrast_input_mode"] = "matrix"
+        at.session_state["L_text"] = "0 1"
+        at.session_state["delta_text"] = "0.5"
+        at.session_state["sigma"] = 1.0
+        at.session_state["power_target"] = 0.80
+        at.session_state["max_n"] = 18
+        at.session_state["auto_candidate"] = False
+        at.session_state["candidate_points"] = 100
+        at.session_state["starts"] = 1
+        at.session_state["random_state"] = 4
+        at.switch_page("pages/3_Run_Results.py")
+        at.run()
+        assert not at.exception
+        assert "result_run_id" not in at.session_state
+
+        gen = next(b for b in at.button if "Generate design" in (b.label or ""))
+        gen.click().run()
+        assert not at.exception
+        assert not at.session_state["run_error"], at.session_state["run_error"]
+        assert at.session_state["result"] is not None
+        assert at.session_state["result_run_id"] == 1
+
+        # Same configuration again: report values repeat, the token must not.
+        gen = next(b for b in at.button if "Generate design" in (b.label or ""))
+        gen.click().run()
+        assert not at.exception
+        assert at.session_state["result_run_id"] == 2
+
+        clear = next(b for b in at.button if b.label == "Clear result")
+        clear.click().run()
+        assert not at.exception
+        assert at.session_state["result"] is None
+        assert at.session_state["result_run_id"] is None

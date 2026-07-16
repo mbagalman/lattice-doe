@@ -21,7 +21,12 @@ import numpy as np
 import streamlit as st
 
 from state import init_state, render_sidebar
-from components.power_params import render_power_params, scenario_contrast
+from components.power_params import (
+    POWER_TARGET_MAX,
+    POWER_TARGET_MIN,
+    render_power_params,
+    scenario_contrast,
+)
 
 st.set_page_config(page_title="Power Config — Lattice DOE", layout="wide")
 init_state()
@@ -708,7 +713,8 @@ with st.expander("Multi-response (optional)"):
                     )
                     r["power"] = c_power.number_input(
                         "Target power", value=r.get("power", 0.80),
-                        min_value=0.01, max_value=0.9999, format="%.2f",
+                        min_value=POWER_TARGET_MIN,
+                        max_value=POWER_TARGET_MAX, format="%.2f",
                         key=f"mr_power_{i}",
                     )
                     r["weight"] = c_weight.number_input(

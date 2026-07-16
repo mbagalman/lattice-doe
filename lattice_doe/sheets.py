@@ -646,6 +646,42 @@ def _get_or_create_sheet(
         return spreadsheet.add_worksheet(title=title, rows=1000, cols=20)
 
 
+def _reconcile_previous_matrix_sheets(
+    spreadsheet: "gspread.Spreadsheet",
+    delete: bool = True,
+) -> set:
+    """Collect — and with *delete*, remove — a previous export's MM output.
+
+    ``ModelMatrixIndex`` records the per-response worksheets WE wrote, so
+    only titles it lists with the ``MM_`` prefix are touched; the user's
+    own worksheets survive even if an edited index names them (UX-73).
+    Returns the set of listed titles still present (empty after deleting),
+    which the caller may reuse in place when it is not allowed to delete.
+    """
+    try:
+        ws_idx = spreadsheet.worksheet("ModelMatrixIndex")
+    except gspread.exceptions.WorksheetNotFound:
+        return set()
+    listed = set()
+    for row in ws_idx.get_all_values()[1:]:
+        title = row[1] if len(row) > 1 else ""
+        if isinstance(title, str) and title.startswith("MM_"):
+            listed.add(title)
+    kept: set = set()
+    for title in sorted(listed):
+        try:
+            ws = spreadsheet.worksheet(title)
+        except gspread.exceptions.WorksheetNotFound:
+            continue
+        if delete:
+            spreadsheet.del_worksheet(ws)
+        else:
+            kept.add(title)
+    if delete:
+        spreadsheet.del_worksheet(ws_idx)
+    return kept
+
+
 def _df_to_rows(df: "pd.DataFrame") -> List[List[Any]]:
     """Convert a DataFrame to a list-of-lists with Python-native scalar types.
 
@@ -702,7 +738,10 @@ def _write_results(
     buckets_sheet : str, default "Buckets"
         Name of the buckets sheet.
     clear_results : bool, default True
-        Clear existing content in each output sheet before writing.
+        Clear existing content in each output sheet before writing. This
+        also permits replacing the per-response worksheets a previous
+        export recorded in ``ModelMatrixIndex``; with ``False`` those are
+        kept and reused in place (UX-73).
     """
     # Both modes use the unified envelope (UX-6); MR is distinguished by a
     # multi-response-only key in its report.
@@ -776,7 +815,20 @@ def _write_results(
     ws_buckets.update("A1", _df_to_rows(buckets_df_val))
 
     # ------------------------------------------------------------------
-    # 4. ModelMatrix sheet — the authoritative basis the power calculation
+    # 4. Reconcile a previous export's per-response output (UX-73): the
+    #    worksheets our own ModelMatrixIndex lists are OURS, and a repeat
+    #    export whose response names changed (even by case — Google
+    #    rejects titles differing only by case) would otherwise collide
+    #    with them or leave the index pointing at the wrong worksheet.
+    #    When clear_results permits overwriting, they are deleted outright;
+    #    otherwise they are kept and offered for in-place reuse below.
+    # ------------------------------------------------------------------
+    _reusable = _reconcile_previous_matrix_sheets(
+        spreadsheet, delete=clear_results
+    )
+
+    # ------------------------------------------------------------------
+    # 5. ModelMatrix sheet — the authoritative basis the power calculation
     #    used (UX-57). For data-dependent codings a refit of the Design
     #    sheet re-learns spline knots; analyses need this matrix instead.
     # ------------------------------------------------------------------
@@ -785,23 +837,41 @@ def _write_results(
         if clear_results:
             ws_mm.clear()
         ws_mm.update("A1", _df_to_rows(result["model_matrix"]))
+    elif clear_results:
+        # Do not pair the new Design with a previous export's basis.
+        try:
+            spreadsheet.del_worksheet(spreadsheet.worksheet("ModelMatrix"))
+        except gspread.exceptions.WorksheetNotFound:
+            pass
 
     # ------------------------------------------------------------------
-    # 5. Compound multi-response (UX-63/UX-66): one worksheet per response
+    # 6. Compound multi-response (UX-63/UX-66): one worksheet per response
     #    plus a name-to-worksheet index — a data-dependent response may not
     #    be reproducible from the Design or global ModelMatrix sheets.
     #    Worksheet titles are slugged (free-form names may contain
     #    characters the spreadsheet API rejects); the index keeps the
-    #    original names.
+    #    original names. Collisions with FOREIGN worksheets are checked on
+    #    the complete title (UX-73): Google treats titles differing only by
+    #    case as duplicates, so a bare-slug check lets a create call fail —
+    #    or the index desync — behind our back. Our own surviving output
+    #    (clear_results=False) is instead reused in place, case-insensitively.
     # ------------------------------------------------------------------
     if (
         result.get("model_matrices") is not None
         and report.get("compound_criterion")
     ):
-        _mm_taken: set = {"ModelMatrix", "ModelMatrixIndex"}
+        _existing = {ws.title for ws in spreadsheet.worksheets()}
+        _mm_taken: set = (_existing - _reusable) | {"ModelMatrixIndex"}
         _mm_index_rows = [["response", "worksheet"]]
         for _rname, _rmm in result["model_matrices"].items():
-            _title = "MM_" + safe_name_slug(_rname, _mm_taken, maxlen=80)
+            _title = "MM_" + safe_name_slug(
+                _rname, _mm_taken, maxlen=80, prefix="MM_"
+            )
+            if _title not in _existing:
+                _folded = _title.casefold()
+                _title = next(
+                    (t for t in _reusable if t.casefold() == _folded), _title
+                )
             ws_r = _get_or_create_sheet(spreadsheet, _title)
             if clear_results:
                 ws_r.clear()

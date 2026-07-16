@@ -920,3 +920,127 @@ class TestCompoundMatrixExcelExport:
                              res["design_df"], res["buckets_df"])
         assert "ModelMatrixIndex" not in wb.sheetnames
         assert not any(n.startswith("MM_") for n in wb.sheetnames)
+
+    def test_case_only_response_names_keep_index_consistent(self):
+        """UX-69: openpyxl silently renames a case-colliding sheet
+        (MM_yield -> MM_yield1), leaving the index pointing at a sheet that
+        does not exist. Slugs must diverge before openpyxl ever sees them,
+        and every index entry must reference a real sheet."""
+        import openpyxl
+
+        from lattice_doe.excel_template import _write_output_sheets
+
+        res = self._compound_result()
+        res["model_matrices"] = {
+            "Yield": pd.DataFrame({"Intercept": [1.0, 1.0]}),
+            "yield": pd.DataFrame({"Intercept": [1.0, 1.0]}),
+        }
+        wb = openpyxl.Workbook()
+        _write_output_sheets(wb, res, res["report"],
+                             res["design_df"], res["buckets_df"])
+
+        assert "MM_Yield" in wb.sheetnames
+        assert "MM_yield_2" in wb.sheetnames
+        idx_rows = [tuple(c.value for c in r)
+                    for r in wb["ModelMatrixIndex"].iter_rows()][1:]
+        assert ("yield", "MM_yield_2") in idx_rows
+        # the desync itself: every index entry must point at a real sheet
+        assert all(sheet in wb.sheetnames for _, sheet in idx_rows)
+
+    @staticmethod
+    def _idx_rows(wb):
+        return [tuple(c.value for c in r)
+                for r in wb["ModelMatrixIndex"].iter_rows(min_row=2)]
+
+    def test_repeat_export_with_case_changed_name_replaces_sheets(self):
+        """UX-73: exporting again into the SAME workbook after a response
+        was renamed by case only must REPLACE the previous per-response
+        sheets. Seeding collision detection with prefixed titles while
+        checking the bare slug missed the collision, so openpyxl renamed
+        the new sheet (MM_yield1) while the index recorded MM_yield."""
+        import openpyxl
+
+        from lattice_doe.excel_template import _write_output_sheets
+
+        res = self._compound_result()
+        res["model_matrices"] = {
+            "Yield": pd.DataFrame({"Intercept": [1.0, 1.0]}),
+            "Other": pd.DataFrame({"Intercept": [1.0, 1.0]}),
+        }
+        wb = openpyxl.Workbook()
+        _write_output_sheets(wb, res, res["report"],
+                             res["design_df"], res["buckets_df"])
+        assert "MM_Yield" in wb.sheetnames
+
+        res2 = self._compound_result()
+        res2["model_matrices"] = {
+            "yield": pd.DataFrame({"Intercept": [2.0, 2.0]}),
+            "Other": pd.DataFrame({"Intercept": [1.0, 1.0]}),
+        }
+        _write_output_sheets(wb, res2, res2["report"],
+                             res2["design_df"], res2["buckets_df"])
+
+        mm = sorted(n for n in wb.sheetnames if n.startswith("MM_"))
+        assert mm == ["MM_Other", "MM_yield"], mm   # no MM_Yield, no MM_yield1
+        idx_rows = self._idx_rows(wb)
+        assert idx_rows == [("yield", "MM_yield"), ("Other", "MM_Other")]
+        assert all(sheet in wb.sheetnames for _, sheet in idx_rows)
+        # the replaced sheet carries the SECOND export's matrix
+        assert wb["MM_yield"].cell(row=2, column=1).value == 2.0
+
+    def test_users_own_prefixed_sheet_survives_and_forces_suffix(self):
+        """UX-73: only sheets OUR index recorded are reconciled away — a
+        user's own MM_-style sheet survives, and the new title must dodge
+        it case-insensitively (Excel titles do not distinguish case)."""
+        import openpyxl
+
+        from lattice_doe.excel_template import _write_output_sheets
+
+        wb = openpyxl.Workbook()
+        wb.create_sheet("mm_YIELD")  # the user's sheet; never indexed by us
+
+        res = self._compound_result()
+        res["model_matrices"] = {
+            "Yield": pd.DataFrame({"Intercept": [1.0, 1.0]}),
+            "Other": pd.DataFrame({"Intercept": [1.0, 1.0]}),
+        }
+        _write_output_sheets(wb, res, res["report"],
+                             res["design_df"], res["buckets_df"])
+
+        assert "mm_YIELD" in wb.sheetnames           # untouched
+        idx_rows = self._idx_rows(wb)
+        assert ("Yield", "MM_Yield_2") in idx_rows   # dodged the collision
+        assert all(sheet in wb.sheetnames for _, sheet in idx_rows)
+
+    def test_non_compound_repeat_export_clears_stale_compound_output(self):
+        """UX-73: output sheets must describe THIS result only. After a
+        compound export, re-exporting a non-compound result into the same
+        workbook must remove the per-response sheets and the index — and a
+        result without a model matrix must not keep the old ModelMatrix
+        next to the new Design."""
+        import openpyxl
+
+        from lattice_doe.excel_template import _write_output_sheets
+
+        res = self._compound_result()
+        wb = openpyxl.Workbook()
+        _write_output_sheets(wb, res, res["report"],
+                             res["design_df"], res["buckets_df"])
+        assert any(n.startswith("MM_") for n in wb.sheetnames)
+
+        res2 = self._compound_result()
+        res2["report"]["compound_criterion"] = False
+        res2["model_matrices"] = None
+        _write_output_sheets(wb, res2, res2["report"],
+                             res2["design_df"], res2["buckets_df"])
+        assert not any(n.startswith("MM_") for n in wb.sheetnames)
+        assert "ModelMatrixIndex" not in wb.sheetnames
+        assert "ModelMatrix" in wb.sheetnames        # still carried a basis
+
+        res3 = self._compound_result()
+        res3["report"]["compound_criterion"] = False
+        res3["model_matrices"] = None
+        res3["model_matrix"] = None
+        _write_output_sheets(wb, res3, res3["report"],
+                             res3["design_df"], res3["buckets_df"])
+        assert "ModelMatrix" not in wb.sheetnames

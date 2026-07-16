@@ -16,7 +16,12 @@ import json
 import numpy as np
 import streamlit as st
 
-from components.power_params import scenario_contrast
+from components.design_config import build_design_opts_from_state
+from components.power_params import (
+    POWER_TARGET_MAX,
+    POWER_TARGET_MIN,
+    scenario_contrast,
+)
 from state import init_state, render_sidebar
 
 st.set_page_config(page_title="Analysis — Lattice DOE", layout="wide")
@@ -107,33 +112,6 @@ def _build_power_cfg(ss: dict, design_opts: DesignOptions):
         )
 
 
-def _build_design_opts(ss: dict) -> DesignOptions:
-    kwargs: dict = dict(
-        criterion=ss["criterion"],
-        starts=int(ss["starts"]),
-        random_state=int(ss["random_state"]),
-        auto_candidate=bool(ss["auto_candidate"]),
-    )
-    if not ss["auto_candidate"]:
-        kwargs["candidate_points"] = int(ss["candidate_points"])
-    expr = ss.get("constraint_expr", "").strip()
-    if expr:
-        kwargs["constraint_expr"] = expr
-    # Blocked design options
-    n_blocks = int(ss.get("n_blocks", 0))
-    if n_blocks >= 2:
-        kwargs["n_blocks"] = n_blocks
-        block_factor_name = ss.get("block_factor_name", "Block").strip()
-        if block_factor_name:
-            kwargs["block_factor_name"] = block_factor_name
-    # Categorical pre-allocation options
-    if ss.get("preallocate_categorical", False):
-        kwargs["preallocate_categorical"] = True
-        kwargs["alloc_min_per_cell"] = int(ss.get("alloc_min_per_cell", 1))
-        alloc_max = int(ss.get("alloc_max_per_cell", 0))
-        if alloc_max > 0:
-            kwargs["alloc_max_per_cell"] = alloc_max
-    return DesignOptions(**kwargs)
 
 
 def _jsonify(obj):
@@ -363,7 +341,11 @@ factors = ss.get("factors", [])
 formula = ss.get("formula", "")
 factor_spec = _factors_to_spec(factors)
 
-design_opts = _build_design_opts(ss)
+# The options the analyses assume (UX-70): prefer the EXACT object the run
+# used (preserved by the Run page) — the previous local reconstruction here
+# dropped the split-plot settings, so eta sensitivity silently fell back to
+# the sp_only df method with no HTC factors and overstated power.
+design_opts = ss.get("result_design_opts") or build_design_opts_from_state(ss)
 
 # Multi-response run: bind ALL analyses to one selected response (UX-65).
 # In compound mode each response was powered on its OWN formula, power
@@ -426,6 +408,48 @@ else:
         _cfg_ok = False
     _analysis_mm = result.get("model_matrix") if isinstance(result, dict) else None
     _analysis_mode = ss.get("power_mode", "contrast")
+
+# The target power every analysis section references (UX-71): each response
+# in a multi-response configuration can carry its OWN target, so the bound
+# power_cfg is the authority — the global widget value is only the fallback
+# when no configuration could be reconstructed.
+_target_power = (
+    float(power_cfg.power) if _cfg_ok else float(ss.get("power_target", 0.80))
+)
+
+# ---------------------------------------------------------------------------
+# Stale-analysis guard (UX-68): every cached analysis below belongs to ONE
+# (run, selected response, mode) context. Switching the selected response —
+# or landing a new run, or changing the power mode — must not leave results
+# computed for the PREVIOUS context on screen (or feed them into renderers
+# expecting a different mode). Response-derived widget defaults (sweep
+# ranges, MDE target) are reset for the same reason; design-level widgets
+# (η range, criteria selection) are user preferences and survive.
+#
+# The run is identified by the token the Run page mints per completed run
+# (UX-74): report values such as n / achieved power / elapsed time can
+# repeat across runs (a re-run of the same configuration), so they cannot
+# distinguish a replacement result. They stay in the tuple only as a
+# fallback discriminator for token-less results.
+# ---------------------------------------------------------------------------
+_analysis_ctx = (
+    ss.get("result_run_id"),
+    result["report"].get("n") if isinstance(result, dict) else None,
+    result["report"].get("achieved_power") if isinstance(result, dict) else None,
+    result["report"].get("elapsed_sec") if isinstance(result, dict) else None,
+    st.session_state.get("analysis_response") if _is_mr_result else None,
+    _analysis_mode,
+)
+if ss.get("_analysis_ctx") != _analysis_ctx:
+    for _stale_key in (
+        "_sensitivity_result", "_sensitivity_contrast", "_mde_result",
+        "_comparison_result", "_sp_eta_result",
+        "sens_sigma_min", "sens_sigma_max", "sens_sigma_pts",
+        "sens_r2_min", "sens_r2_max", "sens_r2_pts",
+        "mde_power_target",
+    ):
+        ss.pop(_stale_key, None)
+    ss["_analysis_ctx"] = _analysis_ctx
 
 # ===========================================================================
 # F1 — Sensitivity analysis
@@ -516,7 +540,7 @@ else:
     if sens is not None:
         data = sens["data"]
         nominal_power = float(sens["nominal_power"])
-        target_power = float(ss.get("power_target", 0.80))
+        target_power = _target_power
 
         if _HAS_PLOTLY:
             import plotly.graph_objects as go
@@ -587,11 +611,14 @@ st.markdown(
 if not _cfg_ok:
     st.warning("Fix power configuration on Step 2 to compute the MDE.")
 else:
+    # Bounds are the shared authoring contract (UX-72): the default is the
+    # selected response's own target, so any target Page 2 accepts must be
+    # displayable here — narrower bounds crash the page on valid configs.
     mde_power = st.number_input(
         "Target power for MDE",
-        min_value=0.50,
-        max_value=0.999,
-        value=float(ss.get("power_target", 0.80)),
+        min_value=POWER_TARGET_MIN,
+        max_value=POWER_TARGET_MAX,
+        value=min(max(_target_power, POWER_TARGET_MIN), POWER_TARGET_MAX),
         step=0.01,
         format="%.2f",
         key="mde_power_target",
@@ -745,7 +772,7 @@ else:
         if _HAS_PLOTLY:
             import plotly.graph_objects as go
 
-            target_power = float(ss.get("power_target", 0.80))
+            target_power = _target_power
             colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
             criteria_list = list(summary["criterion"])
             bar_colors = [colors[i % len(colors)] for i in range(len(criteria_list))]
@@ -873,9 +900,9 @@ if _sp_report is not None:
                 line=dict(color="#1f77b4", width=2),
             ))
             fig_eta.add_hline(
-                y=float(ss.get("power_target", 0.80)),
+                y=_target_power,
                 line_dash="dash", line_color="red",
-                annotation_text=f"Target {float(ss.get('power_target', 0.80)):.0%}",
+                annotation_text=f"Target {_target_power:.0%}",
                 annotation_position="top right",
             )
             fig_eta.update_layout(

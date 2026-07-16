@@ -590,26 +590,65 @@ def _write_output_sheets(
     other sheet. Sheet titles cap at 31 characters and forbid several
     separators, so free-form response names are slugged; the
     ``ModelMatrixIndex`` sheet maps original names to sheet titles.
+
+    Output sheets always describe THIS result only: per-response sheets a
+    previous export recorded in ``ModelMatrixIndex`` are deleted up front
+    (UX-73). Without that, a repeat export whose response names changed —
+    even by case only, which Excel titles do not distinguish — leaves the
+    old sheet in place, the backend silently renames the new one around it,
+    and the rewritten index points at a sheet that does not exist.
     """
+    _reconcile_previous_matrix_sheets(wb)
     _write_results_sheet(wb, report)
     _write_df_to_sheet(wb, "Design", design_df)
     _write_df_to_sheet(wb, "Buckets", buckets_df)
     if result.get("model_matrix") is not None:
         _write_df_to_sheet(wb, "ModelMatrix", result["model_matrix"])
+    elif "ModelMatrix" in wb.sheetnames:
+        del wb["ModelMatrix"]  # do not pair the new Design with an old basis
     if (
         result.get("model_matrices") is not None
         and report.get("compound_criterion")
     ):
-        _mm_taken: set = set(wb.sheetnames)
+        # Collisions (with the user's own sheets — ours are already gone)
+        # are checked on the COMPLETE title: openpyxl compares titles
+        # case-insensitively, so a bare-slug check lets it rename the sheet
+        # while the index records the requested title (UX-73).
+        _mm_taken: set = set(wb.sheetnames) | {"ModelMatrixIndex"}
         _mm_index_rows = []
         for _rname, _rmm in result["model_matrices"].items():
-            _sheet = "MM_" + safe_name_slug(_rname, _mm_taken, maxlen=27)
+            _sheet = "MM_" + safe_name_slug(
+                _rname, _mm_taken, maxlen=27, prefix="MM_"
+            )
             _write_df_to_sheet(wb, _sheet, _rmm)
             _mm_index_rows.append((_rname, _sheet))
         _write_df_to_sheet(
             wb, "ModelMatrixIndex",
             pd.DataFrame(_mm_index_rows, columns=["response", "sheet"]),
         )
+
+
+def _reconcile_previous_matrix_sheets(wb: Any) -> None:
+    """Delete per-response sheets a previous export listed in its index.
+
+    Only titles the index attributes to us (``MM_`` prefix) are deleted —
+    the index is the record of what WE wrote, so the user's own sheets
+    survive even if an edited index names them. The index sheet itself is
+    removed too; a compound result rewrites it, any other result must not
+    leave it dangling.
+    """
+    if "ModelMatrixIndex" not in wb.sheetnames:
+        return
+    ws_idx = wb["ModelMatrixIndex"]
+    for _row in ws_idx.iter_rows(min_row=2, max_col=2, values_only=True):
+        _title = _row[1] if len(_row) > 1 else None
+        if (
+            isinstance(_title, str)
+            and _title.startswith("MM_")
+            and _title in wb.sheetnames
+        ):
+            del wb[_title]
+    del wb["ModelMatrixIndex"]
 
 
 def _write_results_sheet(wb: Any, report: Dict[str, Any]) -> None:

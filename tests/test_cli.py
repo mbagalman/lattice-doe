@@ -372,3 +372,37 @@ class TestHostileResponseNames:
         assert report["model_matrix_files"]["Yield/Day"] == (
             "run_model_matrix_Yield_Day.csv"
         )
+
+    def test_case_only_response_names_write_distinct_files(self, tmp_path):
+        """UX-69: on a case-insensitive filesystem, Yield and yield would
+        silently overwrite each other's CSV without casefolded collision
+        tracking."""
+        import json
+
+        cfg = tmp_path / "mr.yml"
+        cfg.write_text(
+            "formula: '~ 1 + x'\n"
+            "factors:\n  x: [0.0, 1.0]\n"
+            "responses:\n"
+            "  - name: Yield\n    sigma: 1.0\n"
+            "    contrast: {L: [[0.0, 1.0]], delta: [0.5]}\n"
+            "  - name: 'yield'\n    sigma: 1.0\n"
+            "    formula: '~ 1 + x + I(x**2)'\n"
+            "    contrast: {L: [[0.0, 1.0, 0.0]], delta: [0.5]}\n"
+            "alpha: 0.05\npower: 0.8\nmax_n: 12\n"
+            "design: {candidate_points: 40, starts: 1}\n",
+            encoding="utf-8",
+        )
+        rc = main([
+            "--config", str(cfg), "--out", str(tmp_path / "run"),
+            "--allow-partial",
+        ])
+        assert rc == 0
+        report = json.loads(
+            (tmp_path / "run_report.json").read_text(encoding="utf-8")
+        )
+        files = report["model_matrix_files"]
+        assert files["Yield"] != files["yield"]
+        assert files["Yield"].casefold() != files["yield"].casefold()
+        for f in files.values():
+            assert (tmp_path / f).exists()

@@ -105,6 +105,17 @@ def scenario_contrast(design_opts: Any = None, **kwargs: Any) -> Tuple[Any, Any]
         raise ContrastCodingError(exc.reason, UI_CODING_REMEDY) from exc
 
 
+# The one authoring contract for target power (UX-72). Every widget that
+# accepts or re-displays a target — the global widget below, the
+# per-response widgets on Page 2, the MDE widget on Page 4 — must share
+# these bounds: a target authored inside one widget's range crashes any
+# differently-bounded widget that later re-displays it
+# (StreamlitValueBelowMinError). The config layer accepts any value in
+# the open interval (0, 1); these clip only the unusable extremes.
+POWER_TARGET_MIN = 0.01
+POWER_TARGET_MAX = 0.9999
+
+
 def render_power_params() -> None:
     """Render the four shared power parameters as a single row of inputs."""
     power_mode = st.session_state.get("power_mode", "contrast")
@@ -126,8 +137,8 @@ def render_power_params() -> None:
     with col2:
         st.number_input(
             "Target power (1\u2212\u03b2)",
-            min_value=0.50,
-            max_value=0.99,
+            min_value=POWER_TARGET_MIN,
+            max_value=POWER_TARGET_MAX,
             step=0.01,
             format="%.2f",
             key="power_target",
