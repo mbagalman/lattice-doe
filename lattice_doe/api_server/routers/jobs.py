@@ -27,9 +27,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from lattice_doe import find_optimal_design
 from lattice_doe.api import find_multiresponse_design
 from lattice_doe.progress import ProgressReporter
-from api_server.jobs import JobsAtCapacity
-from api_server.models.design import DesignRequest, MultiResponseDesignRequest
-from api_server.serialization import (
+from lattice_doe.api_server.jobs import JobsAtCapacity
+from lattice_doe.api_server.models.design import DesignRequest, MultiResponseDesignRequest
+from lattice_doe.api_server.serialization import (
     factors_to_spec,
     pydantic_design_opts_to_dataclass,
     pydantic_multi_cfg_to_dataclass,

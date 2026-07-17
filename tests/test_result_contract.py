@@ -332,7 +332,7 @@ class TestCompoundResponseMatrices:
         pytest.importorskip("fastapi")
         from fastapi.testclient import TestClient
 
-        from api_server.main import create_app
+        from lattice_doe.api_server.main import create_app
 
         client = TestClient(create_app())
         req = {

@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("fastapi")  # jobs module imports are stdlib, but keep parity
 
-from api_server.jobs import JobManager, JobsAtCapacity
+from lattice_doe.api_server.jobs import JobManager, JobsAtCapacity
 from lattice_doe.progress import Phase
 
 

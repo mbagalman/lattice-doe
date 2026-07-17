@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 
 from .common import StrictRequestModel
 
-from api_server.models.common import DesignOptionsModel, FactorSpec, PowerCfgModel
-from api_server.models.common import MatrixSplitModel
+from lattice_doe.api_server.models.common import DesignOptionsModel, FactorSpec, PowerCfgModel
+from lattice_doe.api_server.models.common import MatrixSplitModel
 
 
 class SensitivityRequest(StrictRequestModel):

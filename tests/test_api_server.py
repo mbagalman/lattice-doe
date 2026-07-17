@@ -45,7 +45,7 @@ pytest.importorskip("pydantic", reason="server extra not installed")
 # Layer 1 — pure unit tests (no HTTP, no FastAPI needed)
 # ---------------------------------------------------------------------------
 
-from api_server.serialization import (
+from lattice_doe.api_server.serialization import (
     sanitize_float,
     sanitize_value,
     df_to_records,
@@ -140,11 +140,11 @@ class TestRecordsToDf:
 
 class TestPydanticPowerCfgToDataclass:
     def _r2_model(self):
-        from api_server.models.common import PowerR2ConfigModel
+        from lattice_doe.api_server.models.common import PowerR2ConfigModel
         return PowerR2ConfigModel(type="r2", r2_target=0.15, alpha=0.05, power=0.8)
 
     def _contrast_model(self):
-        from api_server.models.common import PowerContrastConfigModel
+        from lattice_doe.api_server.models.common import PowerContrastConfigModel
         return PowerContrastConfigModel(
             type="contrast",
             L=[[0, 1, 0]],
@@ -183,7 +183,7 @@ class TestPydanticDesignOptsToDataclass:
         assert isinstance(opts, DesignOptions)
 
     def test_fields_propagated(self):
-        from api_server.models.common import DesignOptionsModel
+        from lattice_doe.api_server.models.common import DesignOptionsModel
         model = DesignOptionsModel(criterion="D", starts=10, random_state=42)
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.criterion == "D"
@@ -192,32 +192,32 @@ class TestPydanticDesignOptsToDataclass:
 
     def test_workers_always_none(self):
         """workers is forced to None inside ASGI."""
-        from api_server.models.common import DesignOptionsModel
+        from lattice_doe.api_server.models.common import DesignOptionsModel
         model = DesignOptionsModel()
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.workers is None
 
     def test_constraint_expr_forwarded(self):
-        from api_server.models.common import DesignOptionsModel
+        from lattice_doe.api_server.models.common import DesignOptionsModel
         model = DesignOptionsModel(constraint_expr="A + B <= 1")
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.constraint_expr == "A + B <= 1"
 
     def test_n_blocks_forwarded(self):
-        from api_server.models.common import DesignOptionsModel
+        from lattice_doe.api_server.models.common import DesignOptionsModel
         model = DesignOptionsModel(n_blocks=3)
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.n_blocks == 3
 
     def test_alloc_max_per_cell_forwarded(self):
-        from api_server.models.common import DesignOptionsModel
+        from lattice_doe.api_server.models.common import DesignOptionsModel
         model = DesignOptionsModel(alloc_max_per_cell=5)
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.alloc_max_per_cell == 5
 
     def test_alloc_max_per_cell_none_not_passed(self):
         """alloc_max_per_cell=None should not appear in DesignOptions kwargs."""
-        from api_server.models.common import DesignOptionsModel
+        from lattice_doe.api_server.models.common import DesignOptionsModel
         model = DesignOptionsModel(alloc_max_per_cell=None)
         opts = pydantic_design_opts_to_dataclass(model)
         # Should use DesignOptions default (None)
@@ -229,14 +229,14 @@ class TestPydanticDesignOptsToDataclass:
 
     def test_split_plot_none_by_default(self):
         """CR-28: split_plot defaults to None — no split-plot mode unless set."""
-        from api_server.models.common import DesignOptionsModel
+        from lattice_doe.api_server.models.common import DesignOptionsModel
         model = DesignOptionsModel()
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.split_plot is None
 
     def test_split_plot_fields_forwarded(self):
         """CR-28: all SplitPlotOptionsModel fields are mapped to SplitPlotOptions."""
-        from api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
+        from lattice_doe.api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
         from lattice_doe.config import SplitPlotOptions
         sp_model = SplitPlotOptionsModel(
             htc_factors=["Temp", "Press"],
@@ -258,7 +258,7 @@ class TestPydanticDesignOptsToDataclass:
 
     def test_split_plot_subplots_per_wp_none(self):
         """CR-28: omitting subplots_per_wp passes None to SplitPlotOptions (auto)."""
-        from api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
+        from lattice_doe.api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
         sp_model = SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=3)
         model = DesignOptionsModel(split_plot=sp_model)
         opts = pydantic_design_opts_to_dataclass(model)
@@ -267,7 +267,7 @@ class TestPydanticDesignOptsToDataclass:
 
     def test_split_plot_defaults_eta_and_df_method(self):
         """CR-28: SplitPlotOptionsModel defaults (eta=1.0, df_method='auto') are preserved."""
-        from api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
+        from lattice_doe.api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
         sp_model = SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=4)
         model = DesignOptionsModel(split_plot=sp_model)
         opts = pydantic_design_opts_to_dataclass(model)
@@ -276,21 +276,21 @@ class TestPydanticDesignOptsToDataclass:
 
     def test_split_plot_validation_n_whole_plots_lt2_raises(self):
         """CR-28: n_whole_plots < 2 is rejected by Pydantic validation."""
-        from api_server.models.common import SplitPlotOptionsModel
+        from lattice_doe.api_server.models.common import SplitPlotOptionsModel
         import pydantic
         with pytest.raises(pydantic.ValidationError):
             SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=1)
 
     def test_split_plot_validation_empty_htc_factors_raises(self):
         """CR-28: empty htc_factors list is rejected by Pydantic validation."""
-        from api_server.models.common import SplitPlotOptionsModel
+        from lattice_doe.api_server.models.common import SplitPlotOptionsModel
         import pydantic
         with pytest.raises(pydantic.ValidationError):
             SplitPlotOptionsModel(htc_factors=[], n_whole_plots=3)
 
     def test_split_plot_validation_negative_eta_raises(self):
         """CR-28: eta < 0 is rejected by Pydantic validation."""
-        from api_server.models.common import SplitPlotOptionsModel
+        from lattice_doe.api_server.models.common import SplitPlotOptionsModel
         import pydantic
         with pytest.raises(pydantic.ValidationError):
             SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=3, eta=-0.1)
@@ -336,7 +336,7 @@ class TestSerializeDesignResult:
 def app():
     if not _HAS_SERVER:
         pytest.skip("fastapi/httpx not installed")
-    from api_server.main import create_app
+    from lattice_doe.api_server.main import create_app
     return create_app()
 
 
@@ -433,7 +433,7 @@ class TestErrorHandling:
 @pytest.mark.anyio
 @pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
 class TestDesignEndpointMocked:
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_design_returns_200_with_mock(self, mock_run, client):
         mock_run.return_value = {
             "design_df": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
@@ -458,7 +458,7 @@ class TestDesignEndpointMocked:
         assert "report" in body
         assert body["report"]["n"] == 5
 
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_design_ValueError_returns_422(self, mock_run, client):
         mock_run.side_effect = ValueError("bad formula")
         r = await client.post("/design", json={
@@ -469,7 +469,7 @@ class TestDesignEndpointMocked:
         assert r.status_code == 422
         assert "bad formula" in r.json()["detail"]
 
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_design_contrast_mode(self, mock_run, client):
         mock_run.return_value = {
             "design_df": pd.DataFrame({"A": [0.1], "B": [-0.1]}),
@@ -630,7 +630,7 @@ class TestMultiResponseModels:
     """Unit tests for MR-9 Pydantic models (no HTTP, no server needed)."""
 
     def test_response_spec_model_basic(self):
-        from api_server.models.common import ResponseSpecModel, PowerR2ConfigModel
+        from lattice_doe.api_server.models.common import ResponseSpecModel, PowerR2ConfigModel
         r = ResponseSpecModel(
             name="Y1",
             power_cfg=PowerR2ConfigModel(type="r2", r2_target=0.15),
@@ -640,7 +640,7 @@ class TestMultiResponseModels:
         assert r.formula is None
 
     def test_response_spec_model_weight_gt0_required(self):
-        from api_server.models.common import ResponseSpecModel
+        from lattice_doe.api_server.models.common import ResponseSpecModel
         import pydantic
         with pytest.raises(pydantic.ValidationError):
             ResponseSpecModel(
@@ -650,7 +650,7 @@ class TestMultiResponseModels:
             )
 
     def test_response_spec_model_empty_name_rejected(self):
-        from api_server.models.common import ResponseSpecModel
+        from lattice_doe.api_server.models.common import ResponseSpecModel
         import pydantic
         with pytest.raises(pydantic.ValidationError):
             ResponseSpecModel(
@@ -659,7 +659,7 @@ class TestMultiResponseModels:
             )
 
     def test_multi_response_options_model_min_two_responses(self):
-        from api_server.models.common import MultiResponseOptionsModel
+        from lattice_doe.api_server.models.common import MultiResponseOptionsModel
         import pydantic
         with pytest.raises(pydantic.ValidationError):
             MultiResponseOptionsModel(
@@ -669,7 +669,7 @@ class TestMultiResponseModels:
             )
 
     def test_multi_response_options_model_invalid_combination_rule(self):
-        from api_server.models.common import MultiResponseOptionsModel
+        from lattice_doe.api_server.models.common import MultiResponseOptionsModel
         import pydantic
         with pytest.raises(pydantic.ValidationError):
             MultiResponseOptionsModel(
@@ -678,7 +678,7 @@ class TestMultiResponseModels:
             )
 
     def test_multi_response_options_sigma_joint_accepted(self):
-        from api_server.models.common import MultiResponseOptionsModel
+        from lattice_doe.api_server.models.common import MultiResponseOptionsModel
         model = MultiResponseOptionsModel(
             responses=_MR_TWO_RESPONSES,
             sigma_joint=[[1.0, 0.3], [0.3, 1.0]],
@@ -686,8 +686,8 @@ class TestMultiResponseModels:
         assert model.sigma_joint == [[1.0, 0.3], [0.3, 1.0]]
 
     def test_pydantic_multi_cfg_to_dataclass_returns_MultiResponseOptions(self):
-        from api_server.models.common import MultiResponseOptionsModel
-        from api_server.serialization import pydantic_multi_cfg_to_dataclass
+        from lattice_doe.api_server.models.common import MultiResponseOptionsModel
+        from lattice_doe.api_server.serialization import pydantic_multi_cfg_to_dataclass
         from lattice_doe.config import MultiResponseOptions
         model = MultiResponseOptionsModel(responses=_MR_TWO_RESPONSES)
         result = pydantic_multi_cfg_to_dataclass(model)
@@ -695,16 +695,16 @@ class TestMultiResponseModels:
         assert len(result.responses) == 2
 
     def test_pydantic_multi_cfg_response_names_propagated(self):
-        from api_server.models.common import MultiResponseOptionsModel
-        from api_server.serialization import pydantic_multi_cfg_to_dataclass
+        from lattice_doe.api_server.models.common import MultiResponseOptionsModel
+        from lattice_doe.api_server.serialization import pydantic_multi_cfg_to_dataclass
         model = MultiResponseOptionsModel(responses=_MR_TWO_RESPONSES)
         result = pydantic_multi_cfg_to_dataclass(model)
         assert result.responses[0].name == "Y1"
         assert result.responses[1].name == "Y2"
 
     def test_pydantic_multi_cfg_sigma_joint_is_ndarray(self):
-        from api_server.models.common import MultiResponseOptionsModel
-        from api_server.serialization import pydantic_multi_cfg_to_dataclass
+        from lattice_doe.api_server.models.common import MultiResponseOptionsModel
+        from lattice_doe.api_server.serialization import pydantic_multi_cfg_to_dataclass
         model = MultiResponseOptionsModel(
             responses=_MR_TWO_RESPONSES,
             sigma_joint=[[1.0, 0.5], [0.5, 1.0]],
@@ -714,7 +714,7 @@ class TestMultiResponseModels:
         assert result.sigma_joint.shape == (2, 2)
 
     def test_serialize_multiresponse_result_keys(self):
-        from api_server.serialization import serialize_multiresponse_result
+        from lattice_doe.api_server.serialization import serialize_multiresponse_result
         fake_result = {
             "design_df": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
             "buckets_df": pd.DataFrame({"A": [0.1], "count": [2]}),
@@ -737,7 +737,7 @@ class TestMultiResponseModels:
         assert len(out["report"]["responses"]) == 2
 
     def test_serialize_multiresponse_result_numpy_sanitized(self):
-        from api_server.serialization import serialize_multiresponse_result
+        from lattice_doe.api_server.serialization import serialize_multiresponse_result
         fake_result = {
             "design_df": pd.DataFrame({"A": [0.1]}),
             "buckets_df": pd.DataFrame({"A": [0.1]}),
@@ -763,7 +763,7 @@ class TestMultiResponseModels:
 class TestMultiResponseEndpoint:
     """MR-9 HTTP tests for POST /multiresponse_design."""
 
-    @patch("api_server.routers.design.find_multiresponse_design")
+    @patch("lattice_doe.api_server.routers.design.find_multiresponse_design")
     async def test_multiresponse_returns_200_with_mock(self, mock_run, client):
         mock_run.return_value = {
             "design_df": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
@@ -788,7 +788,7 @@ class TestMultiResponseEndpoint:
         assert body["report"]["n"] == 10
         assert len(body["report"]["responses"]) == 2
 
-    @patch("api_server.routers.design.find_multiresponse_design")
+    @patch("lattice_doe.api_server.routers.design.find_multiresponse_design")
     async def test_multiresponse_responses_count_matches_request(self, mock_run, client):
         mock_run.return_value = {
             "design_df": pd.DataFrame({"A": [0.1]}),
@@ -811,7 +811,7 @@ class TestMultiResponseEndpoint:
         body = r.json()
         assert len(body["report"]["responses"]) == len(_MR_TWO_RESPONSES)
 
-    @patch("api_server.routers.design.find_multiresponse_design")
+    @patch("lattice_doe.api_server.routers.design.find_multiresponse_design")
     async def test_multiresponse_combination_rule_in_response(self, mock_run, client):
         mock_run.return_value = {
             "design_df": pd.DataFrame({"A": [0.1]}),
@@ -860,14 +860,14 @@ class TestMultiResponseEndpoint:
         })
         assert r.status_code == 422
 
-    @patch("api_server.routers.design.find_multiresponse_design")
+    @patch("lattice_doe.api_server.routers.design.find_multiresponse_design")
     async def test_422_ValueError_from_library(self, mock_run, client):
         mock_run.side_effect = ValueError("incompatible formulas")
         r = await client.post("/multiresponse_design", json=_MR_SIMPLE_BODY)
         assert r.status_code == 422
         assert "incompatible formulas" in r.json()["detail"]
 
-    @patch("api_server.routers.design.find_multiresponse_design")
+    @patch("lattice_doe.api_server.routers.design.find_multiresponse_design")
     async def test_sigma_joint_roundtrips(self, mock_run, client):
         """sigma_joint list-of-lists passes through serialization without error."""
         mock_run.return_value = {
@@ -898,7 +898,7 @@ class TestMultiResponseEndpoint:
         assert passed_multi_cfg.sigma_joint is not None
         assert passed_multi_cfg.sigma_joint.shape == (2, 2)
 
-    @patch("api_server.routers.design.find_multiresponse_design")
+    @patch("lattice_doe.api_server.routers.design.find_multiresponse_design")
     async def test_contrast_response_accepted(self, mock_run, client):
         mock_run.return_value = {
             "design_df": pd.DataFrame({"A": [0.1], "B": [-0.1]}),
@@ -939,7 +939,7 @@ class TestMultiResponseEndpoint:
         r = await client.post("/multiresponse_design", json=body)
         assert r.status_code == 200
 
-    @patch("api_server.routers.design.find_multiresponse_design")
+    @patch("lattice_doe.api_server.routers.design.find_multiresponse_design")
     async def test_health_not_broken_by_mr9(self, mock_run, client):
         """GET /health still returns 200 after MR-9 is registered."""
         r = await client.get("/health")
@@ -1022,44 +1022,44 @@ class TestGLMPydanticModels:
     """GL-7 Layer 1: PowerGLMContrastModel construction and validation."""
 
     def test_glm_model_construction_binomial(self):
-        from api_server.models.common import PowerGLMContrastModel
+        from lattice_doe.api_server.models.common import PowerGLMContrastModel
         m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3, family="binomial")
         assert m.type == "glm_contrast"
         assert m.family == "binomial"
         assert m.baseline == pytest.approx(0.3)
 
     def test_glm_model_construction_poisson(self):
-        from api_server.models.common import PowerGLMContrastModel
+        from lattice_doe.api_server.models.common import PowerGLMContrastModel
         m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.5], baseline=2.0, family="poisson")
         assert m.family == "poisson"
         assert m.baseline == pytest.approx(2.0)
 
     def test_glm_baseline_out_of_range_binomial(self):
-        from api_server.models.common import PowerGLMContrastModel
+        from lattice_doe.api_server.models.common import PowerGLMContrastModel
         import pydantic
         with pytest.raises(pydantic.ValidationError, match="baseline"):
             PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=1.5, family="binomial")
 
     def test_glm_baseline_zero_poisson_rejected(self):
-        from api_server.models.common import PowerGLMContrastModel
+        from lattice_doe.api_server.models.common import PowerGLMContrastModel
         import pydantic
         with pytest.raises(pydantic.ValidationError, match="baseline"):
             PowerGLMContrastModel(L=[[0, 1]], delta=[0.5], baseline=0.0, family="poisson")
 
     def test_glm_wrong_family_rejected(self):
-        from api_server.models.common import PowerGLMContrastModel
+        from lattice_doe.api_server.models.common import PowerGLMContrastModel
         import pydantic
         with pytest.raises(pydantic.ValidationError):
             PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3, family="gaussian")
 
     def test_glm_missing_baseline_rejected(self):
-        from api_server.models.common import PowerGLMContrastModel
+        from lattice_doe.api_server.models.common import PowerGLMContrastModel
         import pydantic
         with pytest.raises(pydantic.ValidationError):
             PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], family="binomial")
 
     def test_pydantic_power_cfg_to_dataclass_glm_branch(self):
-        from api_server.models.common import PowerGLMContrastModel
+        from lattice_doe.api_server.models.common import PowerGLMContrastModel
         from lattice_doe.config import PowerGLMContrastConfig
         m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3, family="binomial")
         cfg = pydantic_power_cfg_to_dataclass(m)
@@ -1069,7 +1069,7 @@ class TestGLMPydanticModels:
         assert cfg.L.shape == (1, 2)
 
     def test_pydantic_power_cfg_to_dataclass_glm_link_forwarded(self):
-        from api_server.models.common import PowerGLMContrastModel
+        from lattice_doe.api_server.models.common import PowerGLMContrastModel
         m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3,
                                    family="binomial", link="logit")
         cfg = pydantic_power_cfg_to_dataclass(m)
@@ -1077,9 +1077,9 @@ class TestGLMPydanticModels:
 
     def test_glm_type_discriminator_in_union(self):
         """PowerCfgModel discriminates glm_contrast correctly."""
-        from api_server.models.common import PowerGLMContrastModel
+        from lattice_doe.api_server.models.common import PowerGLMContrastModel
         from pydantic import TypeAdapter
-        from api_server.models.common import PowerCfgModel
+        from lattice_doe.api_server.models.common import PowerCfgModel
         ta = TypeAdapter(PowerCfgModel)
         m = ta.validate_python({
             "type": "glm_contrast",
@@ -1113,38 +1113,38 @@ class TestGLMDesignEndpointMocked:
             r["report"].update(extra)
         return r
 
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_glm_binomial_returns_200(self, mock_run, client):
         mock_run.return_value = self._mock_return()
         r = await client.post("/design", json=self._glm_body())
         assert r.status_code == 200
 
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_glm_binomial_response_has_design_df(self, mock_run, client):
         mock_run.return_value = self._mock_return()
         r = await client.post("/design", json=self._glm_body())
         assert "design_df" in r.json()
         assert len(r.json()["design_df"]) >= 1
 
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_glm_binomial_report_has_family(self, mock_run, client):
         mock_run.return_value = self._mock_return()
         r = await client.post("/design", json=self._glm_body())
         assert r.json()["report"]["family"] == "binomial"
 
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_glm_binomial_report_test_type_wald_chi2(self, mock_run, client):
         mock_run.return_value = self._mock_return()
         r = await client.post("/design", json=self._glm_body())
         assert r.json()["report"]["test_type"] == "wald_chi2"
 
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_glm_binomial_report_df2_is_none(self, mock_run, client):
         mock_run.return_value = self._mock_return()
         r = await client.post("/design", json=self._glm_body())
         assert r.json()["report"]["df2"] is None
 
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_glm_poisson_returns_200(self, mock_run, client):
         mock_run.return_value = self._mock_return({
             "family": "poisson", "link": "log", "baseline": 2.0, "glm_weight": 2.0,
@@ -1152,7 +1152,7 @@ class TestGLMDesignEndpointMocked:
         r = await client.post("/design", json=self._glm_body(_GLM_POISSON_CFG))
         assert r.status_code == 200
 
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_glm_poisson_report_has_baseline(self, mock_run, client):
         mock_run.return_value = self._mock_return({
             "family": "poisson", "link": "log", "baseline": 2.0, "glm_weight": 2.0,
@@ -1180,7 +1180,7 @@ class TestGLMDesignEndpointMocked:
         r = await client.post("/design", json=body)
         assert r.status_code == 422
 
-    @patch("api_server.routers.design.find_optimal_design")
+    @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_ols_contrast_endpoint_unchanged(self, mock_run, client):
         mock_run.return_value = {
             "design_df": pd.DataFrame({"A": [0.1, -0.1]}),
@@ -1411,7 +1411,7 @@ class TestUX2JobsRouter:
         assert (await client.delete("/jobs/nope")).status_code == 404
 
     async def test_capacity_returns_503_with_retry_after(self, client, app):
-        from api_server.jobs import JobsAtCapacity
+        from lattice_doe.api_server.jobs import JobsAtCapacity
 
         class _Full:
             max_concurrent = 2
@@ -1455,7 +1455,7 @@ def test_ux2_sse_stream_reaches_terminal():
     import json as _json
 
     from fastapi.testclient import TestClient
-    from api_server.main import create_app
+    from lattice_doe.api_server.main import create_app
 
     client = TestClient(create_app())
     body = {

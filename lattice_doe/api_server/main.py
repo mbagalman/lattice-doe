@@ -7,7 +7,7 @@ Usage
 -----
 Start with Uvicorn::
 
-    uvicorn api_server.main:create_app --factory --host 0.0.0.0 --port 8000
+    uvicorn lattice_doe.api_server.main:create_app --factory --host 0.0.0.0 --port 8000
 
 Or via the installed CLI entry point::
 
@@ -24,10 +24,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from api_server import __version__
-from api_server.errors import register_exception_handlers
-from api_server.jobs import build_job_manager
-from api_server.routers import augment, compare, design, jobs, power_curve, sensitivity
+from lattice_doe.api_server import __version__
+from lattice_doe.api_server.errors import register_exception_handlers
+from lattice_doe.api_server.jobs import build_job_manager
+from lattice_doe.api_server.routers import augment, compare, design, jobs, power_curve, sensitivity
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,7 +115,7 @@ def run() -> None:
             'Install with: pip install "lattice-doe[server]"'
         )
     uvicorn.run(
-        "api_server.main:create_app",
+        "lattice_doe.api_server.main:create_app",
         factory=True,
         host="0.0.0.0",
         port=8000,

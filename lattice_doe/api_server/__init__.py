@@ -7,7 +7,7 @@ FastAPI application exposing powered optimal design workflows over HTTP.
 
 Quick start::
 
-    uvicorn api_server.main:create_app --factory --host 0.0.0.0 --port 8000
+    uvicorn lattice_doe.api_server.main:create_app --factory --host 0.0.0.0 --port 8000
     # or:
     lattice-api
 

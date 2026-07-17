@@ -10,13 +10,13 @@ from typing import Any, Dict
 from fastapi import APIRouter
 
 from lattice_doe import compare_criteria
-from api_server.models.compare import (
+from lattice_doe.api_server.models.compare import (
     CompareCriteriaRequest,
     CompareCriteriaResponse,
     CriterionSummaryRow,
 )
-from api_server.models.design import DesignResponse
-from api_server.serialization import (
+from lattice_doe.api_server.models.design import DesignResponse
+from lattice_doe.api_server.serialization import (
     factors_to_spec,
     pydantic_design_opts_to_dataclass,
     pydantic_power_cfg_to_dataclass,

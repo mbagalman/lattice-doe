@@ -16,7 +16,7 @@ class TestMatrixWireFormatPreservesOrder:
 
         import pandas as pd
 
-        from api_server.serialization import (
+        from lattice_doe.api_server.serialization import (
             df_to_records, df_to_split, records_to_df, split_to_df,
         )
 
@@ -43,7 +43,7 @@ class TestMatrixWireFormatPreservesOrder:
         pytest.importorskip("fastapi")
         from fastapi.testclient import TestClient
 
-        from api_server.main import create_app
+        from lattice_doe.api_server.main import create_app
 
         client = TestClient(create_app())
         req = {

@@ -9,8 +9,8 @@ from functools import partial
 from fastapi import APIRouter
 
 from lattice_doe import augment_design
-from api_server.models.augment import AugmentRequest, AugmentResponse
-from api_server.serialization import (
+from lattice_doe.api_server.models.augment import AugmentRequest, AugmentResponse
+from lattice_doe.api_server.serialization import (
     factors_to_spec,
     df_to_records,
     pydantic_design_opts_to_dataclass,

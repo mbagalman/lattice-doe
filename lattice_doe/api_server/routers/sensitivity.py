@@ -10,13 +10,13 @@ from fastapi import APIRouter
 
 from lattice_doe import power_sensitivity, min_detectable_effect
 from lattice_doe.config import PowerContrastConfig
-from api_server.models.sensitivity import (
+from lattice_doe.api_server.models.sensitivity import (
     MdeRequest,
     MdeResponse,
     SensitivityRequest,
     SensitivityResponse,
 )
-from api_server.serialization import (
+from lattice_doe.api_server.serialization import (
     factors_to_spec,
     df_to_records,
     pydantic_design_opts_to_dataclass,

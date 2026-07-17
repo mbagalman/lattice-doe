@@ -9,12 +9,12 @@ from functools import partial
 from fastapi import APIRouter
 
 from lattice_doe import power_curve_by_n, power_curve_by_effect
-from api_server.models.power_curve import (
+from lattice_doe.api_server.models.power_curve import (
     PowerCurveByNRequest,
     PowerCurveByEffectRequest,
     PowerCurveResponse,
 )
-from api_server.serialization import (
+from lattice_doe.api_server.serialization import (
     factors_to_spec,
     pydantic_power_cfg_to_dataclass,
     pydantic_design_opts_to_dataclass,

@@ -309,8 +309,8 @@ lattice_doe/app/          # Streamlit web application (ships with the [app] extr
     ├── 3_Run_Results.py  # Page 3: run the design, view results, download
     └── 4_Analysis.py     # Page 4: power curves, sensitivity, MDE, criteria comparison
 
-api_server/               # FastAPI REST API server
-├── main.py               # app factory: `uvicorn api_server.main:create_app --factory`
+lattice_doe/api_server/   # FastAPI REST API server (ships with the [server] extra)
+├── main.py               # app factory: `uvicorn lattice_doe.api_server.main:create_app --factory`
 ├── serialization.py      # Pydantic request/response models
 ├── errors.py             # exception handlers
 └── routers/
@@ -4359,13 +4359,13 @@ lattice-api
 This starts Uvicorn on `0.0.0.0:8000` with a fresh app instance. Equivalent to:
 
 ```bash
-uvicorn api_server.main:create_app --factory --host 0.0.0.0 --port 8000
+uvicorn lattice_doe.api_server.main:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
 **Option B — Uvicorn with custom settings**
 
 ```bash
-uvicorn api_server.main:create_app \
+uvicorn lattice_doe.api_server.main:create_app \
     --factory \
     --host 0.0.0.0 \
     --port 8000 \
@@ -4726,7 +4726,7 @@ location /iopt/ {
 For multi-worker deployment:
 
 ```bash
-uvicorn api_server.main:create_app \
+uvicorn lattice_doe.api_server.main:create_app \
     --factory \
     --workers 4 \
     --host 127.0.0.1 \
@@ -7763,7 +7763,7 @@ pip install "lattice-doe[server]"
 # Start the API server
 lattice-api
 # or equivalently:
-uvicorn api_server.main:create_app --factory --host 0.0.0.0 --port 8000
+uvicorn lattice_doe.api_server.main:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
 The API is then available at:
@@ -7828,7 +7828,7 @@ blocking another.
 **Manual multi-worker start:**
 
 ```bash
-uvicorn api_server.main:create_app \
+uvicorn lattice_doe.api_server.main:create_app \
     --factory \
     --host 0.0.0.0 \
     --port 8000 \

@@ -137,7 +137,7 @@ Issues = "https://github.com/mbagalman/lattice-doe/issues"
 # Registers a CLI entry point; users can run `lattice` after installation.
 lattice = "lattice_doe.cli:main"
 # REST API server entry point; users can run `lattice-api` after installation.
-lattice-api = "api_server.main:run"
+lattice-api = "lattice_doe.api_server.main:run"
 # Streamlit web UI entry point; users can run `lattice-app` after installing
 # the [app] extra.
 lattice-app = "lattice_doe.app._launcher:main"
@@ -146,9 +146,12 @@ lattice-app = "lattice_doe.app._launcher:main"
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+# The distribution claims exactly ONE top-level import name: lattice_doe.
+# The REST server lives at lattice_doe.api_server (a bare top-level
+# "api_server" would squat a generic name in every user's environment).
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["lattice_doe*", "api_server*"]
+include = ["lattice_doe*"]
 
 [tool.setuptools.package-data]
 "lattice_doe" = ["templates/*.html"]
@@ -176,5 +179,7 @@ disallow_untyped_defs = true
 ignore_missing_imports = true
 # The Streamlit app ships inside the package but is Streamlit-script code,
 # not library code: its pages are run (not imported), carry non-identifier
-# module names (1_Factors.py), and have never been in mypy scope.
-exclude = ["lattice_doe/app/"]
+# module names (1_Factors.py), and have never been in mypy scope. The REST
+# server moved inside the package too and was likewise never in scope;
+# bringing either in is tracked as future work, not done as a side effect.
+exclude = ["lattice_doe/app/", "lattice_doe/api_server/"]

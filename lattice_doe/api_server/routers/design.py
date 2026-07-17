@@ -10,13 +10,13 @@ from fastapi import APIRouter
 
 from lattice_doe import find_optimal_design
 from lattice_doe.api import find_multiresponse_design
-from api_server.models.design import (
+from lattice_doe.api_server.models.design import (
     DesignRequest,
     DesignResponse,
     MultiResponseDesignRequest,
     MultiResponseDesignResponse,
 )
-from api_server.serialization import (
+from lattice_doe.api_server.serialization import (
     factors_to_spec,
     pydantic_design_opts_to_dataclass,
     pydantic_multi_cfg_to_dataclass,
