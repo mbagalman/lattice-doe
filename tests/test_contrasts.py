@@ -43,7 +43,9 @@ def _app_scenario_contrast():
     import sys
     from pathlib import Path
 
-    app_dir = str(Path(__file__).resolve().parents[1] / "app")
+    import lattice_doe
+
+    app_dir = str(Path(lattice_doe.__file__).resolve().parent / "app")
     if app_dir not in sys.path:
         sys.path.insert(0, app_dir)
     pytest.importorskip("streamlit")
@@ -604,7 +606,9 @@ class TestCodingErrorRemedies:
         import ast
         from pathlib import Path
 
-        src = (Path(__file__).resolve().parents[1]
+        import lattice_doe
+
+        src = (Path(lattice_doe.__file__).resolve().parent
                / "app" / "components" / "power_params.py").read_text()
         tree = ast.parse(src)
         top_level = [n for n in tree.body

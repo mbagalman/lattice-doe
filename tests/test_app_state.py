@@ -16,10 +16,13 @@ from pathlib import Path
 
 import pytest
 
-# The Streamlit app lives in ``app/`` and its modules import each other by bare
-# name (``from state import ...``), relying on Streamlit putting the app dir on
-# sys.path at runtime. Replicate that for the test process.
-_APP_DIR = Path(__file__).resolve().parents[1] / "app"
+# The Streamlit app ships inside the package (``lattice_doe/app``) and its
+# modules import each other by bare name (``from state import ...``), relying
+# on Streamlit putting the app dir on sys.path at runtime. Resolve the dir
+# through the installed package and replicate that for the test process.
+import lattice_doe as _lattice_doe
+
+_APP_DIR = Path(_lattice_doe.__file__).resolve().parent / "app"
 if str(_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_APP_DIR))
 

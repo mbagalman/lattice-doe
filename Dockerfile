@@ -8,15 +8,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy package metadata first so dependency layer is cached separately
+# Copy package metadata first so dependency layer is cached separately.
+# The Streamlit app ships inside the package (lattice_doe/app), so no
+# separate app copy is needed.
 COPY pyproject.toml README.md ./
 COPY lattice_doe/ ./lattice_doe/
 
 # Install the package and all Streamlit app dependencies
 RUN pip install --no-cache-dir -e ".[app,extras]"
 
-# Copy the Streamlit app
-COPY app/ ./app/
 COPY .streamlit/ ./.streamlit/
 
 EXPOSE 8501
@@ -25,7 +25,8 @@ EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s \
     CMD curl -f http://localhost:8501/healthz || exit 1
 
-CMD ["streamlit", "run", "app/app.py", \
+# lattice-app resolves the packaged app path; extra args pass to Streamlit.
+CMD ["lattice-app", \
      "--server.port=8501", \
      "--server.address=0.0.0.0", \
      "--server.headless=true"]

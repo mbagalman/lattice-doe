@@ -117,17 +117,17 @@ The interactive web front-end lets you configure and run designs without writing
 
 ```bash
 # Install the package with Streamlit and Plotly
-pip install -e ".[app]"
+pip install "lattice-doe[app]"      # or, from a checkout: pip install -e ".[app]"
 
 # Launch the app (opens in your browser at http://localhost:8501)
-streamlit run app/app.py
+lattice-app
 ```
 
 ### Streamlit Community Cloud (free hosting)
 
 1. Push this repository to GitHub (already done if you're reading this there).
 2. Go to [share.streamlit.io](https://share.streamlit.io) and click **New app**.
-3. Select your repository and set **Main file path** to `app/app.py`.
+3. Select your repository and set **Main file path** to `lattice_doe/app/app.py`.
 4. Click **Deploy** — no secrets or environment variables required.
 
 ### Docker

@@ -139,7 +139,7 @@ The package provides seven ways to generate a design. They all call the same und
 
 **If you are new to the package** and comfortable with Python, start with the Python API (Chapter 8) for maximum transparency and control. Run the [Quick Start Guide](quickstart.md) first — it gets a working design in ten minutes and introduces the core objects.
 
-**If you need a no-code interface**, the Streamlit app (Chapter 10) covers all major design types with a four-page UI that requires no programming. You can run it locally with `streamlit run app/app.py` or deploy it to Streamlit Community Cloud for free.
+**If you need a no-code interface**, the Streamlit app (Chapter 10) covers all major design types with a four-page UI that requires no programming. You can run it locally with `lattice-app` or deploy it to Streamlit Community Cloud for free.
 
 **If your team lives in spreadsheets**, the Excel interface (Chapter 11) and Google Sheets interface (Chapter 12) accept a filled-in template and write results back to the same file, so the entire workflow stays in the tool your collaborators already use.
 
@@ -198,7 +198,7 @@ pip install -e ".[extra1,extra2,...]"
 |---|---|---|
 | `cli` | `pyyaml` — YAML config parsing | You want to use `lattice --config config.yml` |
 | `viz` | `matplotlib`, `seaborn`, `plotly` — power curve figures | You want to generate or display power curve plots |
-| `app` | `streamlit`, `plotly`, `pyyaml` — the web UI | You want to run `streamlit run app/app.py` |
+| `app` | `streamlit`, `plotly`, `pyyaml` — the web UI | You want to run `lattice-app` |
 | `report` | `jinja2`, `pillow`, `kaleido` — HTML report generation | You want to call `generate_report(...)` to produce shareable HTML files |
 | `report-pdf` | Everything in `[report]` plus `weasyprint` | You want PDF output from `generate_report(...)` |
 | `extras` | `tqdm` (progress bars), `xlsxwriter`, `openpyxl` (Excel I/O) | You want progress bars during long runs, or you use the Excel interface |
@@ -298,8 +298,9 @@ lattice_doe/        # core Python package — importable as `lattice_doe`
 │
 └── plot_backends.py      # matplotlib / plotly figure helpers
 
-app/                      # Streamlit web application
-├── app.py                # entry point: `streamlit run app/app.py`
+lattice_doe/app/          # Streamlit web application (ships with the [app] extra)
+├── app.py                # entry point: `lattice-app`
+├── _launcher.py          # console-script launcher for the packaged app
 ├── state.py              # shared session-state helpers
 ├── components/           # reusable UI components (factor table, power params, charts)
 └── pages/
@@ -2945,16 +2946,16 @@ Session state is preserved as you navigate between pages — you can go back to 
 
 #### 10.2 Launching the app
 
-**Local run.** Install the `app` extras group and start Streamlit:
+**Local run.** Install the `app` extras group and launch:
 
 ```bash
-pip install -e ".[app]"
-streamlit run app/app.py
+pip install "lattice-doe[app]"
+lattice-app
 ```
 
 The app opens automatically in your browser at `http://localhost:8501`. The home page shows a four-column overview of the workflow and a quick-reference expander that summarises factor types, formula syntax, and criteria.
 
-**From the project root.** The `app/` directory is added to `sys.path` by Streamlit, so all pages can import from `state.py` and `components/` without any path manipulation. Run only from the project root.
+The UI ships inside the package (`lattice_doe/app/`), so `lattice-app` works from any directory; extra arguments pass straight through to Streamlit (e.g. `lattice-app --server.port 8600`). From a repository checkout, `streamlit run lattice_doe/app/app.py` is equivalent. Streamlit adds the app directory to `sys.path`, so all pages can import from `state.py` and `components/` without any path manipulation.
 
 ---
 
@@ -3090,7 +3091,7 @@ Streamlit Community Cloud (share.streamlit.io) provides free hosting for public 
 2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with your GitHub account.
 3. Click **New app**.
 4. Select your repository and branch.
-5. Set **Main file path** to `app/app.py`.
+5. Set **Main file path** to `lattice_doe/app/app.py`.
 6. Click **Deploy**.
 
 The app will be live at `https://<your-app-name>.streamlit.app` within a few minutes.
@@ -7725,7 +7726,7 @@ use with non-Python colleagues.
 
 ```bash
 pip install "lattice-doe[app]"
-streamlit run app/app.py
+lattice-app
 # → open http://localhost:8501 in your browser
 ```
 
@@ -8904,7 +8905,7 @@ Install extra: `pip install "lattice-doe[cli]"` for YAML parsing.
 
 The Streamlit app exposes a four-page UI covering all major design types and all post-design analysis functions. It is the most feature-rich no-code interface. Users fill in factor definitions, power configuration, and design options through form widgets; the app calls the Python API on submit and displays results interactively. HTML and PDF reports can be downloaded directly from the browser.
 
-The app can be run locally (`streamlit run app/app.py`) or deployed to Streamlit Community Cloud for team sharing with no server administration. Cloud deployment makes it the only interface that is both no-code **and** collaborative by default.
+The app can be run locally (`lattice-app`) or deployed to Streamlit Community Cloud for team sharing with no server administration. Cloud deployment makes it the only interface that is both no-code **and** collaborative by default.
 
 Best for: interactive exploration, non-programmer collaborators, stakeholder demonstrations, teams that want a shared web tool without building their own frontend.
 

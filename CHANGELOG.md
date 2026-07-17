@@ -19,7 +19,7 @@ Initial public release of `lattice-doe`.
 - Scenario-based contrast construction (`contrast_from_scenarios`)
 - Top-level Python API: `find_optimal_design`, `find_multiresponse_design`, `compare_criteria`, `power_curve_*`, `min_detectable_effect`, `robustness_report`, `augment_design`, `generate_report`
 - Command-line interface (`lattice`) with YAML/JSON config support and a `--template` scaffold generator
-- Streamlit multi-page web UI (`streamlit run app/app.py`)
+- Streamlit multi-page web UI, packaged with the `[app]` extra (`lattice-app`)
 - FastAPI REST server (`lattice-api`)
 - HTML/PDF report generation, diagnostic plots, and CSV/JSON diagnostic exports
 - Google Sheets and Excel workbook integrations

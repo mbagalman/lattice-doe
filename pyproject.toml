@@ -138,6 +138,9 @@ Issues = "https://github.com/mbagalman/lattice-doe/issues"
 lattice = "lattice_doe.cli:main"
 # REST API server entry point; users can run `lattice-api` after installation.
 lattice-api = "api_server.main:run"
+# Streamlit web UI entry point; users can run `lattice-app` after installing
+# the [app] extra.
+lattice-app = "lattice_doe.app._launcher:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -149,6 +152,10 @@ include = ["lattice_doe*", "api_server*"]
 
 [tool.setuptools.package-data]
 "lattice_doe" = ["templates/*.html"]
+# Streamlit surfaces every .py file under pages/ as a sidebar page, so the
+# pages directory must NOT be a package (an __init__.py would render as a
+# page); its scripts ship as package data instead.
+"lattice_doe.app" = ["pages/*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -167,3 +174,7 @@ python_version = "3.9"
 warn_unused_configs = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
+# The Streamlit app ships inside the package but is Streamlit-script code,
+# not library code: its pages are run (not imported), carry non-identifier
+# module names (1_Factors.py), and have never been in mypy scope.
+exclude = ["lattice_doe/app/"]

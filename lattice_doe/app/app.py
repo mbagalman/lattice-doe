@@ -2,9 +2,11 @@
 Lattice DOE — Streamlit home page.
 
 Run with:
-    streamlit run app/app.py
+    lattice-app
+or, from a repository checkout:
+    streamlit run lattice_doe/app/app.py
 
-Streamlit adds the app/ directory to sys.path, so all pages can import
+Streamlit adds this directory to sys.path, so all pages can import
 from state.py and components/ without any path manipulation.
 """
 
