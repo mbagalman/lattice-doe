@@ -22,6 +22,7 @@ Uvicorn ``--workers N`` each worker keeps its own jobs; a job id is only
 resolvable on the worker that created it. For multi-worker durable jobs, back
 this with a shared store (Redis/DB) — tracked as a follow-up.
 """
+
 from __future__ import annotations
 
 import os
@@ -122,7 +123,9 @@ class JobManager:
             self._evict_locked()
 
         threading.Thread(
-            target=self._run, args=(job, runner), daemon=True,
+            target=self._run,
+            args=(job, runner),
+            daemon=True,
             name=f"job-{job.id[:8]}",
         ).start()
         return job.id
@@ -137,9 +140,7 @@ class JobManager:
                 with self._lock:
                     job.progress = ev.to_dict()
 
-            reporter = ProgressReporter(
-                _sink, min_interval=0.25, cancelled=job._cancel.is_set
-            )
+            reporter = ProgressReporter(_sink, min_interval=0.25, cancelled=job._cancel.is_set)
             result = runner(reporter)
 
             with self._lock:
@@ -178,8 +179,7 @@ class JobManager:
         if len(self._jobs) <= self._max_retained:
             return
         removable = [
-            jid for jid, j in self._jobs.items()
-            if j.state in ("done", "failed", "cancelled")
+            jid for jid, j in self._jobs.items() if j.state in ("done", "failed", "cancelled")
         ]
         while len(self._jobs) > self._max_retained and removable:
             self._jobs.pop(removable.pop(0), None)

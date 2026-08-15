@@ -20,6 +20,7 @@ surrounding orchestration needed to build optimal experimental designs:
 Dependencies (all within this package):
   candidate.py  →  model_matrix.py  →  iopt_search.py  →  config.py
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -87,9 +88,7 @@ def _fedorov_exchange_single(
 
     # --- Initial random design ---
     if n > n_cand:
-        raise ValueError(
-            f"n={n} exceeds candidate set size n_cand={n_cand}."
-        )
+        raise ValueError(f"n={n} exceeds candidate set size n_cand={n_cand}.")
     idx = rng.choice(n_cand, size=n, replace=False)
     in_design = np.zeros(n_cand, dtype=bool)
     in_design[idx] = True
@@ -99,25 +98,25 @@ def _fedorov_exchange_single(
 
     for _iter in range(max_iter):
         # Current moment matrix and its regularised inverse
-        X_d = X_cand[idx]                        # n × p
-        M = X_d.T @ X_d + jitter * np.eye(p)    # p × p
+        X_d = X_cand[idx]  # n × p
+        M = X_d.T @ X_d + jitter * np.eye(p)  # p × p
         try:
             M_inv = np.linalg.inv(M)
         except np.linalg.LinAlgError:
             break  # singular; stop improving
 
         # H[:, t] = M^-1 x_t  for every candidate t  →  shape (p, n_cand)
-        H = M_inv @ X_cand.T                     # p × n_cand
+        H = M_inv @ X_cand.T  # p × n_cand
         # leverages[t] = x_t' M^-1 x_t
-        leverages = np.einsum("pt,pt->t", X_cand.T, H)   # (n_cand,)
+        leverages = np.einsum("pt,pt->t", X_cand.T, H)  # (n_cand,)
 
         # Pre-gather non-design rows once per iteration
-        non_idx = np.where(~in_design)[0]        # (n_non,)
+        non_idx = np.where(~in_design)[0]  # (n_non,)
         if len(non_idx) == 0:
             break
-        X_non = X_cand[non_idx]                  # n_non × p
-        H_non = H[:, non_idx]                    # p × n_non
-        lev_non = leverages[non_idx]             # (n_non,)
+        X_non = X_cand[non_idx]  # n_non × p
+        H_non = H[:, non_idx]  # p × n_non
+        lev_non = leverages[non_idx]  # (n_non,)
 
         # Current criterion score used for A / I gain calculations
         if criterion == "A":
@@ -125,51 +124,50 @@ def _fedorov_exchange_single(
         elif criterion == "I":
             current_score = float(np.trace(M_inv @ Mcand))
 
-        best_gain = 0.0   # only accept strictly improving swaps
+        best_gain = 0.0  # only accept strictly improving swaps
         best_s_pos = -1
-        best_t_local = -1   # index into non_idx
+        best_t_local = -1  # index into non_idx
 
         for s_pos in range(len(idx)):
             s = idx[s_pos]
             d_s = float(leverages[s])
-            h_s = H[:, s]                        # M^-1 x_s  (p,)
+            h_s = H[:, s]  # M^-1 x_s  (p,)
             denom_s = 1.0 - d_s
             if denom_s < 1e-10:
                 continue  # near-degenerate; can't safely remove this point
 
             # w_s_all[k] = x_{non_idx[k]}' M^-1 x_s  (vectorised over all t)
-            w_s_all = X_non @ h_s                # (n_non,)
+            w_s_all = X_non @ h_s  # (n_non,)
 
             if criterion == "D":
                 # Fedorov det-ratio (exact rank-2 update):
                 #   v_t' = lev_non + w^2 / denom_s   (leverage w.r.t. M' = M - x_s x_s')
                 #   ratio = denom_s * (1 + v_t')   →  gain = ratio - 1
                 v_t_prime = lev_non + w_s_all * w_s_all / denom_s
-                gains = denom_s * (1.0 + v_t_prime) - 1.0       # (n_non,)
+                gains = denom_s * (1.0 + v_t_prime) - 1.0  # (n_non,)
 
             elif criterion == "A":
                 # Step 1 – remove x_s:  trace(M'^-1) = trace(M^-1) + ||h_s||^2/denom_s
                 trace_minus = current_score + float(h_s @ h_s) / denom_s
                 # Step 2 – add x_t:  M'^-1 x_t via Sherman-Morrison (vectorised)
-                mp_inv_xnon = H_non + np.outer(h_s, w_s_all) / denom_s   # p × n_non
+                mp_inv_xnon = H_non + np.outer(h_s, w_s_all) / denom_s  # p × n_non
                 d_t_prime = np.einsum("pt,pt->t", X_non.T, mp_inv_xnon)  # (n_non,)
                 norm2 = np.einsum("pt,pt->t", mp_inv_xnon, mp_inv_xnon)  # (n_non,)
-                new_traces = trace_minus - norm2 / (1.0 + d_t_prime)     # (n_non,)
-                gains = current_score - new_traces                        # (n_non,)
+                new_traces = trace_minus - norm2 / (1.0 + d_t_prime)  # (n_non,)
+                gains = current_score - new_traces  # (n_non,)
 
             else:  # criterion == "I"
                 # Step 1 – remove x_s
-                Mcand_hs = Mcand @ h_s                                    # p,
+                Mcand_hs = Mcand @ h_s  # p,
                 trace_I_minus = current_score + float(h_s @ Mcand_hs) / denom_s
                 # Step 2 – add x_t
-                mp_inv_xnon = H_non + np.outer(h_s, w_s_all) / denom_s   # p × n_non
+                mp_inv_xnon = H_non + np.outer(h_s, w_s_all) / denom_s  # p × n_non
                 d_t_prime = np.einsum("pt,pt->t", X_non.T, mp_inv_xnon)  # (n_non,)
-                Mcand_mp = Mcand @ mp_inv_xnon                            # p × n_non
-                delta_I = (
-                    np.einsum("pt,pt->t", mp_inv_xnon, Mcand_mp)
-                    / (1.0 + d_t_prime)
-                )                                                         # (n_non,)
-                gains = current_score - (trace_I_minus - delta_I)        # (n_non,)
+                Mcand_mp = Mcand @ mp_inv_xnon  # p × n_non
+                delta_I = np.einsum("pt,pt->t", mp_inv_xnon, Mcand_mp) / (
+                    1.0 + d_t_prime
+                )  # (n_non,)
+                gains = current_score - (trace_I_minus - delta_I)  # (n_non,)
 
             # Track the globally best swap across all design points
             local_best = int(np.argmax(gains))
@@ -344,6 +342,7 @@ def _a_criterion_for_indices(X_cand: np.ndarray, idx: np.ndarray, jitter: float 
 # GLS criterion scorers (split-plot / two-stratum variance model)
 # ---------------------------------------------------------------------
 
+
 def _gls_i_criterion(
     X: np.ndarray,
     V_inv: np.ndarray,
@@ -379,7 +378,7 @@ def _gls_i_criterion(
         GLS I-criterion score; lower is better.  Returns ``float('inf')``
         for singular or near-singular designs.
     """
-    M = gls_information_matrix(X, V_inv, jitter=jitter)   # p × p, PD
+    M = gls_information_matrix(X, V_inv, jitter=jitter)  # p × p, PD
     try:
         M_inv = np.linalg.inv(M)
     except np.linalg.LinAlgError:
@@ -726,18 +725,20 @@ def _preallocated_design(
     if cat_cols is not None:
         cat_cols = [c for c in cat_cols if c in cand.columns]
     else:
-        cat_cols = [
-            c for c in cand.columns
-            if not pd.api.types.is_numeric_dtype(cand[c])
-        ]
+        cat_cols = [c for c in cand.columns if not pd.api.types.is_numeric_dtype(cand[c])]
 
     if not cat_cols:
         # No categorical columns — fall back to normal search
         X_cand, p_names = build_model_matrix(formula, cand)
         selected_idx = _optimal_indices_from_X(
-            X_cand, n,
-            criterion=criterion, algo=algo, n_start=n_start,
-            max_iter=max_iter, random_state=random_state, jitter=jitter,
+            X_cand,
+            n,
+            criterion=criterion,
+            algo=algo,
+            n_start=n_start,
+            max_iter=max_iter,
+            random_state=random_state,
+            jitter=jitter,
         )
         design_df = cand.iloc[selected_idx].reset_index(drop=True)
         return design_df, selected_idx, p_names
@@ -760,9 +761,14 @@ def _preallocated_design(
     if n < k * max(1, alloc_min_per_cell) and n <= len(cand):
         X_cand, p_names = build_model_matrix(formula, cand)
         selected_idx = _optimal_indices_from_X(
-            X_cand, n,
-            criterion=criterion, algo=algo, n_start=n_start,
-            max_iter=max_iter, random_state=random_state, jitter=jitter,
+            X_cand,
+            n,
+            criterion=criterion,
+            algo=algo,
+            n_start=n_start,
+            max_iter=max_iter,
+            random_state=random_state,
+            jitter=jitter,
         )
         design_df = cand.iloc[selected_idx].reset_index(drop=True)
         return design_df, selected_idx, p_names
@@ -816,7 +822,7 @@ def _preallocated_design(
         # Build boolean mask for this cell
         mask = np.ones(len(cand), dtype=bool)
         for col in cat_cols:
-            mask &= (cand[col].values == cell_df.iloc[ci][col])
+            mask &= cand[col].values == cell_df.iloc[ci][col]
         cell_positions = np.where(mask)[0]  # positional indices into cand
 
         if len(cell_positions) == 0:
@@ -832,9 +838,14 @@ def _preallocated_design(
             # Extract per-cell model matrix (using positional index slice)
             X_cell = X_cand_full[cell_positions, :]
             local_idx = _optimal_indices_from_X(
-                X_cell, n_distinct,
-                criterion=criterion, algo=algo, n_start=n_start,
-                max_iter=max_iter, random_state=cell_random_state, jitter=jitter,
+                X_cell,
+                n_distinct,
+                criterion=criterion,
+                algo=algo,
+                n_start=n_start,
+                max_iter=max_iter,
+                random_state=cell_random_state,
+                jitter=jitter,
             )
 
         chosen = cell_positions[local_idx]
@@ -968,9 +979,15 @@ def build_i_opt_design_with_idx(
     # Pre-allocation path — delegates entirely to _preallocated_design
     if preallocate_categorical:
         return _preallocated_design(
-            cand=cand, formula=formula, n=n,
-            criterion=criterion, algo=algo, n_start=n_start,
-            max_iter=max_iter, random_state=random_state, jitter=jitter,
+            cand=cand,
+            formula=formula,
+            n=n,
+            criterion=criterion,
+            algo=algo,
+            n_start=n_start,
+            max_iter=max_iter,
+            random_state=random_state,
+            jitter=jitter,
             alloc_min_per_cell=alloc_min_per_cell,
             alloc_max_per_cell=alloc_max_per_cell,
             alloc_wynn_max_iter=alloc_wynn_max_iter,
@@ -1093,9 +1110,7 @@ def build_i_opt_design_with_idx(
             )
 
         if best_idx is None:  # pragma: no cover - defensive
-            raise RuntimeError(
-                "Parallel optimization completed but no best index was found."
-            )
+            raise RuntimeError("Parallel optimization completed but no best index was found.")
 
         design_df = cand.iloc[best_idx].reset_index(drop=True)
         return design_df, best_idx, p_names
@@ -1280,9 +1295,7 @@ def augment_design(
     import patsy as _patsy
 
     _factor_cols = [c for c in design_df.columns if c in cand.columns]
-    _aug_di = _patsy.incr_dbuilder(
-        formula, lambda: iter([design_df[_factor_cols], cand])
-    )
+    _aug_di = _patsy.incr_dbuilder(formula, lambda: iter([design_df[_factor_cols], cand]))
     (X_cand,) = _patsy.build_design_matrices([_aug_di], cand)
     X_cand = np.asarray(X_cand)
     N_cand = X_cand.shape[0]
@@ -1310,18 +1323,18 @@ def augment_design(
         new_rows.append(cand.iloc[[best_j]])
 
     new_runs_df = (
-        pd.concat(new_rows, ignore_index=True) if new_rows
+        pd.concat(new_rows, ignore_index=True)
+        if new_rows
         else pd.DataFrame(columns=design_df.columns)
     )
-    augmented_df = pd.concat(
-        [design_df.reset_index(drop=True), new_runs_df], ignore_index=True
-    )
+    augmented_df = pd.concat([design_df.reset_index(drop=True), new_runs_df], ignore_index=True)
     return augmented_df, new_runs_df
 
 
 # ---------------------------------------------------------------------
 # Split-plot Fedorov exchange algorithm (SP-5)
 # ---------------------------------------------------------------------
+
 
 def build_split_plot_design(
     cand: pd.DataFrame,
@@ -1440,12 +1453,16 @@ def build_split_plot_design(
         htc_factor_dict = {k: v for k, v in factors.items() if k in htc_set}
         etc_factor_dict = {k: v for k, v in factors.items() if k not in htc_set}
         wp_pool_df = build_candidate(
-            htc_factor_dict, candidate_points=n_wp_cand, seed=seed_base,
+            htc_factor_dict,
+            candidate_points=n_wp_cand,
+            seed=seed_base,
             constraint_func=pool_cfunc,
         )
         sp_pool_df = (
             build_candidate(
-                etc_factor_dict, candidate_points=n_sp_cand, seed=seed_base + 1,
+                etc_factor_dict,
+                candidate_points=n_sp_cand,
+                seed=seed_base + 1,
                 constraint_func=pool_cfunc,
             )
             if etc_factor_dict
@@ -1493,9 +1510,7 @@ def build_split_plot_design(
     # combined row. Every combination the exchange can propose is a row of
     # combo_df, so masking here guarantees the returned design is feasible.
     if constraint_func is not None:
-        _feas_flat = combo_df.apply(
-            lambda _row: bool(constraint_func(_row)), axis=1
-        ).to_numpy()
+        _feas_flat = combo_df.apply(lambda _row: bool(constraint_func(_row)), axis=1).to_numpy()
         feasible = _feas_flat.reshape(n_wp_pool, n_sp_pool)
         wp_feasible = feasible.any(axis=1)  # WP candidates with ≥1 feasible SP
         if not wp_feasible.any():
@@ -1528,9 +1543,7 @@ def build_split_plot_design(
         # Random initialisation: draw WP and SP pool indices from the
         # feasible combinations only (each run's SP index must be feasible
         # for its whole plot's WP candidate).
-        wp_slots = feasible_wp_idx[
-            rng.integers(0, len(feasible_wp_idx), size=n_wp)
-        ]
+        wp_slots = feasible_wp_idx[rng.integers(0, len(feasible_wp_idx), size=n_wp)]
         sp_runs = np.zeros(n_total, dtype=np.intp)
         if has_etc:
             for r in range(n_total):
@@ -1538,13 +1551,16 @@ def build_split_plot_design(
                 sp_runs[r] = int(_opts[rng.integers(0, len(_opts))])
 
         # Initial model matrix from pool indices
-        X_current = np.vstack([
-            X_combo_3d[wp_slots[wp_slot_of_run[r]], sp_runs[r]]
-            for r in range(n_total)
-        ])
+        X_current = np.vstack(
+            [X_combo_3d[wp_slots[wp_slot_of_run[r]], sp_runs[r]] for r in range(n_total)]
+        )
         current_score = _score_design_gls(
-            criterion, X_current, V_inv,
-            Mcand=Mcand, N_cand=N_cand_total, jitter=jitter,
+            criterion,
+            X_current,
+            V_inv,
+            Mcand=Mcand,
+            N_cand=N_cand_total,
+            jitter=jitter,
         )
 
         # Alternating WP / SP exchange until convergence or max_iter
@@ -1570,8 +1586,12 @@ def build_split_plot_design(
                     for r in wp_rows:
                         X_prop[r] = X_combo_3d[k, sp_runs[r]]
                     score_prop = _score_design_gls(
-                        criterion, X_prop, V_inv,
-                        Mcand=Mcand, N_cand=N_cand_total, jitter=jitter,
+                        criterion,
+                        X_prop,
+                        V_inv,
+                        Mcand=Mcand,
+                        N_cand=N_cand_total,
+                        jitter=jitter,
                     )
                     if score_prop < best_k_score - 1e-10:
                         best_k = k
@@ -1598,8 +1618,12 @@ def build_split_plot_design(
                         X_prop = X_current.copy()
                         X_prop[r] = X_combo_3d[wp_slots[wp_i], m]
                         score_prop = _score_design_gls(
-                            criterion, X_prop, V_inv,
-                            Mcand=Mcand, N_cand=N_cand_total, jitter=jitter,
+                            criterion,
+                            X_prop,
+                            V_inv,
+                            Mcand=Mcand,
+                            N_cand=N_cand_total,
+                            jitter=jitter,
                         )
                         if score_prop < best_m_score - 1e-10:
                             best_m = m
@@ -1638,6 +1662,7 @@ def build_split_plot_design(
 # =====================================================================
 # Compound criterion Fedorov exchange  (MR-5)
 # =====================================================================
+
 
 def compound_i_criterion(
     indices: np.ndarray,
@@ -1734,8 +1759,7 @@ def _compound_fedorov_single(
 
     # Precompute candidate moment matrices (I-criterion only; unchanged across iterations)
     Mcand_list: Optional[List[np.ndarray]] = (
-        [X_cand_k.T @ X_cand_k for X_cand_k in candidates_list]
-        if criterion == "I" else None
+        [X_cand_k.T @ X_cand_k for X_cand_k in candidates_list] if criterion == "I" else None
     )
 
     for _iter in range(max_iter):
@@ -1758,11 +1782,11 @@ def _compound_fedorov_single(
                 skip_iter = True
                 break
 
-            H_k = M_inv_k @ X_cand_k.T          # p_k × n_cand
-            leverages_k = np.einsum("pt,pt->t", X_cand_k.T, H_k)   # (n_cand,)
-            X_non_k = X_cand_k[non_idx]          # n_non × p_k
-            H_non_k = H_k[:, non_idx]            # p_k × n_non
-            lev_non_k = leverages_k[non_idx]     # (n_non,)
+            H_k = M_inv_k @ X_cand_k.T  # p_k × n_cand
+            leverages_k = np.einsum("pt,pt->t", X_cand_k.T, H_k)  # (n_cand,)
+            X_non_k = X_cand_k[non_idx]  # n_non × p_k
+            H_non_k = H_k[:, non_idx]  # p_k × n_non
+            lev_non_k = leverages_k[non_idx]  # (n_non,)
 
             if criterion == "I":
                 Mcand_k = Mcand_list[k_idx]
@@ -1771,16 +1795,18 @@ def _compound_fedorov_single(
                 sign_k, logdet_k = np.linalg.slogdet(M_k)
                 current_score_k = -float(logdet_k) if sign_k > 0 else float("inf")
 
-            per_k_data.append({
-                "H_k": H_k,
-                "leverages_k": leverages_k,
-                "X_non_k": X_non_k,
-                "H_non_k": H_non_k,
-                "lev_non_k": lev_non_k,
-                "current_score_k": current_score_k,
-                "Mcand_k": Mcand_list[k_idx] if criterion == "I" else None,
-                "w_k": w_k,
-            })
+            per_k_data.append(
+                {
+                    "H_k": H_k,
+                    "leverages_k": leverages_k,
+                    "X_non_k": X_non_k,
+                    "H_non_k": H_non_k,
+                    "lev_non_k": lev_non_k,
+                    "current_score_k": current_score_k,
+                    "Mcand_k": Mcand_list[k_idx] if criterion == "I" else None,
+                    "w_k": w_k,
+                }
+            )
 
         if skip_iter:
             break  # singular formula matrix — cannot safely continue
@@ -1796,7 +1822,7 @@ def _compound_fedorov_single(
 
             for pk in per_k_data:
                 d_s_k = float(pk["leverages_k"][s])
-                h_s_k = pk["H_k"][:, s]           # (p_k,)
+                h_s_k = pk["H_k"][:, s]  # (p_k,)
                 denom_s_k = 1.0 - d_s_k
                 if denom_s_k < 1e-10:
                     denom_bad = True
@@ -1815,21 +1841,16 @@ def _compound_fedorov_single(
                     det_ratio_k = denom_s_k * (1.0 + v_t_prime_k)
                     gains_k = np.log(np.maximum(det_ratio_k, 1e-300))
                 else:  # I
-                    Mcand_hs_k = pk["Mcand_k"] @ h_s_k                               # (p_k,)
-                    trace_I_minus_k = (
-                        pk["current_score_k"] + float(h_s_k @ Mcand_hs_k) / denom_s_k
-                    )
+                    Mcand_hs_k = pk["Mcand_k"] @ h_s_k  # (p_k,)
+                    trace_I_minus_k = pk["current_score_k"] + float(h_s_k @ Mcand_hs_k) / denom_s_k
                     mp_inv_xnon_k = (
                         pk["H_non_k"] + np.outer(h_s_k, w_s_all_k) / denom_s_k
-                    )                                                                  # p_k × n_non
-                    d_t_prime_k = np.einsum(
-                        "pt,pt->t", pk["X_non_k"].T, mp_inv_xnon_k
-                    )                                                                  # (n_non,)
-                    Mcand_mp_k = pk["Mcand_k"] @ mp_inv_xnon_k                        # p_k × n_non
-                    delta_I_k = (
-                        np.einsum("pt,pt->t", mp_inv_xnon_k, Mcand_mp_k)
-                        / (1.0 + d_t_prime_k)
-                    )                                                                  # (n_non,)
+                    )  # p_k × n_non
+                    d_t_prime_k = np.einsum("pt,pt->t", pk["X_non_k"].T, mp_inv_xnon_k)  # (n_non,)
+                    Mcand_mp_k = pk["Mcand_k"] @ mp_inv_xnon_k  # p_k × n_non
+                    delta_I_k = np.einsum("pt,pt->t", mp_inv_xnon_k, Mcand_mp_k) / (
+                        1.0 + d_t_prime_k
+                    )  # (n_non,)
                     gains_k = pk["current_score_k"] - (trace_I_minus_k - delta_I_k)
 
                 compound_gains += pk["w_k"] * gains_k
@@ -1906,12 +1927,15 @@ def build_compound_design(
     for k in range(max(1, n_start)):
         seed = base + k * 1337
         idx = _compound_fedorov_single(
-            candidates_list, weights, n,
-            criterion=criterion, max_iter=max_iter, seed=seed, jitter=jitter,
+            candidates_list,
+            weights,
+            n,
+            criterion=criterion,
+            max_iter=max_iter,
+            seed=seed,
+            jitter=jitter,
         )
-        score = _compound_criterion_score(
-            criterion, candidates_list, weights, idx, jitter=jitter
-        )
+        score = _compound_criterion_score(criterion, candidates_list, weights, idx, jitter=jitter)
         if score < best_score:
             best_score = score
             best_idx = idx

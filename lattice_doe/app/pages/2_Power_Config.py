@@ -34,7 +34,8 @@ init_state()
 render_sidebar()
 
 try:
-    from lattice_doe.design import build_model_matrix
+    from lattice_doe.design import build_model_matrix  # noqa: F401 — import IS the probe
+
     _HAS_IOPT = True
 except ImportError:
     _HAS_IOPT = False
@@ -71,9 +72,7 @@ def _get_p(factors: list[dict], formula: str) -> tuple[int, bool] | None:
     try:
         from lattice_doe.utils import model_matrix_preview
 
-        p, _, exact = model_matrix_preview(
-            formula, _factors_to_spec(factors), return_exact=True
-        )
+        p, _, exact = model_matrix_preview(formula, _factors_to_spec(factors), return_exact=True)
         return p, exact
     except Exception:
         return None
@@ -198,7 +197,11 @@ if st.session_state["power_mode"] == "glm":
         p, _p_exact = _p_info
         st.caption(
             f"Your formula has **p\u202f=\u202f{p}** model parameters"
-            + ("" if _p_exact else " (provisional \u2014 data-derived terms may add columns at run time)")
+            + (
+                ""
+                if _p_exact
+                else " (provisional \u2014 data-derived terms may add columns at run time)"
+            )
             + f". Each row of L must have exactly {p} column(s)."
         )
     elif not factors:
@@ -255,7 +258,10 @@ if st.session_state["power_mode"] == "glm":
     elif L_text or delta_text:
         st.warning("Fill in both L and \u03b4 to validate.")
 
-    if _glm_family == "binomial" and float(st.session_state.get("glm_baseline", 0.20)) in (0.0, 1.0):
+    if _glm_family == "binomial" and float(st.session_state.get("glm_baseline", 0.20)) in (
+        0.0,
+        1.0,
+    ):
         st.error("Baseline must be strictly between 0 and 1 for the binomial family.")
 
 elif st.session_state["power_mode"] == "contrast":
@@ -287,7 +293,11 @@ elif st.session_state["power_mode"] == "contrast":
             p, _p_exact = _p_info
             st.caption(
                 f"Your formula has **p\u202f=\u202f{p}** model parameters"
-                + ("" if _p_exact else " (provisional \u2014 data-derived terms may add columns at run time)")
+                + (
+                    ""
+                    if _p_exact
+                    else " (provisional \u2014 data-derived terms may add columns at run time)"
+                )
                 + f". Each row of L must have exactly {p} column(s). "
                 "See Page 1 \u2192 'Model matrix columns' for parameter indices."
             )
@@ -346,8 +356,7 @@ elif st.session_state["power_mode"] == "contrast":
             st.warning("Fill in both L and \u03b4 to validate.")
 
         with st.expander("What is a contrast matrix?"):
-            st.markdown(
-                """
+            st.markdown("""
 A contrast matrix **L** (q\u202f\u00d7\u202fp) selects which linear combination of model
 coefficients to test. Each row is one hypothesis: `H\u2080: L\u03b2\u202f=\u202f0`
 vs `H\u2081: L\u03b2\u202f=\u202f\u03b4`.
@@ -361,8 +370,7 @@ L = [[0, 0, 1, 0]]
 to find the index of each parameter.
 
 **Alternative**: switch to **Scenario builder** to construct L and \u03b4 automatically.
-"""
-            )
+""")
 
     # -----------------------------------------------------------------------
     # C3 — Scenario builder
@@ -393,8 +401,7 @@ to find the index of each parameter.
                     from lattice_doe.contrasts import coding_is_data_dependent
 
                     _interior_defaults = (
-                        coding_is_data_dependent(formula, _factors_to_spec(factors))
-                        is not None
+                        coding_is_data_dependent(formula, _factors_to_spec(factors)) is not None
                     )
                 except Exception:
                     _interior_defaults = False
@@ -491,12 +498,10 @@ to find the index of each parameter.
                     try:
                         factor_spec = _factors_to_spec(factors)
                         scenario_a = {
-                            f["name"]: st.session_state.get(f"scen_a_{f['name']}")
-                            for f in factors
+                            f["name"]: st.session_state.get(f"scen_a_{f['name']}") for f in factors
                         }
                         scenario_b = {
-                            f["name"]: st.session_state.get(f"scen_b_{f['name']}")
-                            for f in factors
+                            f["name"]: st.session_state.get(f"scen_b_{f['name']}") for f in factors
                         }
                         sesoi = float(st.session_state.get("sesoi", 1.0))
                         L, delta = scenario_contrast(
@@ -519,9 +524,7 @@ to find the index of each parameter.
 # ===========================================================================
 elif st.session_state["power_mode"] == "r2":
     st.subheader("R\u00b2 Effect Size")
-    st.markdown(
-        "Detect whether the full model explains at least this fraction of total variance."
-    )
+    st.markdown("Detect whether the full model explains at least this fraction of total variance.")
 
     st.slider(
         "R\u00b2 target",
@@ -649,21 +652,25 @@ with st.expander("Multi-response (optional)"):
         # Add response button
         if st.button("+ Add response"):
             _cur_mode = ss.get("power_mode", "contrast")
-            mr_responses.append({
-                "name": f"Response{len(mr_responses) + 1}",
-                "power_mode": _cur_mode if _cur_mode in ("contrast", "r2", "glm") else "contrast",
-                "sigma": float(ss.get("sigma", 1.0)),
-                "alpha": float(ss.get("alpha", 0.05)),
-                "power": float(ss.get("power_target", 0.80)),
-                "weight": 1.0,
-                "L_text": ss.get("L_text", ""),
-                "delta_text": ss.get("delta_text", ""),
-                "r2_target": float(ss.get("r2_target", 0.15)),
-                "formula": "",
-                "glm_family": ss.get("glm_family", "binomial"),
-                "glm_baseline": float(ss.get("glm_baseline", 0.20)),
-                "glm_link": ss.get("glm_link", ""),
-            })
+            mr_responses.append(
+                {
+                    "name": f"Response{len(mr_responses) + 1}",
+                    "power_mode": (
+                        _cur_mode if _cur_mode in ("contrast", "r2", "glm") else "contrast"
+                    ),
+                    "sigma": float(ss.get("sigma", 1.0)),
+                    "alpha": float(ss.get("alpha", 0.05)),
+                    "power": float(ss.get("power_target", 0.80)),
+                    "weight": 1.0,
+                    "L_text": ss.get("L_text", ""),
+                    "delta_text": ss.get("delta_text", ""),
+                    "r2_target": float(ss.get("r2_target", 0.15)),
+                    "formula": "",
+                    "glm_family": ss.get("glm_family", "binomial"),
+                    "glm_baseline": float(ss.get("glm_baseline", 0.20)),
+                    "glm_link": ss.get("glm_link", ""),
+                }
+            )
             ss["mr_responses"] = mr_responses
             st.rerun()
 
@@ -672,9 +679,7 @@ with st.expander("Multi-response (optional)"):
         else:
             for i, r in enumerate(mr_responses):
                 with st.expander(f"Response {i + 1}: {r.get('name', '')}"):
-                    r["name"] = st.text_input(
-                        "Name", value=r.get("name", ""), key=f"mr_name_{i}"
-                    )
+                    r["name"] = st.text_input("Name", value=r.get("name", ""), key=f"mr_name_{i}")
                     r["formula"] = st.text_input(
                         "Per-response formula (blank = use global formula)",
                         value=r.get("formula", ""),
@@ -693,8 +698,11 @@ with st.expander("Multi-response (optional)"):
                         _r_mode_val = "contrast"
                     r_mode_idx = r_mode_opts.index(_r_mode_val)
                     _r_mode_sel = st.radio(
-                        "Power mode", r_mode_labels, index=r_mode_idx,
-                        horizontal=True, key=f"mr_mode_{i}",
+                        "Power mode",
+                        r_mode_labels,
+                        index=r_mode_idx,
+                        horizontal=True,
+                        key=f"mr_mode_{i}",
                     )
                     r["power_mode"] = r_mode_opts[r_mode_labels.index(_r_mode_sel)]
 
@@ -702,26 +710,37 @@ with st.expander("Multi-response (optional)"):
                     c_sigma, c_alpha, c_power, c_weight = st.columns(4)
                     if not _r_is_glm:
                         r["sigma"] = c_sigma.number_input(
-                            "\u03c3", value=r.get("sigma", 1.0), min_value=1e-6,
-                            format="%.4g", key=f"mr_sigma_{i}",
+                            "\u03c3",
+                            value=r.get("sigma", 1.0),
+                            min_value=1e-6,
+                            format="%.4g",
+                            key=f"mr_sigma_{i}",
                         )
                     else:
                         c_sigma.markdown("**\u03c3**")
                         c_sigma.caption("N/A (GLM)")
                     r["alpha"] = c_alpha.number_input(
-                        "\u03b1", value=r.get("alpha", 0.05), min_value=1e-4,
-                        max_value=0.5, format="%.3f", key=f"mr_alpha_{i}",
+                        "\u03b1",
+                        value=r.get("alpha", 0.05),
+                        min_value=1e-4,
+                        max_value=0.5,
+                        format="%.3f",
+                        key=f"mr_alpha_{i}",
                     )
                     r["power"] = c_power.number_input(
-                        "Target power", value=r.get("power", 0.80),
+                        "Target power",
+                        value=r.get("power", 0.80),
                         min_value=POWER_TARGET_MIN,
                         max_value=POWER_TARGET_MAX,
                         format=POWER_TARGET_FORMAT,
                         key=f"mr_power_{i}",
                     )
                     r["weight"] = c_weight.number_input(
-                        "Weight", value=r.get("weight", 1.0), min_value=0.01,
-                        format="%.3g", key=f"mr_weight_{i}",
+                        "Weight",
+                        value=r.get("weight", 1.0),
+                        min_value=0.01,
+                        format="%.3g",
+                        key=f"mr_weight_{i}",
                     )
                     if r["power_mode"] in ("contrast", "glm"):
                         if _r_is_glm:
@@ -729,10 +748,14 @@ with st.expander("Multi-response (optional)"):
                             _glm_r_fam_labels = ["Binomial", "Poisson"]
                             _glm_r_fam_idx = _glm_r_fam_opts.index(r.get("glm_family", "binomial"))
                             _glm_r_fam_sel = st.selectbox(
-                                "Family", _glm_r_fam_labels, index=_glm_r_fam_idx,
+                                "Family",
+                                _glm_r_fam_labels,
+                                index=_glm_r_fam_idx,
                                 key=f"mr_glm_family_{i}",
                             )
-                            r["glm_family"] = _glm_r_fam_opts[_glm_r_fam_labels.index(_glm_r_fam_sel)]
+                            r["glm_family"] = _glm_r_fam_opts[
+                                _glm_r_fam_labels.index(_glm_r_fam_sel)
+                            ]
                             r["glm_baseline"] = st.number_input(
                                 "Baseline",
                                 value=float(r.get("glm_baseline", 0.20)),
@@ -746,16 +769,21 @@ with st.expander("Multi-response (optional)"):
                         r["L_text"] = st.text_area(
                             "Contrast matrix L (one row; space/comma-separated)",
                             value=r.get("L_text", ""),
-                            height=80, key=f"mr_L_{i}",
+                            height=80,
+                            key=f"mr_L_{i}",
                         )
                         r["delta_text"] = st.text_input(
-                            _delta_label, value=r.get("delta_text", ""),
+                            _delta_label,
+                            value=r.get("delta_text", ""),
                             key=f"mr_delta_{i}",
                         )
                     else:
                         r["r2_target"] = st.number_input(
-                            "R\u00b2 target", value=r.get("r2_target", 0.15),
-                            min_value=0.01, max_value=0.99, format="%.3f",
+                            "R\u00b2 target",
+                            value=r.get("r2_target", 0.15),
+                            min_value=0.01,
+                            max_value=0.99,
+                            format="%.3f",
                             key=f"mr_r2_{i}",
                         )
                     if st.button(f"Remove response {i + 1}", key=f"mr_remove_{i}"):

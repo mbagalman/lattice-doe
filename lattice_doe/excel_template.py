@@ -32,6 +32,7 @@ Install
 -------
   pip install "lattice-doe[extras]"
 """
+
 from __future__ import annotations
 
 import warnings
@@ -42,8 +43,12 @@ import numpy as np
 import pandas as pd
 
 from .config import (
-    PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
-    DesignOptions, MultiResponseOptions, ResponseSpec,
+    PowerContrastConfig,
+    PowerR2Config,
+    PowerGLMContrastConfig,
+    DesignOptions,
+    MultiResponseOptions,
+    ResponseSpec,
 )
 from ._request_builder import build_power_cfg, build_design_opts
 from .utils import safe_name_slug
@@ -53,9 +58,10 @@ from .utils import safe_name_slug
 # ---------------------------------------------------------------------------
 try:
     import openpyxl  # type: ignore
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side  # type: ignore
+    from openpyxl.styles import Font, PatternFill, Alignment  # type: ignore
     from openpyxl.worksheet.datavalidation import DataValidation  # type: ignore
     from openpyxl.utils import get_column_letter  # type: ignore
+
     _HAS_OPENPYXL = True
 except ImportError:
     _HAS_OPENPYXL = False
@@ -65,10 +71,11 @@ _INSTALL_HINT = 'pip install "lattice-doe[extras]"'
 # ---------------------------------------------------------------------------
 # Section sentinels (must match sheets.py constants for consistency)
 # ---------------------------------------------------------------------------
-_SENTINEL_SETTINGS  = "[SETTINGS]"
-_SENTINEL_CONTRAST  = "[CONTRAST]"
-_SENTINEL_FACTORS   = "[FACTORS]"
+_SENTINEL_SETTINGS = "[SETTINGS]"
+_SENTINEL_CONTRAST = "[CONTRAST]"
+_SENTINEL_FACTORS = "[FACTORS]"
 _SENTINEL_RESPONSES = "[RESPONSES]"
+
 
 # ---------------------------------------------------------------------------
 # Custom exception
@@ -86,9 +93,7 @@ class ExcelError(RuntimeError):
 # ---------------------------------------------------------------------------
 def _require_openpyxl() -> None:
     if not _HAS_OPENPYXL:
-        raise ImportError(
-            f"openpyxl is required for Excel integration. {_INSTALL_HINT}"
-        )
+        raise ImportError(f"openpyxl is required for Excel integration. {_INSTALL_HINT}")
 
 
 def _sentinel_style(ws: Any, row: int, label: str) -> None:
@@ -121,8 +126,7 @@ def _set_column_widths(ws: Any, widths: List[int]) -> None:
 
 def _add_dropdown(ws: Any, formula: str, row: int, col: int = 2) -> None:
     """Attach an in-cell dropdown DataValidation to the given cell."""
-    dv = DataValidation(type="list", formula1=formula, allow_blank=False,
-                        showDropDown=False)
+    dv = DataValidation(type="list", formula1=formula, allow_blank=False, showDropDown=False)
     ws.add_data_validation(dv)
     dv.add(ws.cell(row=row, column=col))
 
@@ -132,7 +136,13 @@ def _add_dropdown(ws: Any, formula: str, row: int, col: int = 2) -> None:
 # ---------------------------------------------------------------------------
 def _read_config_sheet(
     ws: Any,
-) -> Tuple[str, Dict[str, Any], Optional[Union[PowerContrastConfig, PowerR2Config]], DesignOptions, Optional[MultiResponseOptions]]:
+) -> Tuple[
+    str,
+    Dict[str, Any],
+    Optional[Union[PowerContrastConfig, PowerR2Config]],
+    DesignOptions,
+    Optional[MultiResponseOptions],
+]:
     """Parse the Config worksheet and return ``(formula, factors, power_cfg, design_opts, multi_cfg)``.
 
     Raises
@@ -146,9 +156,9 @@ def _read_config_sheet(
         rows.append([str(c).strip() if c is not None else "" for c in row])
 
     # Locate sentinels
-    idx_settings:  Optional[int] = None
-    idx_contrast:  Optional[int] = None
-    idx_factors:   Optional[int] = None
+    idx_settings: Optional[int] = None
+    idx_contrast: Optional[int] = None
+    idx_factors: Optional[int] = None
     idx_responses: Optional[int] = None
 
     for i, row in enumerate(rows):
@@ -168,33 +178,26 @@ def _read_config_sheet(
             "Ensure cell A1 (or equivalent) contains '[SETTINGS]'."
         )
     if idx_factors is None:
-        raise ExcelError(
-            f"Config sheet is missing the '{_SENTINEL_FACTORS}' sentinel."
-        )
+        raise ExcelError(f"Config sheet is missing the '{_SENTINEL_FACTORS}' sentinel.")
 
     # --- Parse [SETTINGS] ---
     sentinels_after = sorted(
-        j for j in (idx_contrast, idx_factors, idx_responses)
-        if j is not None and j > idx_settings
+        j for j in (idx_contrast, idx_factors, idx_responses) if j is not None and j > idx_settings
     )
     settings_end = sentinels_after[0] if sentinels_after else len(rows)
 
     settings: Dict[str, str] = {}
-    for row in rows[idx_settings + 1: settings_end]:
+    for row in rows[idx_settings + 1 : settings_end]:
         col_a = row[0] if len(row) > 0 else ""
         col_b = row[1] if len(row) > 1 else ""
         if col_a:
             settings[col_a] = col_b
 
     if not settings.get("formula"):
-        raise ExcelError(
-            "Config sheet [SETTINGS] is missing the required 'formula' key."
-        )
+        raise ExcelError("Config sheet [SETTINGS] is missing the required 'formula' key.")
     # power_mode is required unless a [RESPONSES] section is present
     if idx_responses is None and not settings.get("power_mode"):
-        raise ExcelError(
-            "Config sheet [SETTINGS] is missing the required 'power_mode' key."
-        )
+        raise ExcelError("Config sheet [SETTINGS] is missing the required 'power_mode' key.")
 
     formula = settings["formula"]
     power_mode = settings.get("power_mode", "").strip().lower()
@@ -211,9 +214,7 @@ def _read_config_sheet(
         try:
             return float(raw)
         except ValueError:
-            raise ExcelError(
-                f"[SETTINGS] key '{key}' must be a number; got {raw!r}."
-            ) from None
+            raise ExcelError(f"[SETTINGS] key '{key}' must be a number; got {raw!r}.") from None
 
     def _int(key: str, default: int) -> int:
         raw = settings.get(key, "").strip()
@@ -222,9 +223,7 @@ def _read_config_sheet(
         try:
             return int(float(raw))  # handles "42.0" from Excel numeric cells
         except ValueError:
-            raise ExcelError(
-                f"[SETTINGS] key '{key}' must be an integer; got {raw!r}."
-            ) from None
+            raise ExcelError(f"[SETTINGS] key '{key}' must be an integer; got {raw!r}.") from None
 
     def _bool(key: str, default: bool) -> bool:
         raw = settings.get(key, "").strip().lower()
@@ -234,35 +233,33 @@ def _read_config_sheet(
             return True
         if raw in ("false", "no", "0"):
             return False
-        raise ExcelError(
-            f"[SETTINGS] key '{key}' must be true/false; got {raw!r}."
-        )
+        raise ExcelError(f"[SETTINGS] key '{key}' must be true/false; got {raw!r}.")
 
-    alpha        = _float("alpha",        0.05)
-    power_target = _float("power",        0.80)
-    sigma        = _float("sigma",        1.0)
-    r2_target    = _float("r2_target",    0.25)
-    max_n        = _int("max_n",          500)
-    criterion    = settings.get("criterion", "I").strip() or "I"
-    starts       = _int("starts",         5)
-    max_iter_do  = _int("max_iter",       1000)
-    random_state = _int("random_state",   123)
+    alpha = _float("alpha", 0.05)
+    power_target = _float("power", 0.80)
+    sigma = _float("sigma", 1.0)
+    r2_target = _float("r2_target", 0.25)
+    max_n = _int("max_n", 500)
+    criterion = settings.get("criterion", "I").strip() or "I"
+    starts = _int("starts", 5)
+    max_iter_do = _int("max_iter", 1000)
+    random_state = _int("random_state", 123)
     # Blocked design options (Enhancement 20)
-    n_blocks_raw          = _int("n_blocks",          0)
+    n_blocks_raw = _int("n_blocks", 0)
     block_factor_name_raw = settings.get("block_factor_name", "Block").strip() or "Block"
     # Categorical pre-allocation options (Enhancement 26)
     preallocate_categorical = _bool("preallocate_categorical", False)
-    alloc_min_per_cell      = _int("alloc_min_per_cell",  1)
-    alloc_max_per_cell_raw  = _int("alloc_max_per_cell",  0)  # 0 → None (no limit)
+    alloc_min_per_cell = _int("alloc_min_per_cell", 1)
+    alloc_max_per_cell_raw = _int("alloc_max_per_cell", 0)  # 0 → None (no limit)
     # Split-plot options (Enhancement 22)
-    htc_factors_raw    = str(settings.get("htc_factors", "") or "").strip()
-    n_whole_plots_raw  = _int("n_whole_plots", 0)
-    sp_eta             = _float("eta",            1.0)
-    subplots_per_wp_raw = _int("subplots_per_wp", 0)   # 0 → auto
-    df_method_sp       = str(settings.get("df_method", "auto") or "auto").strip() or "auto"
+    htc_factors_raw = str(settings.get("htc_factors", "") or "").strip()
+    n_whole_plots_raw = _int("n_whole_plots", 0)
+    sp_eta = _float("eta", 1.0)
+    subplots_per_wp_raw = _int("subplots_per_wp", 0)  # 0 → auto
+    df_method_sp = str(settings.get("df_method", "auto") or "auto").strip() or "auto"
     # GLM options (GL-9)
-    glm_family   = str(settings.get("family", "binomial") or "binomial").strip() or "binomial"
-    glm_link     = str(settings.get("link", "") or "").strip() or None
+    glm_family = str(settings.get("family", "binomial") or "binomial").strip() or "binomial"
+    glm_link = str(settings.get("link", "") or "").strip() or None
     glm_baseline = _float("baseline", 0.0)
 
     _do_d: Dict[str, Any] = dict(
@@ -302,7 +299,7 @@ def _read_config_sheet(
         l_rows: List[List[float]] = []
         delta_values: Optional[List[float]] = None
 
-        for row in rows[idx_contrast + 1: contrast_end]:
+        for row in rows[idx_contrast + 1 : contrast_end]:
             col_a = row[0] if len(row) > 0 else ""
             col_b = row[1] if len(row) > 1 else ""
             if not col_a:
@@ -338,7 +335,9 @@ def _read_config_sheet(
     factors: Dict[str, Any] = {}
     factors_data_start = idx_factors + 2  # +1 sentinel, +1 header
     # Stop at [RESPONSES] if present
-    factors_end = idx_responses if idx_responses is not None and idx_responses > idx_factors else len(rows)
+    factors_end = (
+        idx_responses if idx_responses is not None and idx_responses > idx_factors else len(rows)
+    )
 
     for row in rows[factors_data_start:factors_end]:
         col_a = row[0] if len(row) > 0 else ""
@@ -351,9 +350,7 @@ def _read_config_sheet(
         factor_type = col_b.lower()
         if factor_type == "continuous":
             if len(values) < 2:
-                raise ExcelError(
-                    f"Factor '{col_a}' is continuous but has fewer than 2 values."
-                )
+                raise ExcelError(f"Factor '{col_a}' is continuous but has fewer than 2 values.")
             try:
                 factors[col_a] = (float(values[0]), float(values[1]))
             except ValueError as e:
@@ -363,9 +360,7 @@ def _read_config_sheet(
                 ) from e
         elif factor_type == "categorical":
             if len(values) < 2:
-                raise ExcelError(
-                    f"Factor '{col_a}' is categorical but has fewer than 2 levels."
-                )
+                raise ExcelError(f"Factor '{col_a}' is categorical but has fewer than 2 levels.")
             factors[col_a] = values
         else:
             raise ExcelError(
@@ -381,28 +376,48 @@ def _read_config_sheet(
     if idx_responses is None:
         if power_mode == "r2":
             power_cfg = build_power_cfg(
-                dict(power_mode="r2", r2_target=r2_target, alpha=alpha,
-                     power=power_target, sigma=sigma, max_n=max_n),
-                error_cls=ExcelError, context="Config sheet",
+                dict(
+                    power_mode="r2",
+                    r2_target=r2_target,
+                    alpha=alpha,
+                    power=power_target,
+                    sigma=sigma,
+                    max_n=max_n,
+                ),
+                error_cls=ExcelError,
+                context="Config sheet",
             )
         elif power_mode == "glm":
             if not glm_baseline:
-                raise ExcelError(
-                    "[SETTINGS] 'baseline' is required when power_mode is 'glm'."
-                )
+                raise ExcelError("[SETTINGS] 'baseline' is required when power_mode is 'glm'.")
             power_cfg = build_power_cfg(
-                dict(power_mode="glm", L=L.tolist() if L is not None else None,
-                     delta=delta.tolist() if delta is not None else None,
-                     baseline=glm_baseline, family=glm_family, link=glm_link,
-                     alpha=alpha, power=power_target, max_n=max_n),
-                error_cls=ExcelError, context="Config sheet",
+                dict(
+                    power_mode="glm",
+                    L=L.tolist() if L is not None else None,
+                    delta=delta.tolist() if delta is not None else None,
+                    baseline=glm_baseline,
+                    family=glm_family,
+                    link=glm_link,
+                    alpha=alpha,
+                    power=power_target,
+                    max_n=max_n,
+                ),
+                error_cls=ExcelError,
+                context="Config sheet",
             )
         else:
             power_cfg = build_power_cfg(
-                dict(power_mode="contrast", L=L.tolist() if L is not None else None,
-                     delta=delta.tolist() if delta is not None else None,
-                     alpha=alpha, power=power_target, sigma=sigma, max_n=max_n),
-                error_cls=ExcelError, context="Config sheet",
+                dict(
+                    power_mode="contrast",
+                    L=L.tolist() if L is not None else None,
+                    delta=delta.tolist() if delta is not None else None,
+                    alpha=alpha,
+                    power=power_target,
+                    sigma=sigma,
+                    max_n=max_n,
+                ),
+                error_cls=ExcelError,
+                context="Config sheet",
             )
 
     # --- Parse [RESPONSES] section (optional — multi-response mode) ---
@@ -451,12 +466,12 @@ def _read_config_sheet(
             r_alpha = float(_rcell(3)) if _rcell(3) else alpha
             r_power_v = float(_rcell(4)) if _rcell(4) else power_target
             r_weight = float(_rcell(5)) if _rcell(5) else 1.0
-            r_L_str  = _rcell(6)
-            r_d_str  = _rcell(7)
+            r_L_str = _rcell(6)
+            r_d_str = _rcell(7)
             r_r2_str = _rcell(8)
             r_formula_str = _rcell(9) or None
             r_lambda_mode = _rcell(10) or "n"
-            r_max_n   = int(float(_rcell(11))) if _rcell(11) else 2000
+            r_max_n = int(float(_rcell(11))) if _rcell(11) else 2000
             r_max_iter = int(float(_rcell(12))) if _rcell(12) else 200
             r_tol_power = float(_rcell(13)) if _rcell(13) else 1e-3
             # cols 14/15: GLM family and baseline (optional — blank for non-GLM responses)
@@ -474,52 +489,68 @@ def _read_config_sheet(
                     L_vals = [float(v.strip()) for v in r_L_str.split(",") if v.strip()]
                     d_vals = [float(v.strip()) for v in r_d_str.split(",") if v.strip()]
                 except ValueError as e:
-                    raise ExcelError(
-                        f"{_resp_ctx}: non-numeric L_row or delta: {e}"
-                    ) from e
+                    raise ExcelError(f"{_resp_ctx}: non-numeric L_row or delta: {e}") from e
                 pcfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig] = (
                     build_power_cfg(
-                        dict(power_mode="contrast", L=[L_vals], delta=d_vals,
-                             alpha=r_alpha, power=r_power_v, sigma=r_sigma,
-                             max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power),
-                        error_cls=ExcelError, context=_resp_ctx,
+                        dict(
+                            power_mode="contrast",
+                            L=[L_vals],
+                            delta=d_vals,
+                            alpha=r_alpha,
+                            power=r_power_v,
+                            sigma=r_sigma,
+                            max_n=r_max_n,
+                            max_iter=r_max_iter,
+                            tol_power=r_tol_power,
+                        ),
+                        error_cls=ExcelError,
+                        context=_resp_ctx,
                     )
                 )
             elif r_mode == "r2":
                 if not r_r2_str:
-                    raise ExcelError(
-                        f"{_resp_ctx}: r2 mode requires r2_target (col 9)."
-                    )
+                    raise ExcelError(f"{_resp_ctx}: r2 mode requires r2_target (col 9).")
                 pcfg = build_power_cfg(
-                    dict(power_mode="r2", r2_target=float(r_r2_str),
-                         alpha=r_alpha, power=r_power_v, sigma=r_sigma,
-                         lambda_mode=r_lambda_mode,
-                         max_n=r_max_n, max_iter=r_max_iter, tol_power=r_tol_power),
-                    error_cls=ExcelError, context=_resp_ctx,
+                    dict(
+                        power_mode="r2",
+                        r2_target=float(r_r2_str),
+                        alpha=r_alpha,
+                        power=r_power_v,
+                        sigma=r_sigma,
+                        lambda_mode=r_lambda_mode,
+                        max_n=r_max_n,
+                        max_iter=r_max_iter,
+                        tol_power=r_tol_power,
+                    ),
+                    error_cls=ExcelError,
+                    context=_resp_ctx,
                 )
             elif r_mode == "glm":
                 if not r_L_str or not r_d_str:
                     raise ExcelError(
-                        f"{_resp_ctx}: glm mode requires "
-                        "L_row (col 7) and delta (col 8) values."
+                        f"{_resp_ctx}: glm mode requires " "L_row (col 7) and delta (col 8) values."
                     )
                 if not r_glm_baseline_str:
-                    raise ExcelError(
-                        f"{_resp_ctx}: glm mode requires baseline (col 16)."
-                    )
+                    raise ExcelError(f"{_resp_ctx}: glm mode requires baseline (col 16).")
                 try:
                     L_vals = [float(v.strip()) for v in r_L_str.split(",") if v.strip()]
                     d_vals = [float(v.strip()) for v in r_d_str.split(",") if v.strip()]
                     r_glm_baseline = float(r_glm_baseline_str)
                 except ValueError as e:
-                    raise ExcelError(
-                        f"{_resp_ctx}: non-numeric value: {e}"
-                    ) from e
+                    raise ExcelError(f"{_resp_ctx}: non-numeric value: {e}") from e
                 pcfg = build_power_cfg(
-                    dict(power_mode="glm", L=[L_vals], delta=d_vals,
-                         baseline=r_glm_baseline, family=r_glm_family or "binomial",
-                         alpha=r_alpha, power=r_power_v, max_n=r_max_n),
-                    error_cls=ExcelError, context=_resp_ctx,
+                    dict(
+                        power_mode="glm",
+                        L=[L_vals],
+                        delta=d_vals,
+                        baseline=r_glm_baseline,
+                        family=r_glm_family or "binomial",
+                        alpha=r_alpha,
+                        power=r_power_v,
+                        max_n=r_max_n,
+                    ),
+                    error_cls=ExcelError,
+                    context=_resp_ctx,
                 )
             else:
                 raise ExcelError(
@@ -528,10 +559,14 @@ def _read_config_sheet(
                 )
 
             try:
-                specs.append(ResponseSpec(
-                    name=r_name, power_cfg=pcfg,
-                    formula=r_formula_str, weight=r_weight,
-                ))
+                specs.append(
+                    ResponseSpec(
+                        name=r_name,
+                        power_cfg=pcfg,
+                        formula=r_formula_str,
+                        weight=r_weight,
+                    )
+                )
             except (ValueError, TypeError) as e:
                 raise ExcelError(f"{_resp_ctx}: {e}") from e
 
@@ -570,7 +605,6 @@ def _write_df_to_sheet(wb: Any, sheet_name: str, df: pd.DataFrame) -> None:
                 val = ""
             ws.cell(row=r_idx, column=c_idx, value=val)
     _set_column_widths(ws, [max(len(str(c)), 10) + 2 for c in df.columns])
-
 
 
 def _write_output_sheets(
@@ -613,10 +647,7 @@ def _write_output_sheets(
     if result.get("model_matrix") is not None:
         _write_df_to_sheet(wb, "ModelMatrix", result["model_matrix"])
         _generated.add("ModelMatrix")
-    if (
-        result.get("model_matrices") is not None
-        and report.get("compound_criterion")
-    ):
+    if result.get("model_matrices") is not None and report.get("compound_criterion"):
         # Collisions (with the user's own sheets — ours are already gone)
         # are checked on the COMPLETE title: openpyxl compares titles
         # case-insensitively, so a bare-slug check lets it rename the sheet
@@ -624,14 +655,13 @@ def _write_output_sheets(
         _mm_taken: set = set(wb.sheetnames) | {"ModelMatrixIndex"}
         _mm_index_rows = []
         for _rname, _rmm in result["model_matrices"].items():
-            _sheet = "MM_" + safe_name_slug(
-                _rname, _mm_taken, maxlen=27, prefix="MM_"
-            )
+            _sheet = "MM_" + safe_name_slug(_rname, _mm_taken, maxlen=27, prefix="MM_")
             _write_df_to_sheet(wb, _sheet, _rmm)
             _mm_index_rows.append((_rname, _sheet))
             _generated.add(_sheet)
         _write_df_to_sheet(
-            wb, "ModelMatrixIndex",
+            wb,
+            "ModelMatrixIndex",
             pd.DataFrame(_mm_index_rows, columns=["response", "sheet"]),
         )
         _generated.add("ModelMatrixIndex")
@@ -671,9 +701,12 @@ def _record_generated_sheets(wb: Any, titles: set) -> None:
         props = wb.custom_doc_props
         if _GENERATED_SHEETS_PROP in props.names:
             del props[_GENERATED_SHEETS_PROP]
-        props.append(StringProperty(
-            name=_GENERATED_SHEETS_PROP, value="|".join(sorted(titles)),
-        ))
+        props.append(
+            StringProperty(
+                name=_GENERATED_SHEETS_PROP,
+                value="|".join(sorted(titles)),
+            )
+        )
     except (AttributeError, ImportError):
         # openpyxl < 3.1: no marker support; the next export simply has no
         # deletion authority (safe — stale sheets are dodged by suffixing).
@@ -695,10 +728,8 @@ def _reconcile_previous_matrix_sheets(wb: Any) -> None:
     _warn_about_legacy_sheets(wb, owned)
     for _title in sorted(owned):
         if (
-            (_title in ("ModelMatrix", "ModelMatrixIndex")
-             or _title.startswith("MM_"))
-            and _title in wb.sheetnames
-        ):
+            _title in ("ModelMatrix", "ModelMatrixIndex") or _title.startswith("MM_")
+        ) and _title in wb.sheetnames:
             del wb[_title]
 
 
@@ -722,8 +753,7 @@ def _warn_about_legacy_sheets(wb: Any, owned: set) -> None:
     stale = [
         str(row[1])
         for row in ws_idx.iter_rows(min_row=2, max_col=2, values_only=True)
-        if len(row) > 1 and isinstance(row[1], str)
-        and row[1].startswith("MM_")
+        if len(row) > 1 and isinstance(row[1], str) and row[1].startswith("MM_")
     ]
     warnings.warn(
         "This workbook contains model-matrix sheets from a Lattice DOE "
@@ -828,51 +858,78 @@ def create_excel_template(
     # ------------------------------------------------------------------ #
     # [SETTINGS]
     # ------------------------------------------------------------------ #
-    _sentinel_style(ws, r, _SENTINEL_SETTINGS); r += 1
+    _sentinel_style(ws, r, _SENTINEL_SETTINGS)
+    r += 1
 
-    _key_cell(ws, r, "formula", "~ 1 + A + B"); r += 1
+    _key_cell(ws, r, "formula", "~ 1 + A + B")
+    r += 1
     # power_mode is omitted for multiresponse (overridden by [RESPONSES] section)
     if example != "multiresponse":
         # GLM examples use power_mode="glm"; map template name to mode value
         _pm_value = "glm" if example.startswith("glm") else example
-        _key_cell(ws, r, "power_mode", _pm_value); r += 1
+        _key_cell(ws, r, "power_mode", _pm_value)
+        r += 1
         _add_dropdown(ws, '"r2,contrast,glm"', row=r - 1)
-        _key_cell(ws, r, "alpha",        0.05);  r += 1
-        _key_cell(ws, r, "power",        0.80);  r += 1
+        _key_cell(ws, r, "alpha", 0.05)
+        r += 1
+        _key_cell(ws, r, "power", 0.80)
+        r += 1
         if example == "r2":
-            _key_cell(ws, r, "r2_target",  0.25); r += 1
-            _key_cell(ws, r, "sigma",      "");   r += 1   # not used in R² mode
+            _key_cell(ws, r, "r2_target", 0.25)
+            r += 1
+            _key_cell(ws, r, "sigma", "")
+            r += 1  # not used in R² mode
         elif example.startswith("glm"):
-            _glm_family   = "binomial" if example == "glm-binomial" else "poisson"
-            _glm_baseline = 0.20       if example == "glm-binomial" else 2.0
-            _key_cell(ws, r, "family",    _glm_family);   r += 1
-            _key_cell(ws, r, "link",      "");             r += 1  # blank = canonical
-            _key_cell(ws, r, "baseline",  _glm_baseline); r += 1
+            _glm_family = "binomial" if example == "glm-binomial" else "poisson"
+            _glm_baseline = 0.20 if example == "glm-binomial" else 2.0
+            _key_cell(ws, r, "family", _glm_family)
+            r += 1
+            _key_cell(ws, r, "link", "")
+            r += 1  # blank = canonical
+            _key_cell(ws, r, "baseline", _glm_baseline)
+            r += 1
         else:
-            _key_cell(ws, r, "sigma",      1.0);  r += 1
-            _key_cell(ws, r, "r2_target",  "");   r += 1   # not used in contrast mode
-        _key_cell(ws, r, "max_n",        500);   r += 1
+            _key_cell(ws, r, "sigma", 1.0)
+            r += 1
+            _key_cell(ws, r, "r2_target", "")
+            r += 1  # not used in contrast mode
+        _key_cell(ws, r, "max_n", 500)
+        r += 1
 
-    _key_cell(ws, r, "criterion",    "I");   r += 1
+    _key_cell(ws, r, "criterion", "I")
+    r += 1
     _add_dropdown(ws, '"I,D,A"', row=r - 1)
 
-    _key_cell(ws, r, "starts",       5);     r += 1
-    _key_cell(ws, r, "max_iter",     1000);  r += 1
-    _key_cell(ws, r, "random_state", 123);   r += 1
+    _key_cell(ws, r, "starts", 5)
+    r += 1
+    _key_cell(ws, r, "max_iter", 1000)
+    r += 1
+    _key_cell(ws, r, "random_state", 123)
+    r += 1
     # Blocked design: set n_blocks >= 2 to enable; 0 = unblocked (default).
-    _key_cell(ws, r, "n_blocks",                0);       r += 1
-    _key_cell(ws, r, "block_factor_name",       "Block"); r += 1
+    _key_cell(ws, r, "n_blocks", 0)
+    r += 1
+    _key_cell(ws, r, "block_factor_name", "Block")
+    r += 1
     # Categorical pre-allocation: set to true/false.
-    _key_cell(ws, r, "preallocate_categorical", "false"); r += 1
+    _key_cell(ws, r, "preallocate_categorical", "false")
+    r += 1
     _add_dropdown(ws, '"true,false"', row=r - 1)
-    _key_cell(ws, r, "alloc_min_per_cell",      1);       r += 1
-    _key_cell(ws, r, "alloc_max_per_cell",      0);       r += 1  # 0 = no upper limit
+    _key_cell(ws, r, "alloc_min_per_cell", 1)
+    r += 1
+    _key_cell(ws, r, "alloc_max_per_cell", 0)
+    r += 1  # 0 = no upper limit
     # Split-plot: set htc_factors and n_whole_plots >= 2 to enable.
-    _key_cell(ws, r, "htc_factors",             "");      r += 1  # comma-separated HTC factor names
-    _key_cell(ws, r, "n_whole_plots",           0);       r += 1  # 0 = disabled; >= 2 to enable
-    _key_cell(ws, r, "eta",                     1.0);     r += 1  # variance ratio sigma2_wp/sigma2_sp
-    _key_cell(ws, r, "subplots_per_wp",         0);       r += 1  # 0 = auto
-    _key_cell(ws, r, "df_method",               "auto");  r += 1
+    _key_cell(ws, r, "htc_factors", "")
+    r += 1  # comma-separated HTC factor names
+    _key_cell(ws, r, "n_whole_plots", 0)
+    r += 1  # 0 = disabled; >= 2 to enable
+    _key_cell(ws, r, "eta", 1.0)
+    r += 1  # variance ratio sigma2_wp/sigma2_sp
+    _key_cell(ws, r, "subplots_per_wp", 0)
+    r += 1  # 0 = auto
+    _key_cell(ws, r, "df_method", "auto")
+    r += 1
     _add_dropdown(ws, '"auto,conservative,sp_only"', row=r - 1)
 
     r += 1  # blank separator
@@ -881,28 +938,39 @@ def create_excel_template(
     # [CONTRAST] — only for contrast example
     # ------------------------------------------------------------------ #
     if example == "contrast":
-        _sentinel_style(ws, r, _SENTINEL_CONTRAST); r += 1
+        _sentinel_style(ws, r, _SENTINEL_CONTRAST)
+        r += 1
         # Contrast between A=-1 and A=+1, holding B at mid-range
         # Model: Intercept + A + B  → L = [0, 1, 0]
-        _key_cell(ws, r, "L_row",  "0, 1, 0"); r += 1
-        _key_cell(ws, r, "delta",  "1.0");      r += 1
+        _key_cell(ws, r, "L_row", "0, 1, 0")
+        r += 1
+        _key_cell(ws, r, "delta", "1.0")
+        r += 1
         r += 1  # blank separator
     elif example == "glm-binomial":
-        _sentinel_style(ws, r, _SENTINEL_CONTRAST); r += 1
-        _key_cell(ws, r, "L_row",  "0, 1, 0"); r += 1
-        _key_cell(ws, r, "delta",  "0.5");      r += 1
+        _sentinel_style(ws, r, _SENTINEL_CONTRAST)
+        r += 1
+        _key_cell(ws, r, "L_row", "0, 1, 0")
+        r += 1
+        _key_cell(ws, r, "delta", "0.5")
+        r += 1
         r += 1
     elif example == "glm-poisson":
-        _sentinel_style(ws, r, _SENTINEL_CONTRAST); r += 1
-        _key_cell(ws, r, "L_row",  "0, 1, 0"); r += 1
-        _key_cell(ws, r, "delta",  "0.3");      r += 1
+        _sentinel_style(ws, r, _SENTINEL_CONTRAST)
+        r += 1
+        _key_cell(ws, r, "L_row", "0, 1, 0")
+        r += 1
+        _key_cell(ws, r, "delta", "0.3")
+        r += 1
         r += 1
 
     # ------------------------------------------------------------------ #
     # [FACTORS]
     # ------------------------------------------------------------------ #
-    _sentinel_style(ws, r, _SENTINEL_FACTORS); r += 1
-    _header_row(ws, r, ["Name", "Type", "Value 1", "Value 2"]); r += 1
+    _sentinel_style(ws, r, _SENTINEL_FACTORS)
+    r += 1
+    _header_row(ws, r, ["Name", "Type", "Value 1", "Value 2"])
+    r += 1
     ws.cell(row=r, column=1, value="A")
     ws.cell(row=r, column=2, value="continuous")
     ws.cell(row=r, column=3, value=-1.0)
@@ -921,25 +989,44 @@ def create_excel_template(
     # ------------------------------------------------------------------ #
     if example == "multiresponse":
         r += 1  # blank separator
-        _sentinel_style(ws, r, _SENTINEL_RESPONSES); r += 1
+        _sentinel_style(ws, r, _SENTINEL_RESPONSES)
+        r += 1
         # Header row (informational — not parsed by _read_config_sheet)
-        _header_row(ws, r, [
-            "name", "power_mode", "sigma", "alpha", "power", "weight",
-            "L_row", "delta", "r2_target", "formula",
-            "lambda_mode", "max_n", "max_iter", "tol_power",
-        ]); r += 1
+        _header_row(
+            ws,
+            r,
+            [
+                "name",
+                "power_mode",
+                "sigma",
+                "alpha",
+                "power",
+                "weight",
+                "L_row",
+                "delta",
+                "r2_target",
+                "formula",
+                "lambda_mode",
+                "max_n",
+                "max_iter",
+                "tol_power",
+            ],
+        )
+        r += 1
         # Special key rows
-        _key_cell(ws, r, "power_combination", "min"); r += 1
+        _key_cell(ws, r, "power_combination", "min")
+        r += 1
         # sigma_joint: leave blank to disable; fill as "1,0.3; 0.3,1" to enable Hotelling T²
-        _key_cell(ws, r, "sigma_joint", ""); r += 1
+        _key_cell(ws, r, "sigma_joint", "")
+        r += 1
         # Per-response data rows
         for _rname, _r2t in (("Y1", 0.15), ("Y2", 0.20)):
             ws.cell(row=r, column=1, value=_rname)
             ws.cell(row=r, column=2, value="r2")
             # sigma/alpha/power/weight — blank = use global defaults
-            ws.cell(row=r, column=6, value=1.0)   # weight
+            ws.cell(row=r, column=6, value=1.0)  # weight
             ws.cell(row=r, column=9, value=_r2t)  # r2_target
-            ws.cell(row=r, column=11, value="n")   # lambda_mode
+            ws.cell(row=r, column=11, value="n")  # lambda_mode
             r += 1
 
     _set_column_widths(ws, [20, 16, 12, 12])
@@ -949,7 +1036,7 @@ def create_excel_template(
     # ------------------------------------------------------------------ #
     for sheet in ("Results", "Design", "Buckets"):
         out_ws = wb.create_sheet(sheet)
-        out_ws.cell(row=1, column=1, value=f"Run excel_run() to populate this sheet.")
+        out_ws.cell(row=1, column=1, value="Run excel_run() to populate this sheet.")
         out_ws.cell(row=1, column=1).font = Font(italic=True, color="808080")
 
     dest = Path(path).resolve()
@@ -1027,6 +1114,7 @@ def excel_run(
     try:
         if multi_cfg is not None:
             from .api import find_multiresponse_design  # noqa: PLC0415
+
             result = find_multiresponse_design(
                 formula=formula,
                 factors=factors,

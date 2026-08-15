@@ -1,6 +1,7 @@
 # api_server/routers/compare.py
 # License: MIT
 """POST /compare_criteria."""
+
 from __future__ import annotations
 
 import anyio
@@ -41,14 +42,16 @@ def _sync_compare(request: CompareCriteriaRequest) -> Dict[str, Any]:
     summary_df = result["summary"]
     summary_rows = []
     for _, row in summary_df.iterrows():
-        summary_rows.append(CriterionSummaryRow(
-            criterion=str(row["criterion"]),
-            n=int(row["n"]),
-            achieved_power=float(row["achieved_power"]),
-            elapsed_sec=sanitize_float(row.get("elapsed_sec")),
-            condition_number=sanitize_float(row.get("condition_number")),
-            d_efficiency=sanitize_float(row.get("d_efficiency")),
-        ))
+        summary_rows.append(
+            CriterionSummaryRow(
+                criterion=str(row["criterion"]),
+                n=int(row["n"]),
+                achieved_power=float(row["achieved_power"]),
+                elapsed_sec=sanitize_float(row.get("elapsed_sec")),
+                condition_number=sanitize_float(row.get("condition_number")),
+                d_efficiency=sanitize_float(row.get("d_efficiency")),
+            )
+        )
 
     criteria_used = request.criteria or ["I", "D", "A"]
     results: Dict[str, DesignResponse] = {}

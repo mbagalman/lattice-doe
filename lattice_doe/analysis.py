@@ -26,6 +26,7 @@ Note on return types
 access the figure object or the full result dict, call the canonical
 implementations in ``lattice_doe.power_curves`` directly.
 """
+
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Union, Any, Literal, Tuple, cast
@@ -49,7 +50,13 @@ from .model_matrix import (
     resolve_design_matrix,
     tested_column_indices,
 )
-from .power import contrast_power, global_r2_power, contrast_power_sp, global_r2_power_sp, glm_contrast_power
+from .power import (
+    contrast_power,
+    global_r2_power,
+    contrast_power_sp,
+    global_r2_power_sp,
+    glm_contrast_power,
+)
 from .power import _r2_df_num
 from .split_plot import build_whole_plot_indicator, htc_factor_cols_from_names
 from .power_curves import (
@@ -57,10 +64,10 @@ from .power_curves import (
     power_curve_by_effect as _power_curve_by_effect_impl,
 )
 
-
 # ---------------------------------------------------------------------------
 # Convenience wrappers — DataFrame-returning surface over power_curves.py
 # ---------------------------------------------------------------------------
+
 
 def power_curve_by_n(
     formula: str,
@@ -149,6 +156,7 @@ def power_curve_by_effect(
 # generate_power_curves — combined convenience wrapper
 # ---------------------------------------------------------------------------
 
+
 def generate_power_curves(
     formula: str,
     factors: FactorSpec,
@@ -171,7 +179,11 @@ def generate_power_curves(
 
     if curve_type in ("by_n", "both"):
         results["by_n"] = power_curve_by_n(
-            formula, factors, power_cfg, design_opts=design_opts, plot=plot,
+            formula,
+            factors,
+            power_cfg,
+            design_opts=design_opts,
+            plot=plot,
             plot_backend=plot_backend,
         )
 
@@ -183,8 +195,13 @@ def generate_power_curves(
             n_for_effect = int(design_result["report"]["n"])
 
         results["by_effect"] = power_curve_by_effect(
-            formula, factors, n_for_effect, power_cfg, design_opts=design_opts,
-            plot=plot, plot_backend=plot_backend,
+            formula,
+            factors,
+            n_for_effect,
+            power_cfg,
+            design_opts=design_opts,
+            plot=plot,
+            plot_backend=plot_backend,
         )
 
     return results
@@ -215,9 +232,7 @@ def _tested_power_inputs(
     tested_idx = tested_column_indices(list(names), list(treat_names))
     L_eff = None
     if isinstance(power_cfg, (PowerContrastConfig, PowerGLMContrastConfig)):
-        L_eff = align_contrast_to_columns(
-            np.asarray(power_cfg.L), list(treat_names), list(names)
-        )
+        L_eff = align_contrast_to_columns(np.asarray(power_cfg.L), list(treat_names), list(names))
     r2_df = _r2_df_num(X[:, tested_idx]) if tested_idx is not None else None
     return L_eff, r2_df
 
@@ -316,41 +331,52 @@ def power_sensitivity(
         _s_per_wp = n // _n_wp
         Z_sp = build_whole_plot_indicator(n, _n_wp, _s_per_wp)
         _df_method = (
-            design_opts.split_plot.df_method
-            if design_opts.split_plot is not None
-            else "sp_only"
+            design_opts.split_plot.df_method if design_opts.split_plot is not None else "sp_only"
         )
         _htc_factors_eta = (
-            design_opts.split_plot.htc_factors
-            if design_opts.split_plot is not None
-            else []
+            design_opts.split_plot.htc_factors if design_opts.split_plot is not None else []
         )
         _all_fcols_eta = [c for c in design_df.columns if c != "__wp_id__"]
         _htc_cols_eta = htc_factor_cols_from_names(
-            _p_names, _htc_factors_eta, _all_fcols_eta,
+            _p_names,
+            _htc_factors_eta,
+            _all_fcols_eta,
         )
         _sigma_sp = power_cfg.sigma if isinstance(power_cfg, PowerContrastConfig) else 1.0
         _eta_rows = []
         for _eta in np.linspace(eta_range[0], eta_range[1], max(2, eta_points)):
             if isinstance(power_cfg, PowerContrastConfig):
                 _pr = contrast_power_sp(
-                    power_cfg.L, power_cfg.delta, X, Z_sp,
-                    sigma_sp=_sigma_sp, eta=float(_eta),
-                    alpha=power_cfg.alpha, df_method=_df_method, jitter=jitter,
+                    power_cfg.L,
+                    power_cfg.delta,
+                    X,
+                    Z_sp,
+                    sigma_sp=_sigma_sp,
+                    eta=float(_eta),
+                    alpha=power_cfg.alpha,
+                    df_method=_df_method,
+                    jitter=jitter,
                     htc_factor_cols=_htc_cols_eta,
                 )
             else:
                 _pr = global_r2_power_sp(
-                    power_cfg.r2_target, X, Z_sp, sigma_sp=_sigma_sp,
-                    eta=float(_eta), alpha=power_cfg.alpha,
-                    lambda_mode=power_cfg.lambda_mode, jitter=jitter,
+                    power_cfg.r2_target,
+                    X,
+                    Z_sp,
+                    sigma_sp=_sigma_sp,
+                    eta=float(_eta),
+                    alpha=power_cfg.alpha,
+                    lambda_mode=power_cfg.lambda_mode,
+                    jitter=jitter,
                     htc_factor_cols=_htc_cols_eta,
                 )
-            _eta_rows.append({
-                "eta": float(_eta),
-                "power": float(_pr.power),
-                "noncentrality_lambda": float(_pr.lam),
-            })
+            _eta_rows.append(
+                {
+                    "eta": float(_eta),
+                    "power": float(_pr.power),
+                    "noncentrality_lambda": float(_pr.lam),
+                }
+            )
         _eta_sweep_df = pd.DataFrame(_eta_rows)
 
     # ------------------------------------------------------------------ #
@@ -376,11 +402,13 @@ def power_sensitivity(
                 lambda_mode=power_cfg.lambda_mode,
                 df_num=_r2_df,
             )
-            rows.append({
-                "r2_target": float(r2),
-                "power": float(pwr),
-                "noncentrality_lambda": float(lam),
-            })
+            rows.append(
+                {
+                    "r2_target": float(r2),
+                    "power": float(pwr),
+                    "noncentrality_lambda": float(lam),
+                }
+            )
 
         df = pd.DataFrame(rows)
 
@@ -397,22 +425,30 @@ def power_sensitivity(
         if plot:
             if plot_backend == "plotly":
                 from .plot_backends import plotly_sensitivity as _plotly_sensitivity
+
                 fig = _plotly_sensitivity(df, power_cfg, float(nominal_pwr), n)
             else:
                 try:
                     import matplotlib.pyplot as plt
+
                     fig, ax = plt.subplots(figsize=figsize)
                     ax.plot(df["r2_target"], df["power"], "b-", linewidth=2, label="Power")
                     ax.axvline(
-                        x=power_cfg.r2_target, color="gray", linestyle="--",
+                        x=power_cfg.r2_target,
+                        color="gray",
+                        linestyle="--",
                         label=f"Nominal R² = {power_cfg.r2_target}",
                     )
                     ax.axhline(
-                        y=power_cfg.power, color="r", linestyle="--",
+                        y=power_cfg.power,
+                        color="r",
+                        linestyle="--",
                         label=f"Target power = {power_cfg.power:.2f}",
                     )
                     ax.axhline(
-                        y=float(nominal_pwr), color="steelblue", linestyle=":",
+                        y=float(nominal_pwr),
+                        color="steelblue",
+                        linestyle=":",
                         label=f"Power @ nominal R²: {float(nominal_pwr):.3f}",
                     )
                     ax.set_xlabel("R² (population effect size)")
@@ -454,11 +490,13 @@ def power_sensitivity(
             alpha=power_cfg.alpha,
             jitter=jitter,
         )
-        rows.append({
-            "sigma": float(sigma),
-            "power": float(pwr),
-            "noncentrality_lambda": float(lam),
-        })
+        rows.append(
+            {
+                "sigma": float(sigma),
+                "power": float(pwr),
+                "noncentrality_lambda": float(lam),
+            }
+        )
 
     df = pd.DataFrame(rows)
 
@@ -476,22 +514,30 @@ def power_sensitivity(
     if plot:
         if plot_backend == "plotly":
             from .plot_backends import plotly_sensitivity as _plotly_sensitivity
+
             fig = _plotly_sensitivity(df, power_cfg, float(nominal_pwr), n)
         else:
             try:
                 import matplotlib.pyplot as plt
+
                 fig, ax = plt.subplots(figsize=figsize)
                 ax.plot(df["sigma"], df["power"], "b-", linewidth=2, label="Power")
                 ax.axvline(
-                    x=power_cfg.sigma, color="gray", linestyle="--",
+                    x=power_cfg.sigma,
+                    color="gray",
+                    linestyle="--",
                     label=f"Nominal σ = {power_cfg.sigma}",
                 )
                 ax.axhline(
-                    y=power_cfg.power, color="r", linestyle="--",
+                    y=power_cfg.power,
+                    color="r",
+                    linestyle="--",
                     label=f"Target power = {power_cfg.power:.2f}",
                 )
                 ax.axhline(
-                    y=float(nominal_pwr), color="steelblue", linestyle=":",
+                    y=float(nominal_pwr),
+                    color="steelblue",
+                    linestyle=":",
                     label=f"Power @ nominal σ: {float(nominal_pwr):.3f}",
                 )
                 ax.set_xlabel("σ  (residual standard deviation)")
@@ -516,6 +562,7 @@ def power_sensitivity(
 # ---------------------------------------------------------------------------
 # power_curve_by_baseline — GLM-specific: sweep baseline mean/probability
 # ---------------------------------------------------------------------------
+
 
 def power_curve_by_baseline(
     formula: str,
@@ -583,13 +630,15 @@ def power_curve_by_baseline(
         object.__setattr__(_tmp, "baseline", float(b))
         object.__setattr__(_tmp, "L", _L_eff)  # aligned to X's columns (UX-62)
         res = glm_contrast_power(_tmp, X, jitter=jitter)
-        rows.append({
-            "baseline": float(b),
-            "power": float(res.power),
-            "lam": float(res.lam),
-            "family": cfg.family,
-            "link": cfg.link,
-        })
+        rows.append(
+            {
+                "baseline": float(b),
+                "power": float(res.power),
+                "lam": float(res.lam),
+                "family": cfg.family,
+                "link": cfg.link,
+            }
+        )
 
     return pd.DataFrame(rows)
 
@@ -597,6 +646,7 @@ def power_curve_by_baseline(
 # ---------------------------------------------------------------------------
 # min_detectable_effect — bisection inversion of the power curve
 # ---------------------------------------------------------------------------
+
 
 def min_detectable_effect(
     design_df: pd.DataFrame,
@@ -808,6 +858,7 @@ def min_detectable_effect(
 # compare_criteria — run I/D/A designs side-by-side
 # ---------------------------------------------------------------------------
 
+
 def compare_criteria(
     formula: str,
     factors: FactorSpec,
@@ -900,8 +951,7 @@ def compare_criteria(
     bad = set(criteria) - valid_criteria
     if bad:
         raise ValueError(
-            f"Invalid criteria {sorted(bad)!r}. "
-            f"Each must be one of {sorted(valid_criteria)}."
+            f"Invalid criteria {sorted(bad)!r}. " f"Each must be one of {sorted(valid_criteria)}."
         )
 
     all_results: Dict[str, Any] = {}
@@ -981,6 +1031,7 @@ def compare_criteria(
 # ---------------------------------------------------------------------------
 # robustness_report — multi-axis uncertainty summary for a fixed design
 # ---------------------------------------------------------------------------
+
 
 def _threshold_crossing(
     values: np.ndarray,
@@ -1190,9 +1241,7 @@ def robustness_report(
     if effect_range[0] >= effect_range[1]:
         raise ValueError("effect_range[0] must be < effect_range[1]")
     if mode == "r2" and (effect_range[0] >= 1 or effect_range[1] >= 1):
-        raise ValueError(
-            "effect_range values must be < 1 in R² mode (they are r2_target values)"
-        )
+        raise ValueError("effect_range values must be < 1 in R² mode (they are r2_target values)")
     if effect_points < 2:
         raise ValueError("effect_points must be >= 2")
 
@@ -1232,11 +1281,13 @@ def robustness_report(
                 alpha=power_cfg.alpha,
                 jitter=jitter,
             )
-            effect_rows.append({
-                "effect_scale": float(ev),
-                "power": float(pwr),
-                "noncentrality_lambda": float(lam),
-            })
+            effect_rows.append(
+                {
+                    "effect_scale": float(ev),
+                    "power": float(pwr),
+                    "noncentrality_lambda": float(lam),
+                }
+            )
         else:
             pwr, lam = global_r2_power(
                 r2_target=float(ev),
@@ -1245,11 +1296,13 @@ def robustness_report(
                 lambda_mode=power_cfg.lambda_mode,
                 df_num=_r2_df,
             )
-            effect_rows.append({
-                "r2_target": float(ev),
-                "power": float(pwr),
-                "noncentrality_lambda": float(lam),
-            })
+            effect_rows.append(
+                {
+                    "r2_target": float(ev),
+                    "power": float(pwr),
+                    "noncentrality_lambda": float(lam),
+                }
+            )
     effect_sweep_df = pd.DataFrame(effect_rows)
     effect_col = "effect_scale" if mode == "contrast" else "r2_target"
 
@@ -1269,11 +1322,13 @@ def robustness_report(
                 alpha=power_cfg.alpha,
                 jitter=jitter,
             )
-            sigma_rows.append({
-                "sigma": float(sigma),
-                "power": float(pwr),
-                "noncentrality_lambda": float(lam),
-            })
+            sigma_rows.append(
+                {
+                    "sigma": float(sigma),
+                    "power": float(pwr),
+                    "noncentrality_lambda": float(lam),
+                }
+            )
         sigma_sweep_df = pd.DataFrame(sigma_rows)
 
     # ------------------------------------------------------------------ #
@@ -1299,11 +1354,13 @@ def robustness_report(
                 lambda_mode=power_cfg.lambda_mode,
                 df_num=_r2_df,
             )
-        alpha_rows.append({
-            "alpha": float(alpha),
-            "power": float(pwr),
-            "noncentrality_lambda": float(lam),
-        })
+        alpha_rows.append(
+            {
+                "alpha": float(alpha),
+                "power": float(pwr),
+                "noncentrality_lambda": float(lam),
+            }
+        )
     alpha_sweep_df = pd.DataFrame(alpha_rows)
 
     # ------------------------------------------------------------------ #
@@ -1367,7 +1424,8 @@ def robustness_report(
         "min_alpha_for_target": min_alpha,
         "max_sigma_for_target_truncated": (
             bool((sigma_sweep_df["power"].values >= power_target).all())
-            if sigma_sweep_df is not None else False
+            if sigma_sweep_df is not None
+            else False
         ),
         "min_effect_for_target_truncated": bool(
             (effect_sweep_df["power"].values >= power_target).all()
@@ -1393,10 +1451,20 @@ def robustness_report(
                 axes = list(axes)
 
             def _decorate(ax: Any, xlabel: str, nominal_x: float, title: str) -> None:
-                ax.axhline(y=power_target, color="red", linestyle="--", linewidth=1.2,
-                           label=f"Target power = {power_target:.2f}")
-                ax.axvline(x=nominal_x, color="gray", linestyle="--", linewidth=1,
-                           label=f"Nominal = {nominal_x:.3g}")
+                ax.axhline(
+                    y=power_target,
+                    color="red",
+                    linestyle="--",
+                    linewidth=1.2,
+                    label=f"Target power = {power_target:.2f}",
+                )
+                ax.axvline(
+                    x=nominal_x,
+                    color="gray",
+                    linestyle="--",
+                    linewidth=1,
+                    label=f"Nominal = {nominal_x:.3g}",
+                )
                 ax.set_xlabel(xlabel)
                 ax.set_ylabel("Statistical Power")
                 ax.set_ylim([0, 1.05])
@@ -1407,50 +1475,72 @@ def robustness_report(
             # Panel 0: effect sweep
             ax0 = axes[0]
             if mode == "contrast":
-                ax0.plot(effect_sweep_df["effect_scale"], effect_sweep_df["power"],
-                         "b-", linewidth=2)
+                ax0.plot(
+                    effect_sweep_df["effect_scale"], effect_sweep_df["power"], "b-", linewidth=2
+                )
                 _decorate(ax0, "Effect scale (× δ)", 1.0, "Effect Sweep")
                 if min_effect is not None:
-                    ax0.axvline(x=min_effect, color="darkorange", linestyle=":",
-                                linewidth=1.2, label=f"Threshold ≈ {min_effect:.3g}")
+                    ax0.axvline(
+                        x=min_effect,
+                        color="darkorange",
+                        linestyle=":",
+                        linewidth=1.2,
+                        label=f"Threshold ≈ {min_effect:.3g}",
+                    )
                     ax0.legend(fontsize=7)
             else:
-                ax0.plot(effect_sweep_df["r2_target"], effect_sweep_df["power"],
-                         "b-", linewidth=2)
+                ax0.plot(effect_sweep_df["r2_target"], effect_sweep_df["power"], "b-", linewidth=2)
                 _decorate(ax0, "R² target", power_cfg.r2_target, "Effect Sweep (R²)")
                 if min_effect is not None:
-                    ax0.axvline(x=min_effect, color="darkorange", linestyle=":",
-                                linewidth=1.2, label=f"Threshold ≈ {min_effect:.3g}")
+                    ax0.axvline(
+                        x=min_effect,
+                        color="darkorange",
+                        linestyle=":",
+                        linewidth=1.2,
+                        label=f"Threshold ≈ {min_effect:.3g}",
+                    )
                     ax0.legend(fontsize=7)
 
             # Panel 1: sigma sweep (contrast) or alpha sweep (r2)
             if mode == "contrast":
                 ax1 = axes[1]
-                ax1.plot(sigma_sweep_df["sigma"], sigma_sweep_df["power"],
-                         "b-", linewidth=2)
+                ax1.plot(sigma_sweep_df["sigma"], sigma_sweep_df["power"], "b-", linewidth=2)
                 _decorate(ax1, "σ (residual std dev)", power_cfg.sigma, "Sigma Sweep")
                 if max_sigma is not None:
-                    ax1.axvline(x=max_sigma, color="darkorange", linestyle=":",
-                                linewidth=1.2, label=f"Threshold ≈ {max_sigma:.3g}")
+                    ax1.axvline(
+                        x=max_sigma,
+                        color="darkorange",
+                        linestyle=":",
+                        linewidth=1.2,
+                        label=f"Threshold ≈ {max_sigma:.3g}",
+                    )
                     ax1.legend(fontsize=7)
                 # Alpha sweep in Panel 2
                 ax2 = axes[2]
-                ax2.plot(alpha_sweep_df["alpha"], alpha_sweep_df["power"],
-                         "b-", linewidth=2)
+                ax2.plot(alpha_sweep_df["alpha"], alpha_sweep_df["power"], "b-", linewidth=2)
                 _decorate(ax2, "α (significance level)", power_cfg.alpha, "Alpha Sweep")
                 if min_alpha is not None:
-                    ax2.axvline(x=min_alpha, color="darkorange", linestyle=":",
-                                linewidth=1.2, label=f"Threshold ≈ {min_alpha:.3g}")
+                    ax2.axvline(
+                        x=min_alpha,
+                        color="darkorange",
+                        linestyle=":",
+                        linewidth=1.2,
+                        label=f"Threshold ≈ {min_alpha:.3g}",
+                    )
                     ax2.legend(fontsize=7)
             else:
                 # R² mode has no sigma sweep — alpha in Panel 1
                 ax1 = axes[1]
-                ax1.plot(alpha_sweep_df["alpha"], alpha_sweep_df["power"],
-                         "b-", linewidth=2)
+                ax1.plot(alpha_sweep_df["alpha"], alpha_sweep_df["power"], "b-", linewidth=2)
                 _decorate(ax1, "α (significance level)", power_cfg.alpha, "Alpha Sweep")
                 if min_alpha is not None:
-                    ax1.axvline(x=min_alpha, color="darkorange", linestyle=":",
-                                linewidth=1.2, label=f"Threshold ≈ {min_alpha:.3g}")
+                    ax1.axvline(
+                        x=min_alpha,
+                        color="darkorange",
+                        linestyle=":",
+                        linewidth=1.2,
+                        label=f"Threshold ≈ {min_alpha:.3g}",
+                    )
                     ax1.legend(fontsize=7)
 
             plt.suptitle(
@@ -1477,6 +1567,7 @@ def robustness_report(
 # ---------------------------------------------------------------------------
 # power_curve_by_wp — power vs n_whole_plots for split-plot designs
 # ---------------------------------------------------------------------------
+
 
 def power_curve_by_wp(
     formula: str,
@@ -1541,15 +1632,11 @@ def power_curve_by_wp(
     if wp_range is None:
         wp_range = (2, max(3, 2 + wp_points - 1))
 
-    n_wp_vals = np.round(
-        np.linspace(wp_range[0], wp_range[1], max(1, wp_points))
-    ).astype(int)
+    n_wp_vals = np.round(np.linspace(wp_range[0], wp_range[1], max(1, wp_points))).astype(int)
 
     sigma_sp = power_cfg.sigma if isinstance(power_cfg, PowerContrastConfig) else 1.0
     df_method = (
-        design_opts.split_plot.df_method
-        if design_opts.split_plot is not None
-        else "sp_only"
+        design_opts.split_plot.df_method if design_opts.split_plot is not None else "sp_only"
     )
 
     # Compute candidate pool sizes from DesignOptions.candidate_points.
@@ -1568,12 +1655,19 @@ def power_curve_by_wp(
         n_total = n_wp * subplots_per_wp
         try:
             sp_cand = build_split_plot_candidate(
-                factors, htc_factors, n_wp, subplots_per_wp,
+                factors,
+                htc_factors,
+                n_wp,
+                subplots_per_wp,
                 random_state=design_opts.random_state,
             )
             design_df_, X_ = build_split_plot_design(
-                sp_cand, formula, n_wp, subplots_per_wp,
-                htc_factors, eta,
+                sp_cand,
+                formula,
+                n_wp,
+                subplots_per_wp,
+                htc_factors,
+                eta,
                 factors=factors,
                 criterion=design_opts.criterion,
                 starts=design_opts.starts,
@@ -1588,40 +1682,58 @@ def power_curve_by_wp(
                 _, _p_names_ = build_model_matrix(formula, design_df_)
                 _all_fcols_ = [c for c in design_df_.columns if c != "__wp_id__"]
                 _htc_cols_ = htc_factor_cols_from_names(
-                    _p_names_, htc_factors, _all_fcols_,
+                    _p_names_,
+                    htc_factors,
+                    _all_fcols_,
                 )
                 pr = contrast_power_sp(
-                    power_cfg.L, power_cfg.delta, X_, Z_,
-                    sigma_sp=sigma_sp, eta=eta, alpha=power_cfg.alpha,
-                    df_method=df_method, jitter=design_opts.xtx_jitter,
+                    power_cfg.L,
+                    power_cfg.delta,
+                    X_,
+                    Z_,
+                    sigma_sp=sigma_sp,
+                    eta=eta,
+                    alpha=power_cfg.alpha,
+                    df_method=df_method,
+                    jitter=design_opts.xtx_jitter,
                     htc_factor_cols=_htc_cols_,
                 )
             else:
                 _, _p_names_ = build_model_matrix(formula, design_df_)
                 _all_fcols_ = [c for c in design_df_.columns if c != "__wp_id__"]
                 _htc_cols_ = htc_factor_cols_from_names(
-                    _p_names_, htc_factors, _all_fcols_,
+                    _p_names_,
+                    htc_factors,
+                    _all_fcols_,
                 )
                 pr = global_r2_power_sp(
-                    power_cfg.r2_target, X_, Z_, sigma_sp=sigma_sp,
-                    eta=eta, alpha=power_cfg.alpha,
+                    power_cfg.r2_target,
+                    X_,
+                    Z_,
+                    sigma_sp=sigma_sp,
+                    eta=eta,
+                    alpha=power_cfg.alpha,
                     lambda_mode=power_cfg.lambda_mode,
                     jitter=design_opts.xtx_jitter,
                     htc_factor_cols=_htc_cols_,
                 )
-            rows.append({
-                "n_wp": n_wp,
-                "n_total": n_total,
-                "power": float(pr.power),
-                "noncentrality_lambda": float(pr.lam),
-            })
+            rows.append(
+                {
+                    "n_wp": n_wp,
+                    "n_total": n_total,
+                    "power": float(pr.power),
+                    "noncentrality_lambda": float(pr.lam),
+                }
+            )
         except Exception:
-            rows.append({
-                "n_wp": n_wp,
-                "n_total": n_total,
-                "power": float("nan"),
-                "noncentrality_lambda": float("nan"),
-            })
+            rows.append(
+                {
+                    "n_wp": n_wp,
+                    "n_total": n_total,
+                    "power": float("nan"),
+                    "noncentrality_lambda": float("nan"),
+                }
+            )
 
     return pd.DataFrame(rows)
 
@@ -1629,6 +1741,7 @@ def power_curve_by_wp(
 # ---------------------------------------------------------------------------
 # MR-7: Multi-response analysis functions
 # ---------------------------------------------------------------------------
+
 
 def power_curve_by_n_multiresponse(
     formula: str,
@@ -1701,10 +1814,7 @@ def power_curve_by_n_multiresponse(
     cand, candidate_points = build_search_candidate(formula, factors, design_opts)
 
     # Detect compound path (any response formula differs from global).
-    _compound = any(
-        r.formula is not None and r.formula != formula
-        for r in multi_cfg.responses
-    )
+    _compound = any(r.formula is not None and r.formula != formula for r in multi_cfg.responses)
 
     rule = multi_cfg.power_combination
     weights = [r.weight for r in multi_cfg.responses]
@@ -1755,7 +1865,9 @@ def power_curve_by_n_multiresponse(
         try:
             if _compound:
                 idx_ = build_compound_design(
-                    candidates_list, weights, n_safe,
+                    candidates_list,
+                    weights,
+                    n_safe,
                     criterion=design_opts.criterion,
                     n_start=design_opts.starts,
                     max_iter=design_opts.max_iter,
@@ -1763,8 +1875,9 @@ def power_curve_by_n_multiresponse(
                     jitter=design_opts.xtx_jitter,
                 )
                 per_r_ = [
-                    eval_response_power(r_k, X_cand_k[idx_], p_names_k,
-                                        jitter=design_opts.xtx_jitter)
+                    eval_response_power(
+                        r_k, X_cand_k[idx_], p_names_k, jitter=design_opts.xtx_jitter
+                    )
                     for r_k, X_cand_k, p_names_k in zip(
                         multi_cfg.responses, candidates_list, p_names_list
                     )
@@ -1773,8 +1886,7 @@ def power_curve_by_n_multiresponse(
                 _, idx_, _ = build_i_opt_design_with_idx(n=n_safe, **_search_kwargs)
                 X_ = X_cand[idx_]
                 per_r_ = [
-                    eval_response_power(r, X_, p_names_global,
-                                        jitter=design_opts.xtx_jitter)
+                    eval_response_power(r, X_, p_names_global, jitter=design_opts.xtx_jitter)
                     for r in multi_cfg.responses
                 ]
             combined_ = _combine([d["power"] for d in per_r_], weights, rule)
@@ -1793,17 +1905,28 @@ def power_curve_by_n_multiresponse(
         if plot_backend == "plotly":
             try:
                 import plotly.graph_objects as go  # type: ignore[import]
+
                 fig = go.Figure()
                 for name in resp_names:
                     col = f"{name}_power"
                     if col in df.columns:
-                        fig.add_trace(go.Scatter(
-                            x=df["n"], y=df[col], mode="lines", name=name,
-                        ))
-                fig.add_trace(go.Scatter(
-                    x=df["n"], y=df["combined_power"], mode="lines",
-                    name="combined", line=dict(dash="dash"),
-                ))
+                        fig.add_trace(
+                            go.Scatter(
+                                x=df["n"],
+                                y=df[col],
+                                mode="lines",
+                                name=name,
+                            )
+                        )
+                fig.add_trace(
+                    go.Scatter(
+                        x=df["n"],
+                        y=df["combined_power"],
+                        mode="lines",
+                        name="combined",
+                        line=dict(dash="dash"),
+                    )
+                )
                 fig.update_layout(
                     xaxis_title="n",
                     yaxis_title="Power",
@@ -1814,6 +1937,7 @@ def power_curve_by_n_multiresponse(
         else:
             try:
                 import matplotlib.pyplot as plt  # type: ignore[import]
+
                 fig_mr, ax = plt.subplots(figsize=(8, 5))
                 for name in resp_names:
                     col = f"{name}_power"

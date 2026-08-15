@@ -10,6 +10,7 @@ Mapping strategy
 * ``RuntimeError``                      → 422  (design-generation failure, bad config)
 * Any other ``Exception``               → 500  (unexpected server error, logged)
 """
+
 from __future__ import annotations
 
 import logging
@@ -36,8 +37,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             entry = dict(e)
             if "ctx" in entry and isinstance(entry["ctx"], dict):
                 entry["ctx"] = {
-                    k: str(v) if isinstance(v, Exception) else v
-                    for k, v in entry["ctx"].items()
+                    k: str(v) if isinstance(v, Exception) else v for k, v in entry["ctx"].items()
                 }
             entry.pop("url", None)  # strip Pydantic v2 doc URLs (optional)
             errors.append(entry)
@@ -50,9 +50,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(ValueError)
-    async def value_error_handler(
-        request: Request, exc: ValueError
-    ) -> JSONResponse:
+    async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
         logger.warning("ValueError at %s: %s", request.url.path, exc)
         return JSONResponse(
             status_code=422,
@@ -63,9 +61,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(RuntimeError)
-    async def runtime_error_handler(
-        request: Request, exc: RuntimeError
-    ) -> JSONResponse:
+    async def runtime_error_handler(request: Request, exc: RuntimeError) -> JSONResponse:
         logger.warning("RuntimeError at %s: %s", request.url.path, exc)
         return JSONResponse(
             status_code=422,
@@ -76,9 +72,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(Exception)
-    async def generic_error_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
+    async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.error(
             "Unhandled exception at %s:\n%s",
             request.url.path,

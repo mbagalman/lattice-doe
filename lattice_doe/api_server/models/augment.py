@@ -23,14 +23,18 @@ class AugmentRequest(StrictRequestModel):
     factors: Dict[str, FactorSpec]
     design_opts: Optional[DesignOptionsModel] = None
 
-    model_config = {"json_schema_extra": {
-        "examples": [{
-            "design_df": [{"A": -1.0, "B": -1.0}, {"A": 1.0, "B": 1.0}],
-            "m": 2,
-            "formula": "~ 1 + A + B",
-            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-        }]
-    }}
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "design_df": [{"A": -1.0, "B": -1.0}, {"A": 1.0, "B": 1.0}],
+                    "m": 2,
+                    "formula": "~ 1 + A + B",
+                    "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+                }
+            ]
+        }
+    }
 
 
 class AugmentResponse(BaseModel):
@@ -39,9 +43,7 @@ class AugmentResponse(BaseModel):
     augmented_df: List[Dict[str, Any]] = Field(
         ..., description="Full augmented design (original + new runs)."
     )
-    new_runs_df: List[Dict[str, Any]] = Field(
-        ..., description="Only the newly added runs."
-    )
+    new_runs_df: List[Dict[str, Any]] = Field(..., description="Only the newly added runs.")
     n_original: int
     n_added: int
     n_total: int

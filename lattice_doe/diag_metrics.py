@@ -1,4 +1,5 @@
 """Pure-NumPy diagnostic metrics — no matplotlib dependency."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -13,6 +14,7 @@ __all__ = ["compute_leverages", "compute_design_metrics"]
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
 
 def _xtx(X: np.ndarray) -> np.ndarray:
     return X.T @ X
@@ -90,6 +92,7 @@ def _compute_vif(
 # ---------------------------------------------------------------------------
 # Public functions
 # ---------------------------------------------------------------------------
+
 
 def compute_leverages(X: np.ndarray) -> np.ndarray:
     """Compute leverage values (diagonal of hat matrix).

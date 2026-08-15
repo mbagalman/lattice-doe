@@ -1,6 +1,7 @@
 # api_server/routers/augment.py
 # License: MIT
 """POST /augment."""
+
 from __future__ import annotations
 
 import anyio

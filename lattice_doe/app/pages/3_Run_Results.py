@@ -31,8 +31,11 @@ from components.design_config import build_design_opts_from_state
 try:
     from lattice_doe.utils import safe_name_slug
 except ImportError:  # pragma: no cover - core install without app extra
+
     def safe_name_slug(name, existing=None, maxlen=60):  # type: ignore[misc]
         return str(name)
+
+
 from state import init_state, render_sidebar
 
 st.set_page_config(page_title="Run & Results — Lattice DOE", layout="wide")
@@ -43,12 +46,10 @@ try:
     from lattice_doe import find_optimal_design, find_multiresponse_design
     from lattice_doe.config import (
         DesignOptions,
-        PowerContrastConfig,
-        PowerGLMContrastConfig,
-        PowerR2Config,
         MultiResponseOptions,
     )
     from lattice_doe._request_builder import build_power_cfg
+
     _HAS_IOPT = True
 except ImportError:
     _HAS_IOPT = False
@@ -65,9 +66,7 @@ _HAS_XLSXWRITER = importlib.util.find_spec("xlsxwriter") is not None
 def _factors_to_spec(factors: list[dict]) -> dict:
     spec: dict = {}
     for f in factors:
-        spec[f["name"]] = (
-            (f["low"], f["high"]) if f["type"] == "Continuous" else list(f["levels"])
-        )
+        spec[f["name"]] = (f["low"], f["high"]) if f["type"] == "Continuous" else list(f["levels"])
     return spec
 
 
@@ -108,28 +107,44 @@ def _build_power_cfg(ss: dict, design_opts: DesignOptions):
                 scenario_b=scenario_b,
                 sesoi=float(ss["sesoi"]),
             )
-        return build_power_cfg(dict(
-            power_mode="contrast", L=L, delta=delta,
-            alpha=float(ss["alpha"]), power=float(ss["power_target"]),
-            sigma=float(ss["sigma"]), max_n=int(ss["max_n"]),
-        ))
+        return build_power_cfg(
+            dict(
+                power_mode="contrast",
+                L=L,
+                delta=delta,
+                alpha=float(ss["alpha"]),
+                power=float(ss["power_target"]),
+                sigma=float(ss["sigma"]),
+                max_n=int(ss["max_n"]),
+            )
+        )
     elif ss["power_mode"] == "glm":
         L = _parse_matrix(ss["L_text"])
         delta = _parse_vector(ss["delta_text"])
-        return build_power_cfg(dict(
-            power_mode="glm", L=L, delta=delta,
-            baseline=float(ss.get("glm_baseline", 0.20)),
-            family=ss.get("glm_family", "binomial"),
-            link=ss.get("glm_link", "").strip() or None,
-            alpha=float(ss["alpha"]), power=float(ss["power_target"]),
-            max_n=int(ss["max_n"]),
-        ))
+        return build_power_cfg(
+            dict(
+                power_mode="glm",
+                L=L,
+                delta=delta,
+                baseline=float(ss.get("glm_baseline", 0.20)),
+                family=ss.get("glm_family", "binomial"),
+                link=ss.get("glm_link", "").strip() or None,
+                alpha=float(ss["alpha"]),
+                power=float(ss["power_target"]),
+                max_n=int(ss["max_n"]),
+            )
+        )
     else:
-        return build_power_cfg(dict(
-            power_mode="r2", r2_target=float(ss["r2_target"]),
-            alpha=float(ss["alpha"]), power=float(ss["power_target"]),
-            max_n=int(ss["max_n"]), lambda_mode=ss["lambda_mode"],
-        ))
+        return build_power_cfg(
+            dict(
+                power_mode="r2",
+                r2_target=float(ss["r2_target"]),
+                alpha=float(ss["alpha"]),
+                power=float(ss["power_target"]),
+                max_n=int(ss["max_n"]),
+                lambda_mode=ss["lambda_mode"],
+            )
+        )
 
 
 def _build_multi_response_cfg(ss: dict) -> "MultiResponseOptions":
@@ -204,10 +219,7 @@ def _make_excel(design_df: pd.DataFrame, buckets_df: pd.DataFrame, report: dict)
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         design_df.to_excel(writer, sheet_name="Design", index=False)
         buckets_df.to_excel(writer, sheet_name="Buckets", index=False)
-        report_rows = [
-            {"Key": k, "Value": str(_jsonify(v))}
-            for k, v in report.items()
-        ]
+        report_rows = [{"Key": k, "Value": str(_jsonify(v))} for k, v in report.items()]
         pd.DataFrame(report_rows).to_excel(writer, sheet_name="Report", index=False)
     return output.getvalue()
 
@@ -242,7 +254,11 @@ with st.expander("Current configuration", expanded=not bool(ss.get("result"))):
         _formula_display = formula or "\u2014"
         st.markdown(f"**Formula:** `{_formula_display}`")
     with c2:
-        _mode_labels = {"contrast": "Contrast-based", "r2": "Global R\u00b2", "glm": "GLM (logistic/Poisson)"}
+        _mode_labels = {
+            "contrast": "Contrast-based",
+            "r2": "Global R\u00b2",
+            "glm": "GLM (logistic/Poisson)",
+        }
         mode_label = _mode_labels.get(power_mode, power_mode)
         st.markdown(f"**Power mode:** {mode_label}")
         if power_mode == "contrast":
@@ -289,9 +305,8 @@ if not factors:
     _issues.append("No factors defined \u2014 go to **Page 1**.")
 if not formula.strip():
     _issues.append("No formula entered \u2014 go to **Page 1**.")
-_needs_contrast_matrix = (
-    power_mode == "glm"
-    or (power_mode == "contrast" and ss.get("contrast_input_mode") == "matrix")
+_needs_contrast_matrix = power_mode == "glm" or (
+    power_mode == "contrast" and ss.get("contrast_input_mode") == "matrix"
 )
 if _needs_contrast_matrix:
     if not ss.get("L_text", "").strip():
@@ -327,6 +342,7 @@ if run_clicked and not _issues and _HAS_IOPT:
         design_opts = _build_design_opts(ss)
         factor_spec = _factors_to_spec(factors)
         with st.status("Searching for the optimal design\u2026", expanded=True) as _status:
+
             def _on_progress(ev):
                 # Live phase / trial-n / power / elapsed instead of a static
                 # spinner (UX-3). A faulty status update must not break the run.
@@ -337,7 +353,9 @@ if run_clicked and not _issues and _HAS_IOPT:
                     bits.append(f"power={ev.current_power:.3f}")
                 bits.append(f"{getattr(ev, 'elapsed_sec', 0.0):.1f}s")
                 try:
-                    _status.update(label="Searching \u2014 " + " \u00b7 ".join(b for b in bits if b))
+                    _status.update(
+                        label="Searching \u2014 " + " \u00b7 ".join(b for b in bits if b)
+                    )
                 except Exception:
                     pass
 
@@ -383,15 +401,13 @@ if run_clicked and not _issues and _HAS_IOPT:
 if ss.get("run_error"):
     st.error(f"Run failed: {ss['run_error']}")
     with st.expander("Troubleshooting tips"):
-        st.markdown(
-            """
+        st.markdown("""
 - **L columns \u2260 p**: check Page 1 \u2192 'Model matrix columns' for the correct p.
 - **max_n too small**: raise it on Page 2 \u2192 'Max sample size'.
 - **Power never reached**: increase starts, lower target power, or widen factor ranges.
 - **Constraint too strict**: relax or remove the constraint expression on Page 2.
 - **Empty L row**: every row of L must contain at least one non-zero value.
-"""
-        )
+""")
 
 # ---------------------------------------------------------------------------
 # Show results only after a successful run
@@ -438,7 +454,9 @@ with st.expander("Full report (JSON)"):
 _mr_response_keys = [k for k in report if k.endswith("_power") and k != "achieved_power"]
 if _mr_response_keys:
     with st.expander("Per-response powers", expanded=True):
-        _pr_data = {k.replace("_power", ""): [f"{report[k]:.3f}"] for k in sorted(_mr_response_keys)}
+        _pr_data = {
+            k.replace("_power", ""): [f"{report[k]:.3f}"] for k in sorted(_mr_response_keys)
+        }
         if "combined_power" in report:
             _pr_data["combined"] = [f"{report['combined_power']:.3f}"]
         st.dataframe(
@@ -585,32 +603,47 @@ else:
                 actual_power = float(report["achieved_power"])
 
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=n_vals, y=powers, mode="lines", name="Approx. power",
-                    line=dict(color="#1f77b4", width=2),
-                    hovertemplate="n=%{x}<br>power=%{y:.3f}<extra></extra>",
-                ))
-                fig.add_trace(go.Scatter(
-                    x=[n_result], y=[actual_power], mode="markers",
-                    name=f"Result (n={n_result}, power={actual_power:.3f})",
-                    marker=dict(color="#d62728", size=10),
-                    hovertemplate=f"n={n_result}<br>power={actual_power:.3f}<extra></extra>",
-                ))
+                fig.add_trace(
+                    go.Scatter(
+                        x=n_vals,
+                        y=powers,
+                        mode="lines",
+                        name="Approx. power",
+                        line=dict(color="#1f77b4", width=2),
+                        hovertemplate="n=%{x}<br>power=%{y:.3f}<extra></extra>",
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=[n_result],
+                        y=[actual_power],
+                        mode="markers",
+                        name=f"Result (n={n_result}, power={actual_power:.3f})",
+                        marker=dict(color="#d62728", size=10),
+                        hovertemplate=f"n={n_result}<br>power={actual_power:.3f}<extra></extra>",
+                    )
+                )
                 fig.add_hline(
-                    y=target_power, line_dash="dash", line_color="grey",
+                    y=target_power,
+                    line_dash="dash",
+                    line_color="grey",
                     annotation_text=f"Target {target_power:.0%}",
                     annotation_position="bottom right",
                 )
                 fig.add_vline(
-                    x=n_result, line_dash="dot", line_color="#d62728",
+                    x=n_result,
+                    line_dash="dot",
+                    line_color="#d62728",
                     annotation_text=f"n={n_result}",
                     annotation_position="top right",
                 )
                 fig.update_layout(
-                    xaxis_title="Sample size n", yaxis_title="Power",
+                    xaxis_title="Sample size n",
+                    yaxis_title="Power",
                     yaxis=dict(range=[0, 1.05]),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                    margin=dict(t=40, b=40), height=400,
+                    margin=dict(t=40, b=40),
+                    height=400,
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 if power_mode_ss == "r2" and lambda_mode_ss == "n_minus_p":
@@ -656,6 +689,7 @@ with exp_cols[1]:
 # G2 — JSON report download
 with exp_cols[2]:
     import json as _json
+
     _report_json = _json.dumps(_jsonify(report), indent=2).encode()
     st.download_button(
         "\u2b07 Report JSON",
@@ -672,10 +706,14 @@ with exp_cols[3]:
         import os as _os
         import tempfile as _tempfile
         from lattice_doe import generate_report as _generate_report
+
         _power_cfg_d3 = st.session_state.get("_last_power_cfg")
         _formula_d3 = st.session_state.get("formula", "")
         _factors_d3_raw = st.session_state.get("factors", [])
-        _factors_d3 = {f["name"]: (f["low"], f["high"]) if f["type"] == "Continuous" else list(f["levels"]) for f in _factors_d3_raw}
+        _factors_d3 = {
+            f["name"]: (f["low"], f["high"]) if f["type"] == "Continuous" else list(f["levels"])
+            for f in _factors_d3_raw
+        }
         if _power_cfg_d3 is not None and _factors_d3:
             # Generate HTML once per result; cache bytes in session state so
             # repeated renders (slider drags, etc.) don't re-write to disk.
@@ -713,7 +751,11 @@ with exp_cols[3]:
                     help="Download a self-contained HTML report (opens offline in any browser).",
                 )
         else:
-            st.button("\u2b07 HTML report", disabled=True, use_container_width=True,
-                      help="Re-run the design to generate the report.")
+            st.button(
+                "\u2b07 HTML report",
+                disabled=True,
+                use_container_width=True,
+                help="Re-run the design to generate the report.",
+            )
     else:
-        st.info('Install `lattice-doe[report]` to enable HTML report download.')
+        st.info("Install `lattice-doe[report]` to enable HTML report download.")

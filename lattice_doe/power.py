@@ -241,8 +241,7 @@ def contrast_power(
         L = L.reshape(1, -1)
     if L.ndim != 2 or L.shape[1] != p:
         raise ValueError(
-            f"Contrast matrix L has incompatible shape. "
-            f"Expected (q, p={p}), got {L.shape}."
+            f"Contrast matrix L has incompatible shape. " f"Expected (q, p={p}), got {L.shape}."
         )
 
     q = L.shape[0]
@@ -257,8 +256,7 @@ def contrast_power(
     df_denom = int(n - np.linalg.matrix_rank(X))
     if df_num <= 0:
         raise ValueError(
-            f"Contrast matrix L has rank {df_num}. "
-            "Must have rank > 0 to be testable."
+            f"Contrast matrix L has rank {df_num}. " "Must have rank > 0 to be testable."
         )
     if df_denom <= 0:
         raise ValueError(
@@ -286,7 +284,7 @@ def contrast_power(
     # handles the inversion, but delta must satisfy the same dependencies
     # for the hypothesis to be well-posed — checked below (SR-9).
 
-    V = V_unscaled * (sigma ** 2)
+    V = V_unscaled * (sigma**2)
 
     # Use pseudo-inverse in case V is singular
     V_inv = np.linalg.pinv(V)
@@ -390,8 +388,7 @@ def glm_contrast_power(
     rank_V = np.linalg.matrix_rank(V_unscaled)
     if rank_V == 0:
         raise ValueError(
-            "Contrast variance matrix L @ (X'X)⁻¹ @ Lᵀ has rank 0; "
-            "the contrast is not testable."
+            "Contrast variance matrix L @ (X'X)⁻¹ @ Lᵀ has rank 0; " "the contrast is not testable."
         )
 
     V_inv = np.linalg.pinv(V_unscaled)
@@ -461,7 +458,7 @@ def global_r2_power(
     X = np.asarray(X)
     if X.ndim != 2:
         raise ValueError(f"Design matrix X must be 2D; got {X.ndim} dimensions.")
-        
+
     n, p = X.shape
     rank_X = int(np.linalg.matrix_rank(X))
     df_denom = int(n - rank_X)
@@ -486,7 +483,7 @@ def global_r2_power(
         )
 
     # --- Calculation ---
-    
+
     # Cohen's f²
     f2 = r2_target / (1.0 - r2_target)
 
@@ -509,7 +506,6 @@ def global_r2_power(
     power = np.clip(power, 0.0, 1.0)
 
     return GlobalPowerResult(power=power, lam=lam)
-
 
 
 # ---------------------------------------------------------------------
@@ -622,14 +618,10 @@ def contrast_power_sp(
     if L.ndim == 1:
         L = L.reshape(1, -1)
     if L.ndim != 2 or L.shape[1] != p:
-        raise ValueError(
-            f"L has incompatible shape; expected (q, p={p}), got {L.shape}."
-        )
+        raise ValueError(f"L has incompatible shape; expected (q, p={p}), got {L.shape}.")
     q = L.shape[0]
     if delta.shape[0] != q:
-        raise ValueError(
-            f"delta length {delta.shape[0]} does not match L rows {q}."
-        )
+        raise ValueError(f"delta length {delta.shape[0]} does not match L rows {q}.")
 
     from .split_plot import (
         build_split_plot_covariance_inv,
@@ -654,7 +646,7 @@ def contrast_power_sp(
         df_num = int(np.linalg.matrix_rank(L))
         V_c_pinv = np.linalg.pinv(V_c)
         _check_delta_consistency(V_c, V_c_pinv, delta)
-        lam = max(0.0, float(delta @ V_c_pinv @ delta) / (sigma_sp ** 2))
+        lam = max(0.0, float(delta @ V_c_pinv @ delta) / (sigma_sp**2))
         df_d = int(df_denoms[0])
         if df_d <= 0:
             return ContrastPowerResult(power=0.0, lam=lam)
@@ -675,7 +667,7 @@ def contrast_power_sp(
             powers.append(0.0)
             lams.append(0.0)
             continue
-        lam_i = max(0.0, d_i ** 2 / (sigma_sp ** 2 * v_i))
+        lam_i = max(0.0, d_i**2 / (sigma_sp**2 * v_i))
         df_d_i = int(df_denoms[i])
         if df_d_i <= 0:
             powers.append(0.0)
@@ -933,8 +925,7 @@ def combine_powers(
         total_w = float(sum(w))
         if total_w <= 0.0:
             raise ValueError(
-                f"combine_powers: weights must have a positive sum; got "
-                f"{total_w}."
+                f"combine_powers: weights must have a positive sum; got " f"{total_w}."
             )
         return float(sum(pv * wv for pv, wv in zip(powers, w)) / total_w)
     raise ValueError(
@@ -1004,16 +995,22 @@ def eval_response_power(
                 )
             from .split_plot import htc_factor_cols_from_names
 
-            _all_fnames = all_factor_names if all_factor_names is not None else list(
-                split_plot_opts.htc_factors
+            _all_fnames = (
+                all_factor_names
+                if all_factor_names is not None
+                else list(split_plot_opts.htc_factors)
             )
-            htc_cols = htc_factor_cols_from_names(
-                p_names, split_plot_opts.htc_factors, _all_fnames
-            )
+            htc_cols = htc_factor_cols_from_names(p_names, split_plot_opts.htc_factors, _all_fnames)
             result = contrast_power_sp(
-                cfg.L, cfg.delta, X, Z,
-                sigma_sp=cfg.sigma, eta=split_plot_opts.eta, alpha=cfg.alpha,
-                df_method=split_plot_opts.df_method, htc_factor_cols=htc_cols,
+                cfg.L,
+                cfg.delta,
+                X,
+                Z,
+                sigma_sp=cfg.sigma,
+                eta=split_plot_opts.eta,
+                alpha=cfg.alpha,
+                df_method=split_plot_opts.df_method,
+                htc_factor_cols=htc_cols,
                 jitter=jitter,
             )
             # Report the stratum df actually used (SR-22); the eta = 0
@@ -1023,15 +1020,13 @@ def eval_response_power(
 
                 _is_wp_e = classify_contrasts(
                     np.atleast_2d(np.asarray(cfg.L, dtype=float)),
-                    htc_cols, X.shape[1],
+                    htc_cols,
+                    X.shape[1],
                 )
                 _dfs_e = split_plot_df_denom(
                     X, Z, _is_wp_e, split_plot_opts.df_method, htc_cols or None
                 )
-                df2 = (
-                    int(_dfs_e[0]) if np.all(_dfs_e == _dfs_e[0])
-                    else int(_dfs_e.min())
-                )
+                df2 = int(_dfs_e[0]) if np.all(_dfs_e == _dfs_e[0]) else int(_dfs_e.min())
         else:
             result = contrast_power(cfg.L, cfg.delta, X, cfg.sigma, cfg.alpha, jitter=jitter)
         return {
@@ -1050,17 +1045,25 @@ def eval_response_power(
                 )
             from .split_plot import htc_factor_cols_from_names
 
-            _all_fnames_r2 = all_factor_names if all_factor_names is not None else list(
-                split_plot_opts.htc_factors
+            _all_fnames_r2 = (
+                all_factor_names
+                if all_factor_names is not None
+                else list(split_plot_opts.htc_factors)
             )
             _htc_cols_r2 = htc_factor_cols_from_names(
                 p_names, split_plot_opts.htc_factors, _all_fnames_r2
             )
             result = global_r2_power_sp(
-                cfg.r2_target, X, Z,
-                sigma_sp=cfg.sigma, eta=split_plot_opts.eta, alpha=cfg.alpha,
-                df_method=split_plot_opts.df_method, lambda_mode=cfg.lambda_mode,
-                jitter=jitter, htc_factor_cols=_htc_cols_r2,
+                cfg.r2_target,
+                X,
+                Z,
+                sigma_sp=cfg.sigma,
+                eta=split_plot_opts.eta,
+                alpha=cfg.alpha,
+                df_method=split_plot_opts.df_method,
+                lambda_mode=cfg.lambda_mode,
+                jitter=jitter,
+                htc_factor_cols=_htc_cols_r2,
             )
             # Report the stratum df actually used (SR-22/SR-27).
             if split_plot_opts.eta > 0.0:
@@ -1165,17 +1168,12 @@ def hotelling_t2_power(
     q_D, k = Delta.shape
 
     if p_L != p:
-        raise ValueError(
-            f"L has {p_L} columns but X has {p} columns; shapes incompatible."
-        )
+        raise ValueError(f"L has {p_L} columns but X has {p} columns; shapes incompatible.")
     if q_D != q:
-        raise ValueError(
-            f"L has {q} rows but Delta has {q_D} rows; both must equal q."
-        )
+        raise ValueError(f"L has {q} rows but Delta has {q_D} rows; both must equal q.")
     if sigma_joint.shape != (k, k):
         raise ValueError(
-            f"sigma_joint must be ({k}, {k}) for k={k} responses, "
-            f"got {sigma_joint.shape}."
+            f"sigma_joint must be ({k}, {k}) for k={k} responses, " f"got {sigma_joint.shape}."
         )
 
     # Symmetry check

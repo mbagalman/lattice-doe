@@ -1,6 +1,7 @@
 # api_server/routers/sensitivity.py
 # License: MIT
 """POST /sensitivity and POST /mde."""
+
 from __future__ import annotations
 
 import anyio
@@ -33,10 +34,7 @@ def _sync_sensitivity(request: SensitivityRequest) -> dict:
     power_cfg = pydantic_power_cfg_to_dataclass(request.power_cfg)
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
     design_df = records_to_df(request.design_df)
-    model_matrix = (
-        split_to_df(request.model_matrix)
-        if request.model_matrix is not None else None
-    )
+    model_matrix = split_to_df(request.model_matrix) if request.model_matrix is not None else None
     result = power_sensitivity(
         formula=request.formula,
         factors=factors_to_spec(request.factors, request.formula),
@@ -63,10 +61,7 @@ def _sync_mde(request: MdeRequest) -> dict:
     power_cfg = pydantic_power_cfg_to_dataclass(request.power_cfg)
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
     design_df = records_to_df(request.design_df)
-    model_matrix = (
-        split_to_df(request.model_matrix)
-        if request.model_matrix is not None else None
-    )
+    model_matrix = split_to_df(request.model_matrix) if request.model_matrix is not None else None
     result = min_detectable_effect(
         design_df=design_df,
         formula=request.formula,

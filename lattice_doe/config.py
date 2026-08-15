@@ -11,6 +11,7 @@ These classes define structured inputs for:
 This file intentionally contains no procedural code — only structured
 configuration objects used throughout the package.
 """
+
 from __future__ import annotations
 
 import ast as _ast
@@ -25,51 +26,88 @@ import numpy as np  # core dependency
 # is a core dependency, so this adds no install-time requirement.
 import pandas as pd
 
-
 # ---------------------------------------------------------------------
 # Declarative constraint expression compiler
 # ---------------------------------------------------------------------
 
 # Whitelisted function names callable inside constraint expressions.
-_CONSTRAINT_ALLOWED_FUNCS: frozenset = frozenset({
-    "abs", "max", "min", "round",
-    "sqrt", "log", "log2", "log10", "exp",
-    "floor", "ceil",
-})
+_CONSTRAINT_ALLOWED_FUNCS: frozenset = frozenset(
+    {
+        "abs",
+        "max",
+        "min",
+        "round",
+        "sqrt",
+        "log",
+        "log2",
+        "log10",
+        "exp",
+        "floor",
+        "ceil",
+    }
+)
 
 # Restricted globals supplied to eval().  __builtins__ is empty so that
 # Python's built-in namespace is not reachable at runtime.
 _CONSTRAINT_SAFE_GLOBALS: dict = {
     "__builtins__": {},
-    "abs": abs, "max": max, "min": min, "round": round,
-    "True": True, "False": False,
-    "sqrt": _math.sqrt, "log": _math.log, "log2": _math.log2,
-    "log10": _math.log10, "exp": _math.exp, "pi": _math.pi,
-    "floor": _math.floor, "ceil": _math.ceil,
+    "abs": abs,
+    "max": max,
+    "min": min,
+    "round": round,
+    "True": True,
+    "False": False,
+    "sqrt": _math.sqrt,
+    "log": _math.log,
+    "log2": _math.log2,
+    "log10": _math.log10,
+    "exp": _math.exp,
+    "pi": _math.pi,
+    "floor": _math.floor,
+    "ceil": _math.ceil,
 }
 
 # AST node types that are permitted anywhere in the expression tree.
 # Anything not in this set is rejected at compile time, before eval().
-_CONSTRAINT_ALLOWED_NODES: frozenset = frozenset({
-    _ast.Expression,
-    # Boolean logic
-    _ast.BoolOp, _ast.And, _ast.Or,
-    # Arithmetic
-    _ast.BinOp,
-    _ast.Add, _ast.Sub, _ast.Mult, _ast.Div,
-    _ast.Mod, _ast.Pow, _ast.FloorDiv,
-    # Unary operators
-    _ast.UnaryOp, _ast.Not, _ast.USub, _ast.UAdd,
-    # Comparisons
-    _ast.Compare,
-    _ast.Eq, _ast.NotEq, _ast.Lt, _ast.LtE, _ast.Gt, _ast.GtE,
-    _ast.In, _ast.NotIn,
-    # Literals and name references
-    _ast.Constant,
-    _ast.Name, _ast.Load,
-    # Whitelisted function calls (validated separately in visit_Call)
-    _ast.Call,
-})
+_CONSTRAINT_ALLOWED_NODES: frozenset = frozenset(
+    {
+        _ast.Expression,
+        # Boolean logic
+        _ast.BoolOp,
+        _ast.And,
+        _ast.Or,
+        # Arithmetic
+        _ast.BinOp,
+        _ast.Add,
+        _ast.Sub,
+        _ast.Mult,
+        _ast.Div,
+        _ast.Mod,
+        _ast.Pow,
+        _ast.FloorDiv,
+        # Unary operators
+        _ast.UnaryOp,
+        _ast.Not,
+        _ast.USub,
+        _ast.UAdd,
+        # Comparisons
+        _ast.Compare,
+        _ast.Eq,
+        _ast.NotEq,
+        _ast.Lt,
+        _ast.LtE,
+        _ast.Gt,
+        _ast.GtE,
+        _ast.In,
+        _ast.NotIn,
+        # Literals and name references
+        _ast.Constant,
+        _ast.Name,
+        _ast.Load,
+        # Whitelisted function calls (validated separately in visit_Call)
+        _ast.Call,
+    }
+)
 
 
 class _ConstraintExprValidator(_ast.NodeVisitor):
@@ -115,8 +153,7 @@ class _ConstraintExprValidator(_ast.NodeVisitor):
             )
         if node.keywords:
             raise ValueError(
-                "constraint_expr: keyword arguments in function calls "
-                "are not allowed."
+                "constraint_expr: keyword arguments in function calls " "are not allowed."
             )
         # Validate each positional argument (starred args → ast.Starred,
         # which is not in _CONSTRAINT_ALLOWED_NODES and will be rejected).
@@ -157,9 +194,7 @@ def _compile_constraint_expr(expr: str) -> "Callable[[pd.Series], bool]":
     try:
         tree = _ast.parse(expr, mode="eval")
     except SyntaxError as exc:
-        raise ValueError(
-            f"constraint_expr has a syntax error: {expr!r}\n  {exc}"
-        ) from exc
+        raise ValueError(f"constraint_expr has a syntax error: {expr!r}\n  {exc}") from exc
 
     # 2. Walk the AST and reject any unsafe node (attribute access, subscript,
     #    comprehensions, dunder names, non-whitelisted calls, …).
@@ -325,15 +360,13 @@ class PowerR2Config:
 
     def __post_init__(self):
         if not (0 < self.r2_target < 1):
-            raise ValueError(
-                f"r2_target must be between (0, 1), but got {self.r2_target}"
-            )
+            raise ValueError(f"r2_target must be between (0, 1), but got {self.r2_target}")
         if not (0 < self.alpha < 1):
             raise ValueError(f"alpha must be in (0, 1), but got {self.alpha}")
         if not (0 < self.power < 1):
             raise ValueError(f"power must be in (0, 1), but got {self.power}")
         if self.lambda_mode not in ("n", "n_minus_p"):
-            raise ValueError(f"lambda_mode must be 'n' or 'n_minus_p'")
+            raise ValueError("lambda_mode must be 'n' or 'n_minus_p'")
         if self.tol_power <= 0:
             raise ValueError(f"tol_power must be > 0, but got {self.tol_power}")
         if self.max_iter <= 0:
@@ -410,30 +443,20 @@ class SplitPlotOptions:
                 "SplitPlotOptions.htc_factors must be a non-empty list of factor names."
             )
         if not all(isinstance(f, str) and f for f in self.htc_factors):
-            raise ValueError(
-                "SplitPlotOptions.htc_factors must contain non-empty strings."
-            )
+            raise ValueError("SplitPlotOptions.htc_factors must contain non-empty strings.")
         if len(self.htc_factors) != len(set(self.htc_factors)):
-            raise ValueError(
-                "SplitPlotOptions.htc_factors contains duplicate factor names."
-            )
+            raise ValueError("SplitPlotOptions.htc_factors contains duplicate factor names.")
         if not isinstance(self.n_whole_plots, int) or isinstance(self.n_whole_plots, bool):
             raise ValueError("n_whole_plots must be an integer.")
         if self.n_whole_plots < 2:
-            raise ValueError(
-                f"n_whole_plots must be ≥ 2, got {self.n_whole_plots}."
-            )
+            raise ValueError(f"n_whole_plots must be ≥ 2, got {self.n_whole_plots}.")
         if self.eta < 0:
-            raise ValueError(
-                f"eta (variance ratio σ²_wp/σ²_sp) must be ≥ 0, got {self.eta}."
-            )
+            raise ValueError(f"eta (variance ratio σ²_wp/σ²_sp) must be ≥ 0, got {self.eta}.")
         if self.subplots_per_wp is not None:
             if not isinstance(self.subplots_per_wp, int) or isinstance(self.subplots_per_wp, bool):
                 raise ValueError("subplots_per_wp must be an integer or None.")
             if self.subplots_per_wp < 1:
-                raise ValueError(
-                    f"subplots_per_wp must be ≥ 1, got {self.subplots_per_wp}."
-                )
+                raise ValueError(f"subplots_per_wp must be ≥ 1, got {self.subplots_per_wp}.")
         if self.df_method not in ("auto", "conservative", "sp_only"):
             raise ValueError(
                 f"df_method must be 'auto', 'conservative', or 'sp_only'; "
@@ -556,7 +579,7 @@ class DesignOptions:
     parallel_seed_stride : int, default 10000
         Offset added between per-start seeds to decorrelate parallel trials.
         Each worker i gets seed = random_state + i * parallel_seed_stride.
-    
+
     Notes
     -----
     Adaptive candidate sizing (auto_candidate=True) is recommended when:
@@ -612,9 +635,7 @@ class DesignOptions:
     split_plot: Optional[SplitPlotOptions] = field(default=None, repr=False)
 
     # Advanced options
-    constraint_func: Optional[Callable[["pd.Series"], bool]] = field(
-        default=None, repr=False
-    )
+    constraint_func: Optional[Callable[["pd.Series"], bool]] = field(default=None, repr=False)
     constraint_expr: Optional[str] = field(default=None, repr=False)
     workers: Optional[int] = None
     parallel_seed_stride: int = 10_000
@@ -678,9 +699,7 @@ class DesignOptions:
             if not isinstance(self.n_blocks, int) or isinstance(self.n_blocks, bool):
                 raise ValueError("n_blocks must be an integer or None")
             if self.n_blocks < 2:
-                raise ValueError(
-                    "n_blocks must be >= 2; use None for unblocked designs."
-                )
+                raise ValueError("n_blocks must be >= 2; use None for unblocked designs.")
             if self.block_sizes is not None:
                 if len(self.block_sizes) != self.n_blocks:
                     raise ValueError(
@@ -716,9 +735,7 @@ class DesignOptions:
 
     def __str__(self) -> str:
         has_constraint = self.constraint_func is not None
-        expr_preview = (
-            f", expr={self.constraint_expr!r}" if self.constraint_expr else ""
-        )
+        expr_preview = f", expr={self.constraint_expr!r}" if self.constraint_expr else ""
         return (
             f"DesignOptions(auto_candidate={self.auto_candidate}, "
             f"algo='{self.algo}', starts={self.starts}, workers={self.workers}, "
@@ -726,10 +743,10 @@ class DesignOptions:
         )
 
 
-
 # ---------------------------------------------------------------------
 # GLM (logistic / Poisson) power configuration
 # ---------------------------------------------------------------------
+
 
 @dataclass
 class PowerGLMContrastConfig:
@@ -834,9 +851,7 @@ class PowerGLMContrastConfig:
 
         # --- Family and link validation ---
         if self.family not in ("binomial", "poisson"):
-            raise ValueError(
-                f"family must be 'binomial' or 'poisson', got {self.family!r}"
-            )
+            raise ValueError(f"family must be 'binomial' or 'poisson', got {self.family!r}")
         _canonical = {"binomial": "logit", "poisson": "log"}
         if self.link is None:
             # Store the canonical link explicitly so callers never see None.
@@ -844,7 +859,7 @@ class PowerGLMContrastConfig:
         else:
             _allowed = {
                 "binomial": ("logit",),
-                "poisson":  ("log",),
+                "poisson": ("log",),
             }
             if self.link not in _allowed[self.family]:
                 raise ValueError(
@@ -856,8 +871,7 @@ class PowerGLMContrastConfig:
         if self.family == "binomial":
             if not (0.0 < self.baseline < 1.0):
                 raise ValueError(
-                    f"baseline must be in (0, 1) for binomial family, "
-                    f"got {self.baseline}"
+                    f"baseline must be in (0, 1) for binomial family, " f"got {self.baseline}"
                 )
             if min(self.baseline, 1.0 - self.baseline) < 0.05:
                 _warnings.warn(
@@ -868,9 +882,7 @@ class PowerGLMContrastConfig:
                 )
         else:  # poisson
             if self.baseline <= 0.0:
-                raise ValueError(
-                    f"baseline must be > 0 for Poisson family, got {self.baseline}"
-                )
+                raise ValueError(f"baseline must be > 0 for Poisson family, got {self.baseline}")
 
         # --- Numeric range validation ---
         if not (0.0 < self.alpha < 1.0):
@@ -968,7 +980,9 @@ class ResponseSpec:
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("ResponseSpec.name must be a non-empty string.")
-        if not isinstance(self.power_cfg, (PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig)):
+        if not isinstance(
+            self.power_cfg, (PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig)
+        ):
             raise TypeError(
                 "ResponseSpec.power_cfg must be a PowerContrastConfig, PowerR2Config, "
                 "or PowerGLMContrastConfig."
@@ -1019,16 +1033,13 @@ class MultiResponseOptions:
         if len(names) != len(set(names)):
             raise ValueError("ResponseSpec names must be unique.")
         if self.power_combination not in ("min", "product", "weighted_mean"):
-            raise ValueError(
-                "power_combination must be 'min', 'product', or 'weighted_mean'."
-            )
+            raise ValueError("power_combination must be 'min', 'product', or 'weighted_mean'.")
         if self.sigma_joint is not None:
             k = len(self.responses)
             arr = np.asarray(self.sigma_joint)
             if arr.shape != (k, k):
                 raise ValueError(
-                    f"sigma_joint must be ({k},{k}) for {k} responses, "
-                    f"got {arr.shape}."
+                    f"sigma_joint must be ({k},{k}) for {k} responses, " f"got {arr.shape}."
                 )
 
 

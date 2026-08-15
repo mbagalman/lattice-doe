@@ -31,6 +31,7 @@ References
 * Atkinson, Donev & Tobias (2007) "Optimum Experimental Designs, with SAS."
   Chapter 13 on blocking.
 """
+
 from __future__ import annotations
 
 from typing import List, Optional, Tuple
@@ -75,8 +76,7 @@ def balanced_block_sizes(n: int, n_blocks: int) -> List[int]:
         raise ValueError(f"n_blocks must be >= 2; got {n_blocks}.")
     if n < n_blocks:
         raise ValueError(
-            f"n ({n}) must be >= n_blocks ({n_blocks}): "
-            "each block must have at least 1 run."
+            f"n ({n}) must be >= n_blocks ({n_blocks}): " "each block must have at least 1 run."
         )
     base = n // n_blocks
     remainder = n % n_blocks
@@ -173,9 +173,7 @@ def build_blocked_design(
         block_sizes = balanced_block_sizes(n, n_blocks)
 
     if len(block_sizes) != n_blocks:
-        raise ValueError(
-            f"len(block_sizes)={len(block_sizes)} != n_blocks={n_blocks}."
-        )
+        raise ValueError(f"len(block_sizes)={len(block_sizes)} != n_blocks={n_blocks}.")
     if sum(block_sizes) != n:
         raise ValueError(
             f"sum(block_sizes)={sum(block_sizes)} != n={n}. "
@@ -196,11 +194,7 @@ def build_blocked_design(
 
     for b_idx, (b_label, b_size) in enumerate(zip(block_labels, block_sizes)):
         # Give each block a distinct seed to decorrelate the within-block searches
-        seed_b = (
-            (random_state + b_idx * parallel_seed_stride)
-            if random_state is not None
-            else None
-        )
+        seed_b = (random_state + b_idx * parallel_seed_stride) if random_state is not None else None
         design_b, _sel_idx_b, _ = build_i_opt_design_with_idx(
             cand=cand,
             formula=formula,

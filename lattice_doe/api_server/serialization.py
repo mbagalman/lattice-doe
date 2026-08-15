@@ -6,6 +6,7 @@ Serialization helpers: numpy/pandas ↔ JSON-safe Python types.
 These converters live here (not in the models) so they can be used by
 every router without circular imports.
 """
+
 from __future__ import annotations
 
 import math
@@ -14,12 +15,20 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 
-from lattice_doe.config import DesignOptions, MultiResponseOptions, PowerContrastConfig, PowerGLMContrastConfig, PowerR2Config, ResponseSpec, SplitPlotOptions
-
+from lattice_doe.config import (
+    DesignOptions,
+    MultiResponseOptions,
+    PowerContrastConfig,
+    PowerGLMContrastConfig,
+    PowerR2Config,
+    ResponseSpec,
+    SplitPlotOptions,
+)
 
 # ---------------------------------------------------------------------------
 # Scalar / float sanitization
 # ---------------------------------------------------------------------------
+
 
 def sanitize_float(v: Any) -> Optional[float]:
     """Convert numpy floats and handle nan/inf → None."""
@@ -55,6 +64,7 @@ def sanitize_value(v: Any) -> Any:
 # DataFrame serialization
 # ---------------------------------------------------------------------------
 
+
 def df_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """Convert a DataFrame to a list of JSON-safe row dicts."""
     records = []
@@ -81,10 +91,7 @@ def df_to_split(df: pd.DataFrame) -> Dict[str, Any]:
     """
     return {
         "columns": [str(c) for c in df.columns],
-        "data": [
-            [sanitize_value(v) for v in row]
-            for row in df.itertuples(index=False, name=None)
-        ],
+        "data": [[sanitize_value(v) for v in row] for row in df.itertuples(index=False, name=None)],
     }
 
 
@@ -98,9 +105,7 @@ def split_to_df(payload: Any) -> pd.DataFrame:
     return pd.DataFrame(list(data), columns=list(columns))
 
 
-def factors_to_spec(
-    factors: Dict[str, Any], formula: Optional[str] = None
-) -> Dict[str, Any]:
+def factors_to_spec(factors: Dict[str, Any], formula: Optional[str] = None) -> Dict[str, Any]:
     """Convert a request's factor mapping to the core factor-spec form (UX-5).
 
     Discriminated factor models (``ContinuousFactorModel`` /
@@ -125,6 +130,7 @@ def factors_to_spec(
 # ---------------------------------------------------------------------------
 # Config conversion: Pydantic model → dataclass
 # ---------------------------------------------------------------------------
+
 
 def pydantic_power_cfg_to_dataclass(
     model: Any,
@@ -217,6 +223,7 @@ def pydantic_design_opts_to_dataclass(model: Optional[Any]) -> DesignOptions:
 # Result serialization: find_optimal_design return dict → response dict
 # ---------------------------------------------------------------------------
 
+
 def serialize_report(report: dict) -> dict:
     """Strip internal keys and sanitize numpy scalars from a report dict."""
     skip = {"_X", "_selected_idx", "_X_cand", "figure"}
@@ -286,7 +293,6 @@ def serialize_multiresponse_result(result: dict) -> dict:
         # Per-response authoritative bases (UX-63): in compound mode each
         # response's power used its OWN formula's matrix, not the global one.
         out["model_matrices"] = {
-            name: df_to_split(df)
-            for name, df in result["model_matrices"].items()
+            name: df_to_split(df) for name, df in result["model_matrices"].items()
         }
     return out

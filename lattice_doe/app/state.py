@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import streamlit as st
 
-
 # Dynamic (per-row) widget keys that must survive page navigation. Unlike the
 # static keys below, these are created at runtime — one set per factor row and
 # per scenario-builder factor — so they can't be listed in `defaults`. They are
@@ -17,8 +16,13 @@ import streamlit as st
 # keys (e.g. "fdel_<id>") are deliberately excluded because Streamlit forbids
 # setting a button's value through st.session_state.
 _PERSIST_DYNAMIC_PREFIXES = (
-    "fname_", "ftype_", "flow_", "fhigh_", "flevels_",   # factor table rows (Page 1)
-    "scen_a_", "scen_b_",                                 # scenario builder (Page 2)
+    "fname_",
+    "ftype_",
+    "flow_",
+    "fhigh_",
+    "flevels_",  # factor table rows (Page 1)
+    "scen_a_",
+    "scen_b_",  # scenario builder (Page 2)
 )
 
 
@@ -49,12 +53,11 @@ def init_state() -> None:
     Idempotent."""
     defaults: dict = {
         # --- Factors & formula ---
-        "factors": [],          # list of dicts: {name, type, low, high} or {name, type, levels}
+        "factors": [],  # list of dicts: {name, type, low, high} or {name, type, levels}
         "formula": "~ 1 + A + B",
-
         # --- Power config ---
-        "power_mode": "contrast",          # "contrast" | "r2"
-        "contrast_input_mode": "matrix",   # "matrix" | "scenario"
+        "power_mode": "contrast",  # "contrast" | "r2"
+        "contrast_input_mode": "matrix",  # "matrix" | "scenario"
         "L_text": "",
         "delta_text": "",
         "scenario_a": {},
@@ -66,7 +69,6 @@ def init_state() -> None:
         "power_target": 0.80,
         "sigma": 1.0,
         "max_n": 500,
-
         # --- Design options ---
         "criterion": "I",
         "starts": 8,
@@ -74,40 +76,34 @@ def init_state() -> None:
         "candidate_points": 2000,
         "random_state": 42,
         "constraint_expr": "",
-
         # --- Blocked design options (Enhancement 20) ---
         # 0 means unblocked; ≥ 2 enables blocking.
         "n_blocks": 0,
         "block_factor_name": "Block",
-
         # --- Categorical pre-allocation options (Enhancement 26) ---
         "preallocate_categorical": False,
         "alloc_min_per_cell": 1,
         # 0 is the sentinel for "no upper limit" (maps to alloc_max_per_cell=None).
         "alloc_max_per_cell": 0,
-
         # --- Split-plot / hard-to-change factor options (Enhancement 22) ---
         "split_plot_enabled": False,
-        "sp_htc_factors": [],      # list of factor names that are hard-to-change
-        "sp_n_whole_plots": 4,     # number of whole plots (≥ 2)
-        "sp_eta": 1.0,             # variance ratio σ²_wp / σ²_sp
-        "sp_subplots_per_wp": 0,   # 0 = auto-compute
-        "sp_df_method": "auto",    # "auto" | "conservative" | "sp_only"
-
+        "sp_htc_factors": [],  # list of factor names that are hard-to-change
+        "sp_n_whole_plots": 4,  # number of whole plots (≥ 2)
+        "sp_eta": 1.0,  # variance ratio σ²_wp / σ²_sp
+        "sp_subplots_per_wp": 0,  # 0 = auto-compute
+        "sp_df_method": "auto",  # "auto" | "conservative" | "sp_only"
         # --- GLM options (GL-8) ---
-        "glm_family": "binomial",    # "binomial" | "poisson"
-        "glm_link": "",              # "" = canonical link
-        "glm_baseline": 0.20,        # event probability (binomial) or rate (Poisson)
-
+        "glm_family": "binomial",  # "binomial" | "poisson"
+        "glm_link": "",  # "" = canonical link
+        "glm_baseline": 0.20,  # event probability (binomial) or rate (Poisson)
         # --- Multi-response options (MR-8 / CR-32) ---
-        "mr_enabled": False,          # enable multi-response mode
-        "mr_combination": "min",      # "min" | "product" | "weighted_mean"
-        "mr_responses": [],           # list of response dicts (see Page 2)
-        "mr_sigma_joint": "",         # optional k×k covariance matrix text (blank = None)
-
+        "mr_enabled": False,  # enable multi-response mode
+        "mr_combination": "min",  # "min" | "product" | "weighted_mean"
+        "mr_responses": [],  # list of response dicts (see Page 2)
+        "mr_sigma_joint": "",  # optional k×k covariance matrix text (blank = None)
         # --- Results (populated after a successful run) ---
-        "result": None,       # full dict from find_optimal_design
-        "run_error": None,    # error string if the last run failed
+        "result": None,  # full dict from find_optimal_design
+        "run_error": None,  # error string if the last run failed
     }
     for key, value in defaults.items():
         if key not in st.session_state:

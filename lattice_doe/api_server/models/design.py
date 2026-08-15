@@ -28,8 +28,7 @@ class DesignRequest(StrictRequestModel):
     factors: Dict[str, FactorSpec] = Field(
         ...,
         description=(
-            "Factor specifications. Continuous: [low, high]. "
-            "Categorical: [\"lvl1\", \"lvl2\", ...]."
+            "Factor specifications. Continuous: [low, high]. " 'Categorical: ["lvl1", "lvl2", ...].'
         ),
         examples=[{"A": [-1.0, 1.0], "B": [-1.0, 1.0]}],
     )
@@ -39,13 +38,17 @@ class DesignRequest(StrictRequestModel):
         description="Design generation options. Uses defaults when omitted.",
     )
 
-    model_config = {"json_schema_extra": {
-        "examples": [{
-            "formula": "~ 1 + A + B",
-            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-            "power_cfg": {"type": "r2", "r2_target": 0.15},
-        }]
-    }}
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "formula": "~ 1 + A + B",
+                    "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+                    "power_cfg": {"type": "r2", "r2_target": 0.15},
+                }
+            ]
+        }
+    }
 
 
 class DiagnosticsModel(BaseModel):
@@ -69,17 +72,17 @@ class ReportModel(BaseModel):
     search_strategy: Optional[str] = None
     warnings: List[str] = []
     # Machine-readable search outcome (UX-7)
-    status: Optional[str] = None            # "complete" | "partial"
+    status: Optional[str] = None  # "complete" | "partial"
     target_met: Optional[bool] = None
     termination_reason: Optional[str] = None  # target_reached | max_n | max_iter | candidate_cap
     diagnostics: Optional[DiagnosticsModel] = None
     # GLM fields (present when power_cfg.type == "glm_contrast")
-    test_type: Optional[str] = None       # "f" | "wald_chi2"
+    test_type: Optional[str] = None  # "f" | "wald_chi2"
     family: Optional[str] = None
     link: Optional[str] = None
     baseline: Optional[float] = None
     glm_weight: Optional[float] = None
-    df2: Optional[int] = None             # None for GLM (Wald χ² has no denominator df)
+    df2: Optional[int] = None  # None for GLM (Wald χ² has no denominator df)
 
     model_config = {"extra": "allow"}  # forward-compatible with new report keys
 
@@ -87,12 +90,8 @@ class ReportModel(BaseModel):
 class DesignResponse(BaseModel):
     """Response body for POST /design."""
 
-    design_df: List[Dict[str, Any]] = Field(
-        ..., description="Design matrix rows as records."
-    )
-    buckets_df: List[Dict[str, Any]] = Field(
-        ..., description="Unique run frequencies."
-    )
+    design_df: List[Dict[str, Any]] = Field(..., description="Design matrix rows as records.")
+    buckets_df: List[Dict[str, Any]] = Field(..., description="Unique run frequencies.")
     model_matrix: Optional[MatrixSplitModel] = Field(
         default=None,
         description=(
@@ -110,6 +109,7 @@ class DesignResponse(BaseModel):
 # Multi-response design endpoint models
 # ---------------------------------------------------------------------------
 
+
 class MultiResponseDesignRequest(StrictRequestModel):
     """Request body for POST /multiresponse_design."""
 
@@ -121,8 +121,7 @@ class MultiResponseDesignRequest(StrictRequestModel):
     factors: Dict[str, FactorSpec] = Field(
         ...,
         description=(
-            "Factor specifications. Continuous: [low, high]. "
-            "Categorical: [\"lvl1\", \"lvl2\", ...]."
+            "Factor specifications. Continuous: [low, high]. " 'Categorical: ["lvl1", "lvl2", ...].'
         ),
         examples=[{"A": [-1.0, 1.0], "B": [-1.0, 1.0]}],
     )
@@ -135,19 +134,23 @@ class MultiResponseDesignRequest(StrictRequestModel):
         description="Design generation options. Uses defaults when omitted.",
     )
 
-    model_config = {"json_schema_extra": {
-        "examples": [{
-            "formula": "~ 1 + A + B",
-            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-            "multi_cfg": {
-                "responses": [
-                    {"name": "Y1", "power_cfg": {"type": "r2", "r2_target": 0.15}},
-                    {"name": "Y2", "power_cfg": {"type": "r2", "r2_target": 0.20}},
-                ],
-                "power_combination": "min",
-            },
-        }]
-    }}
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "formula": "~ 1 + A + B",
+                    "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+                    "multi_cfg": {
+                        "responses": [
+                            {"name": "Y1", "power_cfg": {"type": "r2", "r2_target": 0.15}},
+                            {"name": "Y2", "power_cfg": {"type": "r2", "r2_target": 0.20}},
+                        ],
+                        "power_combination": "min",
+                    },
+                }
+            ]
+        }
+    }
 
 
 class MultiResponseReportModel(BaseModel):
@@ -193,12 +196,8 @@ class MultiResponseDesignResponse(BaseModel):
     multi-response metadata lives in ``report``.
     """
 
-    design_df: List[Dict[str, Any]] = Field(
-        ..., description="Design matrix rows as records."
-    )
-    buckets_df: List[Dict[str, Any]] = Field(
-        ..., description="Unique run-frequency buckets."
-    )
+    design_df: List[Dict[str, Any]] = Field(..., description="Design matrix rows as records.")
+    buckets_df: List[Dict[str, Any]] = Field(..., description="Unique run-frequency buckets.")
     model_matrix: Optional[MatrixSplitModel] = Field(
         default=None,
         description=(

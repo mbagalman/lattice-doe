@@ -15,12 +15,12 @@ Key design decisions
 * ``workers`` is accepted but silently forced to ``None`` inside the ASGI
   server; use Uvicorn's ``--workers`` flag for process-level parallelism.
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Any, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field, field_validator
-
 
 # ---------------------------------------------------------------------------
 # Factor specification
@@ -67,6 +67,7 @@ FactorSpec = Union[
 # ---------------------------------------------------------------------------
 # Power configuration models
 # ---------------------------------------------------------------------------
+
 
 class StrictRequestModel(BaseModel):
     """Base for all REST request models (UX-4).
@@ -180,6 +181,7 @@ PowerCfgModel = Annotated[
 # Split-plot options model
 # ---------------------------------------------------------------------------
 
+
 class SplitPlotOptionsModel(StrictRequestModel):
     """Options for split-plot (hard-to-change factor) designs.
 
@@ -227,6 +229,7 @@ class SplitPlotOptionsModel(StrictRequestModel):
 # Design options model
 # ---------------------------------------------------------------------------
 
+
 class DesignOptionsModel(StrictRequestModel):
     """Options controlling design generation.
 
@@ -271,6 +274,7 @@ class DesignOptionsModel(StrictRequestModel):
                 "flag for horizontal scaling."
             )
         return v
+
     max_iter: int = Field(1000, gt=0)
     xtx_jitter: float = Field(1e-8, gt=0.0)
     # Blocked design
@@ -314,6 +318,7 @@ class DesignOptionsModel(StrictRequestModel):
 # ---------------------------------------------------------------------------
 # Multi-response models
 # ---------------------------------------------------------------------------
+
 
 class ResponseSpecModel(StrictRequestModel):
     """One response variable's power requirements for a multi-response design."""
@@ -377,6 +382,4 @@ class MatrixSplitModel(BaseModel):
     columns: List[str] = Field(
         ..., description="Parameter names, in the order the rows are laid out."
     )
-    data: List[List[float]] = Field(
-        ..., description="Matrix rows, each aligned to `columns`."
-    )
+    data: List[List[float]] = Field(..., description="Matrix rows, each aligned to `columns`.")

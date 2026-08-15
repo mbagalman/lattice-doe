@@ -15,6 +15,7 @@ I-, D-, and A-optimal designs are selected:
 These functions are called by ``iopt_search.py`` during every design build
 and are independent of the exchange algorithm and criterion scoring.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -154,7 +155,7 @@ def estimate_candidate_size(
             warnings.warn(
                 f"Estimated candidate size ({raw_points}) for continuous factors "
                 f"exceeded cand_max ({cand_max}). Clipping to {final_points} points.",
-                UserWarning
+                UserWarning,
             )
         return final_points
 
@@ -180,13 +181,13 @@ def estimate_candidate_size(
             warnings.warn(
                 f"Estimated candidate size ({candidate_points_raw}) for categorical factors "
                 f"exceeded cand_max ({cand_max}). Clipping to {candidate_points} points.",
-                UserWarning
+                UserWarning,
             )
         elif candidate_points == cand_min and candidate_points_raw < cand_min:
             warnings.warn(
                 f"Estimated candidate size ({candidate_points_raw}) for categorical factors "
                 f"was below cand_min ({cand_min}). Setting to {candidate_points} points.",
-                UserWarning
+                UserWarning,
             )
         return candidate_points
 
@@ -216,7 +217,7 @@ def estimate_candidate_size(
         warnings.warn(
             f"Estimated candidate size ({candidate_points_raw}) for mixed factors "
             f"exceeded cand_max ({cand_max}). Clipping to {candidate_points} points.",
-            UserWarning
+            UserWarning,
         )
     return candidate_points
 
@@ -321,6 +322,7 @@ def build_candidate(
             # Too many combinations - sample a subset
             # Use random sampling with replacement to get cat_cells_cap combinations
             import random
+
             rng = random.Random(seed)
 
             sampled_combinations = []
@@ -345,13 +347,10 @@ def build_candidate(
                 for lv in levels:
                     if lv not in present:
                         repair = {
-                            fn: lvs[0]
-                            for fn, lvs in zip(cat_factor_names, cat_factor_levels)
+                            fn: lvs[0] for fn, lvs in zip(cat_factor_names, cat_factor_levels)
                         }
                         repair[fname] = lv
-                        cat_df = pd.concat(
-                            [cat_df, pd.DataFrame([repair])], ignore_index=True
-                        )
+                        cat_df = pd.concat([cat_df, pd.DataFrame([repair])], ignore_index=True)
             cat_df = cat_df.drop_duplicates().reset_index(drop=True)
 
     # Combine continuous and categorical spaces
@@ -585,9 +584,7 @@ def build_split_plot_candidate(
         raise ValueError("htc_factors must be a non-empty list.")
     missing = set(htc_factors) - set(factors.keys())
     if missing:
-        raise ValueError(
-            f"htc_factors contains names not found in factors: {sorted(missing)}."
-        )
+        raise ValueError(f"htc_factors contains names not found in factors: {sorted(missing)}.")
 
     # --- Split factor specs into HTC and ETC ---
     htc_set = set(htc_factors)

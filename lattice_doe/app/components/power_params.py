@@ -21,7 +21,7 @@ UI_CODING_REMEDY = (
     "The Scenario builder cannot construct L for this formula. Reduce the "
     "number of levels in the combined term, or switch **Contrast input** to "
     "**Matrix (L, \u03b4)** and enter them directly. See the user guide "
-    "\u00a73.3, \"Formulas whose coding is learned from the data\"."
+    '\u00a73.3, "Formulas whose coding is learned from the data".'
 )
 
 #: Remedy for the preview only: the exact coding comes from the candidate set

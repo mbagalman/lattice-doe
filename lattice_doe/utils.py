@@ -6,6 +6,7 @@ General utilities for Lattice DOE
 
 Small, dependency-light helpers used across modules (validation, sizing, etc.).
 """
+
 from __future__ import annotations
 
 import re
@@ -127,9 +128,7 @@ def normalize_factors(
             kind = spec.get("type")
             if kind == "continuous":
                 if "low" not in spec or "high" not in spec:
-                    raise ValueError(
-                        f"Continuous factor '{name}' needs 'low' and 'high' keys."
-                    )
+                    raise ValueError(f"Continuous factor '{name}' needs 'low' and 'high' keys.")
                 out[name] = _ContinuousSpec((spec["low"], spec["high"]))
             elif kind == "categorical":
                 levels = spec.get("levels")
@@ -203,35 +202,29 @@ def validate_factors(factors: FactorSpec) -> None:
                 lo_f = float(lo)
                 hi_f = float(hi)
             except Exception as e:
-                raise ValueError(
-                    f"Continuous factor '{name}' bounds must be numeric: {e}"
-                )
-            
+                raise ValueError(f"Continuous factor '{name}' bounds must be numeric: {e}")
+
             if not (np.isfinite(lo_f) and np.isfinite(hi_f)):
                 raise ValueError(
                     f"Continuous factor '{name}' bounds must be finite numbers; "
                     f"got ({lo}, {hi})"
                 )
-                
+
             if not (lo_f < hi_f):
                 raise ValueError(
                     f"Continuous factor '{name}' needs (low, high) with low < high; "
                     f"got ({lo}, {hi})"
                 )
-        
+
         # Categorical: sequence of levels
         elif isinstance(spec, (list, tuple)):
             levels = list(spec)
             if len(levels) == 0:
-                raise ValueError(
-                    f"Categorical factor '{name}' must have at least one level."
-                )
-                
+                raise ValueError(f"Categorical factor '{name}' must have at least one level.")
+
             if len(levels) != len(set(levels)):
-                raise ValueError(
-                    f"Categorical factor '{name}' contains duplicate levels."
-                )
-        
+                raise ValueError(f"Categorical factor '{name}' contains duplicate levels.")
+
         # Invalid spec type
         else:
             raise ValueError(
@@ -305,8 +298,7 @@ def _representative_frame(
     if cross_size <= max_cross_rows:
         # Full Cartesian cross — exact for any Patsy expression.
         combos = list(itertools.product(*cat.values())) if cat else [()]
-        frame = {name: [c[i] for c in combos]
-                 for i, name in enumerate(cat.keys())}
+        frame = {name: [c[i] for c in combos] for i, name in enumerate(cat.keys())}
         n_rows = len(combos)
         exact = True
     else:
@@ -408,7 +400,6 @@ def model_matrix_preview(
     return X.shape[1], list(col_names)
 
 
-
 def safe_name_slug(
     name: str,
     existing: "Optional[set]" = None,
@@ -445,8 +436,7 @@ def safe_name_slug(
     bounds the slug alone; the returned value never includes *prefix*.
     """
     cleaned = "".join(
-        "_" if (c in '\\/:*?"<>|[]\'' or ord(c) < 32) else c
-        for c in str(name)
+        "_" if (c in "\\/:*?\"<>|[]'" or ord(c) < 32) else c for c in str(name)
     ).strip(". ")
     cleaned = cleaned[:maxlen].strip(". ") or "response"
     if existing is None:
@@ -464,6 +454,7 @@ def safe_name_slug(
         k += 1
     existing.add(prefix + slug)
     return slug
+
 
 __all__ = [
     "validate_factors",

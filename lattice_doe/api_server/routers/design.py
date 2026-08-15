@@ -1,6 +1,7 @@
 # api_server/routers/design.py
 # License: MIT
 """POST /design and POST /multiresponse_design endpoints."""
+
 from __future__ import annotations
 
 import anyio
@@ -90,7 +91,5 @@ def _sync_run_multiresponse_design(request: MultiResponseDesignRequest) -> dict:
 async def run_multiresponse_design(
     request: MultiResponseDesignRequest,
 ) -> MultiResponseDesignResponse:
-    result_dict = await anyio.to_thread.run_sync(
-        partial(_sync_run_multiresponse_design, request)
-    )
+    result_dict = await anyio.to_thread.run_sync(partial(_sync_run_multiresponse_design, request))
     return MultiResponseDesignResponse(**result_dict)

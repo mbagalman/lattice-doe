@@ -18,7 +18,6 @@ import uuid
 
 import streamlit as st
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -46,9 +45,7 @@ def _add_factor(ftype: str) -> None:
 
 def _delete_factor(fid: str) -> None:
     """Remove a factor and clean up all its widget keys."""
-    st.session_state["factor_ids"] = [
-        x for x in st.session_state["factor_ids"] if x != fid
-    ]
+    st.session_state["factor_ids"] = [x for x in st.session_state["factor_ids"] if x != fid]
     for prefix in ("fname", "ftype", "flow", "fhigh", "flevels", "fdel"):
         st.session_state.pop(f"{prefix}_{fid}", None)
 

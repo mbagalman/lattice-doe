@@ -17,6 +17,7 @@ The ``create_app`` factory pattern lets Uvicorn's ``--factory`` flag create a
 fresh app instance per worker process, which is the correct pattern for
 multi-worker deployments.
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
         import numpy  # noqa: F401
         import scipy  # noqa: F401
         import patsy  # noqa: F401
+
         logger.info("lattice-api v%s started.", __version__)
         yield
         logger.info("lattice-api shutting down.")

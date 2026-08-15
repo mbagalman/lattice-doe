@@ -9,6 +9,7 @@ Power-assured optimal experimental designs for linear and GLM models.
 from __future__ import annotations
 
 from importlib.metadata import version, PackageNotFoundError
+
 try:
     __version__ = version("lattice-doe")
 except PackageNotFoundError:
@@ -17,10 +18,14 @@ except PackageNotFoundError:
 # Re-export primary API and configuration types
 from .api import find_optimal_design, find_multiresponse_design  # noqa: F401
 from .config import (  # noqa: F401
-    PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
+    PowerContrastConfig,
+    PowerR2Config,
+    PowerGLMContrastConfig,
     glm_fisher_weight,
-    DesignOptions, SplitPlotOptions,
-    ResponseSpec, MultiResponseOptions,
+    DesignOptions,
+    SplitPlotOptions,
+    ResponseSpec,
+    MultiResponseOptions,
 )
 
 # Factor-specification typing (UX-28): the discriminated dict forms and the
@@ -49,7 +54,14 @@ from .analysis import (  # noqa: F401
     power_curve_by_n_multiresponse,
     multiresponse_sensitivity,
 )
-from .power import contrast_power_sp, global_r2_power_sp, eval_response_power, combine_powers, hotelling_t2_power, glm_contrast_power  # noqa: F401
+from .power import (
+    contrast_power_sp,
+    global_r2_power_sp,
+    eval_response_power,
+    combine_powers,
+    hotelling_t2_power,
+    glm_contrast_power,
+)  # noqa: F401
 from .allocation import i_optimal_allocation  # noqa: F401
 from .progress import Phase, ProgressEvent, ProgressReporter, SearchCancelled  # noqa: F401
 from .candidate import build_candidate, build_split_plot_candidate  # noqa: F401

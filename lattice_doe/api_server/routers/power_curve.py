@@ -1,6 +1,7 @@
 # api_server/routers/power_curve.py
 # License: MIT
 """POST /power_curve/by_n and POST /power_curve/by_effect."""
+
 from __future__ import annotations
 
 import anyio

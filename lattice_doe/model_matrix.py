@@ -8,6 +8,7 @@ Thin wrapper around Patsy's ``dmatrix`` that returns a plain numpy array
 alongside the column (parameter) names.  Called by ``iopt_search.py`` and
 any other module that needs to evaluate a Patsy formula over a DataFrame.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional, Tuple

@@ -1,6 +1,7 @@
 # lattice_doe/app/_launcher.py
 # License: MIT
 """Console entry point for the packaged Streamlit UI (``lattice-app``)."""
+
 from __future__ import annotations
 
 import sys

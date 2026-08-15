@@ -13,4 +13,5 @@ Quick start::
 
 Docs available at http://localhost:8000/docs (Swagger) and /redoc.
 """
+
 __version__ = "0.1.0"

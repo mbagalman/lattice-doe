@@ -18,6 +18,7 @@ Power curves help researchers understand:
 
 The module supports both interactive (matplotlib) and data-only outputs.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Union, Literal, Tuple
@@ -40,6 +41,7 @@ from .diag_metrics import compute_design_metrics
 try:
     import matplotlib.pyplot as plt
     from matplotlib.figure import Figure
+
     _HAS_MATPLOTLIB = True
 except ImportError:
     _HAS_MATPLOTLIB = False
@@ -62,10 +64,10 @@ def power_curve_by_n(
     plot_backend: Literal["matplotlib", "plotly"] = "matplotlib",
 ) -> Dict[str, Union[pd.DataFrame, Optional["Figure"]]]:
     """Generate power curve as a function of sample size n.
-    
+
     For each n value, builds an I-optimal design and computes actual
     power based on the realized design matrix.
-    
+
     Parameters
     ----------
     formula : str
@@ -85,7 +87,7 @@ def power_curve_by_n(
         If True and matplotlib available, return a figure object.
     figsize : tuple, default (8, 5)
         Figure size if plotting.
-    
+
     Returns
     -------
     dict
@@ -94,14 +96,13 @@ def power_curve_by_n(
           'figure': matplotlib Figure if plot=True and available, else None,
           'target_n': int, approximate n to achieve target power
         }
-    
+
     Notes
     -----
     This function is computationally intensive as it generates a full
     I-optimal design for each n value. Consider using fewer n_points
     for initial exploration.
     """
-    # --- Reviewer Feedback: Validation ---
     if n_points <= 0:
         raise ValueError("n_points must be > 0")
 
@@ -117,7 +118,7 @@ def power_curve_by_n(
     cand, candidate_points = build_search_candidate(formula, factors, design_opts)
     X_cand, _ = build_model_matrix(formula, cand)
     p = X_cand.shape[1]
-    
+
     # Determine n range if not provided
     if n_range is None:
         # Heuristic: start from p+1, go up to where we expect >0.99 power
@@ -128,11 +129,11 @@ def power_curve_by_n(
             w = glm_fisher_weight(power_cfg)
             sigma_eff = 1.0 / max(np.sqrt(w), 1e-12)
             effect_magnitude = np.linalg.norm(power_cfg.delta) / sigma_eff
-            max_n = min(int(100 / max(effect_magnitude ** 2, 1e-12)), 500)
+            max_n = min(int(100 / max(effect_magnitude**2, 1e-12)), 500)
         elif isinstance(power_cfg, PowerContrastConfig):
             # Conservative estimate based on effect size
             effect_magnitude = np.linalg.norm(power_cfg.delta) / power_cfg.sigma
-            max_n = min(int(100 / (effect_magnitude ** 2)), 500)
+            max_n = min(int(100 / (effect_magnitude**2)), 500)
         else:
             # R² mode
             f2 = power_cfg.r2_target / (1 - power_cfg.r2_target)
@@ -141,7 +142,7 @@ def power_curve_by_n(
     else:
         min_n, max_n = n_range
         min_n = max(min_n, p + 1)
-    
+
     # Generate n values (use geometric spacing for better resolution at small n)
     n_values = np.unique(np.geomspace(min_n, max_n, n_points).astype(int))
 
@@ -158,7 +159,7 @@ def power_curve_by_n(
 
     results = []
     target_n = None
-    
+
     for n in n_values:
         # Build I-optimal design at this n
         design_df, _sel_idx, _ = build_i_opt_design_with_idx(
@@ -189,7 +190,7 @@ def power_curve_by_n(
         # for data-dependent codings a re-code learns different parameters
         # from the n selected rows than L was built against (UX-57).
         X = X_cand[_sel_idx, :]
-        
+
         # Compute power
         if isinstance(power_cfg, PowerGLMContrastConfig):
             _res = glm_contrast_power(power_cfg, X, jitter=design_opts.xtx_jitter)
@@ -210,45 +211,51 @@ def power_curve_by_n(
                 alpha=power_cfg.alpha,
                 lambda_mode=power_cfg.lambda_mode,
             )
-        
+
         # Compute design metrics for additional insight
         metrics = compute_design_metrics(X, X_cand=X_cand)
-        
-        results.append({
-            'n': int(n),
-            'power': float(power),
-            'lambda': float(lam),
-            'd_efficiency': float(metrics['d_efficiency']),
-            'i_criterion': float(metrics['i_criterion']),
-            'condition_number': float(metrics['condition_number']),
-        })
-        
+
+        results.append(
+            {
+                "n": int(n),
+                "power": float(power),
+                "lambda": float(lam),
+                "d_efficiency": float(metrics["d_efficiency"]),
+                "i_criterion": float(metrics["i_criterion"]),
+                "condition_number": float(metrics["condition_number"]),
+            }
+        )
+
         # Track first n achieving target power
         if target_n is None and power >= power_cfg.power:
             target_n = int(n)
-    
+
     # Create DataFrame
     df = pd.DataFrame(results)
-    
+
     # Optional plotting
     fig = None
     if plot:
         if plot_backend == "plotly":
             from .plot_backends import plotly_curve_by_n as _plotly_curve_by_n
+
             fig = _plotly_curve_by_n(df, power_cfg, target_n)
         elif _HAS_MATPLOTLIB:
             fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
 
             # Power curve
             ax1 = axes[0]
-            ax1.plot(df['n'], df['power'], 'b-', linewidth=2, label='Power')
-            ax1.axhline(y=power_cfg.power, color='r', linestyle='--',
-                        label=f'Target ({power_cfg.power:.2f})')
-            ax1.axhline(y=0.80, color='gray', linestyle=':', alpha=0.5)
+            ax1.plot(df["n"], df["power"], "b-", linewidth=2, label="Power")
+            ax1.axhline(
+                y=power_cfg.power,
+                color="r",
+                linestyle="--",
+                label=f"Target ({power_cfg.power:.2f})",
+            )
+            ax1.axhline(y=0.80, color="gray", linestyle=":", alpha=0.5)
             if target_n:
-                ax1.axvline(x=target_n, color='g', linestyle='--', alpha=0.5,
-                            label=f'n={target_n}')
-            ax1.set_ylabel('Statistical Power')
+                ax1.axvline(x=target_n, color="g", linestyle="--", alpha=0.5, label=f"n={target_n}")
+            ax1.set_ylabel("Statistical Power")
             ax1.set_ylim([0, 1.05])
             ax1.grid(True, alpha=0.3)
             ax1.legend()
@@ -257,24 +264,23 @@ def power_curve_by_n(
             ax2 = axes[1]
             ax2_twin = ax2.twinx()
 
-            line1 = ax2.plot(df['n'], df['i_criterion'], 'g-',
-                             label='I-criterion (left)')
-            line2 = ax2_twin.plot(df['n'], df['d_efficiency'], 'orange',
-                                  label='D-efficiency (right)')
+            line1 = ax2.plot(df["n"], df["i_criterion"], "g-", label="I-criterion (left)")
+            line2 = ax2_twin.plot(
+                df["n"], df["d_efficiency"], "orange", label="D-efficiency (right)"
+            )
 
-            ax2.set_xlabel('Sample Size (n)')
-            ax2.set_ylabel('I-criterion (lower is better)', color='g')
-            ax2_twin.set_ylabel('D-efficiency (higher is better)', color='orange')
-            ax2.tick_params(axis='y', labelcolor='g')
-            ax2_twin.tick_params(axis='y', labelcolor='orange')
+            ax2.set_xlabel("Sample Size (n)")
+            ax2.set_ylabel("I-criterion (lower is better)", color="g")
+            ax2_twin.set_ylabel("D-efficiency (higher is better)", color="orange")
+            ax2.tick_params(axis="y", labelcolor="g")
+            ax2_twin.tick_params(axis="y", labelcolor="orange")
             ax2.grid(True, alpha=0.3)
 
             # Combined legend
             lines = line1 + line2
-            labels = [l.get_label() for l in lines]
-            ax2.legend(lines, labels, loc='best')
+            labels = [ln.get_label() for ln in lines]
+            ax2.legend(lines, labels, loc="best")
 
-            # --- Reviewer Feedback: Titles ---
             if isinstance(power_cfg, PowerContrastConfig):
                 effect_desc = f"Effect Norm={np.linalg.norm(power_cfg.delta):.2f}, $\\sigma$={power_cfg.sigma}"
                 title = f"Power vs. Sample Size (n) for Contrast Test\n({effect_desc}, $\\alpha$={power_cfg.alpha})"
@@ -284,11 +290,11 @@ def power_curve_by_n(
 
             plt.suptitle(title)
             plt.tight_layout()
-    
+
     return {
-        'data': df,
-        'figure': fig,
-        'target_n': target_n,
+        "data": df,
+        "figure": fig,
+        "target_n": target_n,
     }
 
 
@@ -305,10 +311,10 @@ def power_curve_by_effect(
     plot_backend: Literal["matplotlib", "plotly"] = "matplotlib",
 ) -> Dict[str, Union[pd.DataFrame, Optional["Figure"]]]:
     """Generate power curve as a function of effect size.
-    
+
     Fixes n and varies the effect size (delta for contrasts, R² for global).
     Uses a single I-optimal design computed at the specified n.
-    
+
     Parameters
     ----------
     formula : str
@@ -331,7 +337,7 @@ def power_curve_by_effect(
         If True and matplotlib available, return a figure object.
     figsize : tuple, default (8, 5)
         Figure size if plotting.
-    
+
     Returns
     -------
     dict
@@ -345,7 +351,6 @@ def power_curve_by_effect(
               swept effect already meets the target
         }
     """
-    # --- Reviewer Feedback: Validation ---
     if effect_points <= 0:
         raise ValueError("effect_points must be > 0")
 
@@ -387,10 +392,10 @@ def power_curve_by_effect(
     # matrix rather than recoded from design_df, so data-dependent codings
     # keep the basis L was built against (UX-57).
     X = X_cand[_sel_idx, :]
-    
+
     results = []
     min_detectable = None
-    
+
     if isinstance(power_cfg, PowerGLMContrastConfig):
         # GLM: sweep delta scale multiplier on LP scale (log-odds / log-rate)
         if effect_range is None:
@@ -405,12 +410,14 @@ def power_curve_by_effect(
             object.__setattr__(_tmp, "delta", scaled_delta)
             _res = glm_contrast_power(_tmp, X, jitter=design_opts.xtx_jitter)
 
-            results.append({
-                "effect_size": float(mult),
-                "power": float(_res.power),
-                "lambda": float(_res.lam),
-                "actual_delta_norm": float(np.linalg.norm(scaled_delta)),
-            })
+            results.append(
+                {
+                    "effect_size": float(mult),
+                    "power": float(_res.power),
+                    "lambda": float(_res.lam),
+                    "actual_delta_norm": float(np.linalg.norm(scaled_delta)),
+                }
+            )
 
             if min_detectable is None and _res.power >= float(power_cfg.power):
                 min_detectable = float(mult)
@@ -433,12 +440,14 @@ def power_curve_by_effect(
                 alpha=power_cfg.alpha,
             )
 
-            results.append({
-                'effect_size': float(mult),
-                'power': float(power),
-                'lambda': float(lam),
-                'actual_delta_norm': float(np.linalg.norm(scaled_delta)),
-            })
+            results.append(
+                {
+                    "effect_size": float(mult),
+                    "power": float(power),
+                    "lambda": float(lam),
+                    "actual_delta_norm": float(np.linalg.norm(scaled_delta)),
+                }
+            )
 
             if min_detectable is None and power >= float(power_cfg.power):
                 min_detectable = float(mult)
@@ -446,9 +455,9 @@ def power_curve_by_effect(
     else:  # R² mode
         if effect_range is None:
             effect_range = (0.01, 0.5)
-        
+
         r2_values = np.linspace(effect_range[0], effect_range[1], effect_points)
-        
+
         for r2 in r2_values:
             power, lam = global_r2_power(
                 r2,
@@ -456,56 +465,68 @@ def power_curve_by_effect(
                 alpha=power_cfg.alpha,
                 lambda_mode=power_cfg.lambda_mode,
             )
-            
-            results.append({
-                'effect_size': float(r2),
-                'power': float(power),
-                'lambda': float(lam),
-            })
-            
+
+            results.append(
+                {
+                    "effect_size": float(r2),
+                    "power": float(power),
+                    "lambda": float(lam),
+                }
+            )
+
             if min_detectable is None and power >= float(power_cfg.power):
                 min_detectable = float(r2)
-    
+
     df = pd.DataFrame(results)
-    
+
     # Optional plotting
     fig = None
     if plot:
         if plot_backend == "plotly":
             from .plot_backends import plotly_curve_by_effect as _plotly_curve_by_effect
+
             fig = _plotly_curve_by_effect(df, power_cfg, min_detectable, n)
         elif _HAS_MATPLOTLIB:
             fig, ax = plt.subplots(figsize=figsize)
 
-            ax.plot(df['effect_size'], df['power'], 'b-', linewidth=2)
-            ax.axhline(y=0.80, color='r', linestyle='--', label='80% Power')
-            ax.axhline(y=power_cfg.power, color='g', linestyle='--',
-                      label=f'Target ({power_cfg.power:.2f})')
+            ax.plot(df["effect_size"], df["power"], "b-", linewidth=2)
+            ax.axhline(y=0.80, color="r", linestyle="--", label="80% Power")
+            ax.axhline(
+                y=power_cfg.power,
+                color="g",
+                linestyle="--",
+                label=f"Target ({power_cfg.power:.2f})",
+            )
 
             if min_detectable:
-                ax.axvline(x=min_detectable, color='orange', linestyle=':',
-                          label=f'MDE={min_detectable:.3f}')
+                ax.axvline(
+                    x=min_detectable,
+                    color="orange",
+                    linestyle=":",
+                    label=f"MDE={min_detectable:.3f}",
+                )
 
-            # --- Reviewer Feedback: Titles & Labels ---
             if isinstance(power_cfg, PowerContrastConfig):
-                ax.set_xlabel('Effect Size Multiplier (on base norm)')
-                title = f'Power vs. Effect Size at n={n}\n(Contrast Test, $\\sigma$={power_cfg.sigma}, $\\alpha$={power_cfg.alpha})'
+                ax.set_xlabel("Effect Size Multiplier (on base norm)")
+                title = f"Power vs. Effect Size at n={n}\n(Contrast Test, $\\sigma$={power_cfg.sigma}, $\\alpha$={power_cfg.alpha})"
                 ax.set_title(title)
             else:
-                ax.set_xlabel('R² Effect Size')
-                title = f'Power vs. Effect Size at n={n}\n(Global F-Test, $\\alpha$={power_cfg.alpha})'
+                ax.set_xlabel("R² Effect Size")
+                title = (
+                    f"Power vs. Effect Size at n={n}\n(Global F-Test, $\\alpha$={power_cfg.alpha})"
+                )
                 ax.set_title(title)
 
-            ax.set_ylabel('Statistical Power')
+            ax.set_ylabel("Statistical Power")
             ax.set_ylim([0, 1.05])
             ax.grid(True, alpha=0.3)
             ax.legend()
             plt.tight_layout()
-    
+
     return {
-        'data': df,
-        'figure': fig,
-        'min_detectable_effect': min_detectable,
+        "data": df,
+        "figure": fig,
+        "min_detectable_effect": min_detectable,
     }
 
 
@@ -513,9 +534,9 @@ def power_surface_2d(
     formula: str,
     factors: FactorSpec,
     power_cfg: Union[PowerContrastConfig, PowerR2Config],
-    param1: Literal['n', 'effect', 'sigma', 'alpha'],
+    param1: Literal["n", "effect", "sigma", "alpha"],
     param1_range: Tuple[float, float],
-    param2: Literal['n', 'effect', 'sigma', 'alpha'],
+    param2: Literal["n", "effect", "sigma", "alpha"],
     param2_range: Tuple[float, float],
     grid_points: int = 20,
     design_opts: Optional[DesignOptions] = None,
@@ -645,9 +666,7 @@ def power_surface_2d(
                     f"'n' axis range is empty after bounds: needs "
                     f"p + 1 = {p + 1} <= n <= n_cand = {n_cand}."
                 )
-            return np.unique(
-                np.geomspace(lo_eff, hi_eff, grid_points).astype(int)
-            )
+            return np.unique(np.geomspace(lo_eff, hi_eff, grid_points).astype(int))
         return np.linspace(lo, hi, grid_points)
 
     axis1 = _make_axis(param1, param1_range)
@@ -706,11 +725,7 @@ def power_surface_2d(
         if fixed_n <= p or (fixed_n > n_cand and not _prealloc_repl):
             raise ValueError(
                 f"n={fixed_n} is not evaluable: needs p = {p} < n"
-                + (
-                    ""
-                    if _prealloc_repl
-                    else f" <= candidate set size = {n_cand}"
-                )
+                + ("" if _prealloc_repl else f" <= candidate set size = {n_cand}")
                 + "."
             )
     elif n is not None:
@@ -721,10 +736,10 @@ def power_surface_2d(
 
     def _compute_power(v1: float, v2: float) -> Tuple[float, float]:
         """Return (power, lam) for a grid cell (v1, v2)."""
-        n_val   = int(v1) if param1 == "n" else (int(v2) if param2 == "n" else fixed_n)
-        alpha   = v1 if param1 == "alpha"  else (v2 if param2 == "alpha"  else base_alpha)
-        sigma   = v1 if param1 == "sigma"  else (v2 if param2 == "sigma"  else base_sigma)
-        effect  = v1 if param1 == "effect" else (v2 if param2 == "effect" else base_effect)
+        n_val = int(v1) if param1 == "n" else (int(v2) if param2 == "n" else fixed_n)
+        alpha = v1 if param1 == "alpha" else (v2 if param2 == "alpha" else base_alpha)
+        sigma = v1 if param1 == "sigma" else (v2 if param2 == "sigma" else base_sigma)
+        effect = v1 if param1 == "effect" else (v2 if param2 == "effect" else base_effect)
 
         X = _get_X(n_val)
 
@@ -732,15 +747,20 @@ def power_surface_2d(
             # effect is a scale multiplier on the base delta vector
             delta_scaled = power_cfg.delta * float(effect)
             pwr, lam = contrast_power(
-                L=power_cfg.L, delta=delta_scaled, X=X,
-                sigma=float(sigma), alpha=float(alpha),
+                L=power_cfg.L,
+                delta=delta_scaled,
+                X=X,
+                sigma=float(sigma),
+                alpha=float(alpha),
                 jitter=design_opts.xtx_jitter,
             )
         else:
             # effect IS the r2_target
             pwr, lam = global_r2_power(
-                r2_target=float(effect), X=X,
-                alpha=float(alpha), lambda_mode=power_cfg.lambda_mode,
+                r2_target=float(effect),
+                X=X,
+                alpha=float(alpha),
+                lambda_mode=power_cfg.lambda_mode,
             )
         return float(pwr), float(lam)
 
@@ -761,6 +781,7 @@ def power_surface_2d(
     if plot:
         if plot_backend == "plotly":
             from .plot_backends import plotly_surface_2d as _plotly_surface_2d
+
             fig = _plotly_surface_2d(power_grid, axis1, axis2, power_cfg, param1, param2)
         elif _HAS_MATPLOTLIB:
             fig, ax = plt.subplots(figsize=figsize)
@@ -770,8 +791,15 @@ def power_surface_2d(
             plt.colorbar(cs, ax=ax, label="Power")
             # Mark the target-power contour in white
             try:
-                ax.contour(G2, G1, power_grid, levels=[power_cfg.power],
-                           colors="white", linewidths=2, linestyles="--")
+                ax.contour(
+                    G2,
+                    G1,
+                    power_grid,
+                    levels=[power_cfg.power],
+                    colors="white",
+                    linewidths=2,
+                    linestyles="--",
+                )
             except Exception:
                 pass
             param1_label = "n" if param1 == "n" else param1
@@ -796,7 +824,7 @@ def power_surface_2d(
 
 
 __all__ = [
-    'power_curve_by_n',
-    'power_curve_by_effect', 
-    'power_surface_2d',
+    "power_curve_by_n",
+    "power_curve_by_effect",
+    "power_surface_2d",
 ]

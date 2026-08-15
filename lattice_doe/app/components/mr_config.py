@@ -50,31 +50,48 @@ def build_multi_response_cfg(ss: Any) -> "Any":
         if _r_mode == "glm":
             L = parse_matrix(r.get("L_text", ""))
             delta = parse_vector(r.get("delta_text", ""))
-            pcfg = build_power_cfg(dict(
-                power_mode="glm", L=L, delta=delta,
-                baseline=float(r.get("glm_baseline", 0.20)),
-                family=r.get("glm_family", "binomial"),
-                link=r.get("glm_link", "").strip() or None,
-                alpha=r_alpha, power=r_power,
-            ))
+            pcfg = build_power_cfg(
+                dict(
+                    power_mode="glm",
+                    L=L,
+                    delta=delta,
+                    baseline=float(r.get("glm_baseline", 0.20)),
+                    family=r.get("glm_family", "binomial"),
+                    link=r.get("glm_link", "").strip() or None,
+                    alpha=r_alpha,
+                    power=r_power,
+                )
+            )
         elif _r_mode == "contrast":
             L = parse_matrix(r.get("L_text", ""))
             delta = parse_vector(r.get("delta_text", ""))
-            pcfg = build_power_cfg(dict(
-                power_mode="contrast", L=L, delta=delta,
-                alpha=r_alpha, power=r_power, sigma=r_sigma,
-            ))
+            pcfg = build_power_cfg(
+                dict(
+                    power_mode="contrast",
+                    L=L,
+                    delta=delta,
+                    alpha=r_alpha,
+                    power=r_power,
+                    sigma=r_sigma,
+                )
+            )
         else:
-            pcfg = build_power_cfg(dict(
-                power_mode="r2", r2_target=float(r.get("r2_target", 0.15)),
-                alpha=r_alpha, power=r_power,
-            ))
-        specs.append(ResponseSpec(
-            name=str(r.get("name", f"R{len(specs) + 1}")),
-            power_cfg=pcfg,
-            weight=r_weight,
-            formula=r_formula,
-        ))
+            pcfg = build_power_cfg(
+                dict(
+                    power_mode="r2",
+                    r2_target=float(r.get("r2_target", 0.15)),
+                    alpha=r_alpha,
+                    power=r_power,
+                )
+            )
+        specs.append(
+            ResponseSpec(
+                name=str(r.get("name", f"R{len(specs) + 1}")),
+                power_cfg=pcfg,
+                weight=r_weight,
+                formula=r_formula,
+            )
+        )
     # Parse optional sigma_joint matrix
     sigma_joint = None
     _sj_text = ss.get("mr_sigma_joint", "").strip()
@@ -84,9 +101,7 @@ def build_multi_response_cfg(ss: Any) -> "Any":
             for _line in _sj_text.splitlines():
                 _line = _line.strip()
                 if _line:
-                    _sj_rows.append(
-                        [float(x) for x in _line.replace(",", " ").split()]
-                    )
+                    _sj_rows.append([float(x) for x in _line.replace(",", " ").split()])
             sigma_joint = np.array(_sj_rows)
         except (ValueError, Exception):
             sigma_joint = None

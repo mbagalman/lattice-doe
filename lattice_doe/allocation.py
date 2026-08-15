@@ -50,6 +50,7 @@ by a cell-local search. It closely approximates, but does not exactly
 optimise, the joint I-criterion of the full design (measured ≈0.6% gap in
 the audit).
 """
+
 from __future__ import annotations
 
 import itertools
@@ -62,10 +63,10 @@ from .config import DesignOptions
 from .model_matrix import build_model_matrix
 from .utils import FactorSpec, normalize_factors
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _is_continuous(spec: Any) -> bool:
     """Return True if *spec* is a continuous factor (markers win, UX-5)."""
@@ -122,7 +123,7 @@ def _wynn_multiplicative_I(
         M_inv_A_M_inv = M_inv @ A @ M_inv  # (p, p)
 
         # Sensitivity function φ_i = x_i' (M^{-1} A M^{-1}) x_i
-        temp = X_cells @ M_inv_A_M_inv   # (k, p)
+        temp = X_cells @ M_inv_A_M_inv  # (k, p)
         phi = np.sum(temp * X_cells, axis=1)  # (k,)  element-wise then sum
 
         # Current criterion value φ_bar = trace(M^{-1} A)
@@ -239,6 +240,7 @@ def _round_allocation(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def i_optimal_allocation(
     formula: str,
     factors: FactorSpec,
@@ -335,14 +337,10 @@ def i_optimal_allocation(
         )
 
     cells: List[Tuple[Any, ...]] = list(itertools.product(*cat_levels))
-    k = len(cells)
 
     # Build representative DataFrame — one row per cell
     # Continuous factors are fixed at their midpoint
-    cont_midpoints = {
-        fname: (factors[fname][0] + factors[fname][1]) / 2.0
-        for fname in cont_names
-    }
+    cont_midpoints = {fname: (factors[fname][0] + factors[fname][1]) / 2.0 for fname in cont_names}
 
     rep_rows = []
     for cell in cells:
@@ -384,11 +382,7 @@ def i_optimal_allocation(
     )
 
     # Return only non-zero cells
-    return {
-        cell: int(cnt)
-        for cell, cnt in zip(cells, counts)
-        if cnt > 0
-    }
+    return {cell: int(cnt) for cell, cnt in zip(cells, counts) if cnt > 0}
 
 
 __all__ = ["i_optimal_allocation"]

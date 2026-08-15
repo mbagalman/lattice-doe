@@ -25,6 +25,7 @@ Quick start::
     # After running the widget, retrieve the result:
     result = w.get_result()
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Union
@@ -44,12 +45,14 @@ from .config import DesignOptions, PowerContrastConfig, PowerR2Config
 try:
     import ipywidgets as _widgets
     from IPython.display import display as _ipy_display, clear_output as _clear_output
+
     _HAS_WIDGETS = True
 except ImportError:  # pragma: no cover
     _HAS_WIDGETS = False
 
 try:
     import plotly.graph_objects as _go
+
     _HAS_PLOTLY = True
 except ImportError:
     _HAS_PLOTLY = False
@@ -60,6 +63,7 @@ _INSTALL_HINT = 'pip install "lattice-doe[widgets]"'
 # ---------------------------------------------------------------------------
 # Public exception
 # ---------------------------------------------------------------------------
+
 
 class WidgetsError(RuntimeError):
     """Raised when ipywidgets/plotly are missing or widget state is invalid."""
@@ -76,6 +80,7 @@ def _require_widgets() -> None:
 # ---------------------------------------------------------------------------
 # Pure-Python helpers (no ipywidgets dependency — fully testable)
 # ---------------------------------------------------------------------------
+
 
 def _parse_matrix(text: str) -> np.ndarray:
     """Parse newline-separated rows of space/comma-delimited values into a 2-D array."""
@@ -189,6 +194,7 @@ def _approx_power_curve(
 # _FactorRow — one row in the dynamic factor table (requires ipywidgets)
 # ---------------------------------------------------------------------------
 
+
 class _FactorRow:
     """Widget bundle for a single factor entry in the factor table.
 
@@ -244,13 +250,15 @@ class _FactorRow:
         else:
             self._cat_box.layout.display = "none"
 
-        self.row_box = _widgets.HBox([
-            self.name_widget,
-            self.type_widget,
-            self._cont_box,
-            self._cat_box,
-            self.remove_button,
-        ])
+        self.row_box = _widgets.HBox(
+            [
+                self.name_widget,
+                self.type_widget,
+                self._cont_box,
+                self._cat_box,
+                self.remove_button,
+            ]
+        )
 
         if on_type_change is not None:
             self.type_widget.observe(
@@ -279,6 +287,7 @@ class _FactorRow:
 # ---------------------------------------------------------------------------
 # DesignWidget — the main public class
 # ---------------------------------------------------------------------------
+
 
 class DesignWidget:
     """Interactive Jupyter widget for building I-optimal powered designs.
@@ -357,8 +366,12 @@ class DesignWidget:
             _do_constraint_expr = design_opts.constraint_expr or ""
             # Collect non-exposed fields for passthrough
             _exposed = {
-                "starts", "criterion", "random_state", "auto_candidate",
-                "candidate_points", "constraint_expr",
+                "starts",
+                "criterion",
+                "random_state",
+                "auto_candidate",
+                "candidate_points",
+                "constraint_expr",
             }
             for field in vars(design_opts):
                 if field not in _exposed:
@@ -397,15 +410,19 @@ class DesignWidget:
         # R² section
         self._r2_slider = _widgets.FloatSlider(
             value=r2_target,
-            min=0.01, max=0.99, step=0.01,
+            min=0.01,
+            max=0.99,
+            step=0.01,
             description="R² target:",
             readout_format=".2f",
             style={"description_width": "90px"},
             layout=_widgets.Layout(width="360px"),
         )
         self._lambda_mode_radio = _widgets.RadioButtons(
-            options=[("n  (G*Power / statsmodels convention)", "n"),
-                     ("n − p  (conservative)", "n_minus_p")],
+            options=[
+                ("n  (G*Power / statsmodels convention)", "n"),
+                ("n − p  (conservative)", "n_minus_p"),
+            ],
             value="n",
             description="λ convention:",
             style={"description_width": "110px"},
@@ -446,7 +463,9 @@ class DesignWidget:
         # Shared power params (always visible)
         self._alpha_slider = _widgets.FloatSlider(
             value=alpha,
-            min=0.001, max=0.20, step=0.001,
+            min=0.001,
+            max=0.20,
+            step=0.001,
             description="α (sig. level):",
             readout_format=".3f",
             style={"description_width": "110px"},
@@ -454,7 +473,9 @@ class DesignWidget:
         )
         self._power_slider = _widgets.FloatSlider(
             value=power,
-            min=0.50, max=0.999, step=0.01,
+            min=0.50,
+            max=0.999,
+            step=0.01,
             description="Target power:",
             readout_format=".2f",
             style={"description_width": "110px"},
@@ -477,7 +498,9 @@ class DesignWidget:
         )
         self._starts_slider = _widgets.IntSlider(
             value=_do_starts,
-            min=1, max=50, step=1,
+            min=1,
+            max=50,
+            step=1,
             description="Starts:",
             style={"description_width": "80px"},
             layout=_widgets.Layout(width="300px"),
@@ -502,19 +525,21 @@ class DesignWidget:
         self._cand_points_widget.layout.display = "none" if _do_auto_candidate else ""
         self._constraint_expr_widget = _widgets.Text(
             value=_do_constraint_expr,
-            placeholder='e.g. A + B <= 1',
+            placeholder="e.g. A + B <= 1",
             description="Constraint:",
             layout=_widgets.Layout(width="380px"),
             style={"description_width": "90px"},
         )
-        _adv_content = _widgets.VBox([
-            self._criterion_dd,
-            self._starts_slider,
-            self._seed_widget,
-            self._auto_cand_checkbox,
-            self._cand_points_widget,
-            self._constraint_expr_widget,
-        ])
+        _adv_content = _widgets.VBox(
+            [
+                self._criterion_dd,
+                self._starts_slider,
+                self._seed_widget,
+                self._auto_cand_checkbox,
+                self._cand_points_widget,
+                self._constraint_expr_widget,
+            ]
+        )
         self._advanced_accordion = _widgets.Accordion(children=[_adv_content])
         self._advanced_accordion.set_title(0, "Advanced design options")
         self._advanced_accordion.selected_index = 0 if show_advanced else None
@@ -533,12 +558,14 @@ class DesignWidget:
             "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
             "<b>Range / Levels</b>"
         )
-        self._factor_section = _widgets.VBox([
-            _widgets.HTML("<h4 style='margin:0'>Factors</h4>"),
-            _factor_hdr,
-            self._factor_table_box,
-            self._add_factor_btn,
-        ])
+        self._factor_section = _widgets.VBox(
+            [
+                _widgets.HTML("<h4 style='margin:0'>Factors</h4>"),
+                _factor_hdr,
+                self._factor_table_box,
+                self._add_factor_btn,
+            ]
+        )
 
         # Run button + output
         self._run_btn = _widgets.Button(
@@ -559,7 +586,9 @@ class DesignWidget:
         # --- Pre-populate factor rows from constructor factors dict ---
         for fname, spec in self._init_factors.items():
             if isinstance(spec, (list, tuple)) and len(spec) == 2 and not isinstance(spec[0], str):
-                self._add_factor_row(name=fname, ftype="Continuous", lo=float(spec[0]), hi=float(spec[1]))
+                self._add_factor_row(
+                    name=fname, ftype="Continuous", lo=float(spec[0]), hi=float(spec[1])
+                )
             else:
                 levels_str = ",".join(str(lv) for lv in spec)
                 self._add_factor_row(name=fname, ftype="Categorical", levels=levels_str)
@@ -573,28 +602,30 @@ class DesignWidget:
         self._apply_mode_visibility(power_mode)
 
         # --- Assemble full layout ---
-        self._layout = _widgets.VBox([
-            _widgets.HTML("<h3 style='margin:4px 0'>Lattice DOE</h3>"),
-            self._factor_section,
-            _widgets.HTML("<hr style='margin:6px 0'>"),
-            self._formula_widget,
-            _widgets.HTML("<hr style='margin:6px 0'>"),
-            _widgets.HTML("<h4 style='margin:0'>Power Mode</h4>"),
-            self._mode_toggle,
-            self._r2_box,
-            self._contrast_box,
-            _widgets.HTML("<hr style='margin:6px 0'>"),
-            _widgets.HTML("<h4 style='margin:0'>Power Parameters</h4>"),
-            self._alpha_slider,
-            self._power_slider,
-            self._max_n_widget,
-            _widgets.HTML("<hr style='margin:6px 0'>"),
-            self._advanced_accordion,
-            _widgets.HTML("<hr style='margin:6px 0'>"),
-            self._run_btn,
-            self._status_html,
-            self._output,
-        ])
+        self._layout = _widgets.VBox(
+            [
+                _widgets.HTML("<h3 style='margin:4px 0'>Lattice DOE</h3>"),
+                self._factor_section,
+                _widgets.HTML("<hr style='margin:6px 0'>"),
+                self._formula_widget,
+                _widgets.HTML("<hr style='margin:6px 0'>"),
+                _widgets.HTML("<h4 style='margin:0'>Power Mode</h4>"),
+                self._mode_toggle,
+                self._r2_box,
+                self._contrast_box,
+                _widgets.HTML("<hr style='margin:6px 0'>"),
+                _widgets.HTML("<h4 style='margin:0'>Power Parameters</h4>"),
+                self._alpha_slider,
+                self._power_slider,
+                self._max_n_widget,
+                _widgets.HTML("<hr style='margin:6px 0'>"),
+                self._advanced_accordion,
+                _widgets.HTML("<hr style='margin:6px 0'>"),
+                self._run_btn,
+                self._status_html,
+                self._output,
+            ]
+        )
 
     # -----------------------------------------------------------------------
     # Public methods
@@ -759,9 +790,7 @@ class DesignWidget:
         errors = self._validate_inputs()
         if errors:
             self._status_html.value = (
-                "<span style='color:red'>"
-                + "<br>".join(f"• {e}" for e in errors)
-                + "</span>"
+                "<span style='color:red'>" + "<br>".join(f"• {e}" for e in errors) + "</span>"
             )
             return
 
@@ -781,12 +810,10 @@ class DesignWidget:
             from .progress import ProgressReporter
 
             def _on_ev(ev) -> None:
-                _p = (f" — power {ev.current_power:.4f}"
-                      if ev.current_power is not None else "")
+                _p = f" — power {ev.current_power:.4f}" if ev.current_power is not None else ""
                 _n = f" n={ev.trial_n}" if ev.trial_n is not None else ""
                 self._status_html.value = (
-                    f"<i style='color:gray'>[{ev.elapsed_sec:.1f}s] "
-                    f"{ev.phase}{_n}{_p}…</i>"
+                    f"<i style='color:gray'>[{ev.elapsed_sec:.1f}s] " f"{ev.phase}{_n}{_p}…</i>"
                 )
 
             result = find_optimal_design(
@@ -801,9 +828,7 @@ class DesignWidget:
             # UX-7: a search that missed its target must not display an
             # unqualified success message.
             if _report.get("target_met") is False:
-                _warn_lines = "".join(
-                    f"<br>• {w}" for w in _report.get("warnings", [])
-                )
+                _warn_lines = "".join(f"<br>• {w}" for w in _report.get("warnings", []))
                 self._status_html.value = (
                     "<span style='color:#b45309'><b>⚠ Target power not "
                     "reached</b> (achieved "
@@ -819,9 +844,7 @@ class DesignWidget:
             self._render_results(result, state)
 
         except Exception as exc:
-            self._status_html.value = (
-                f"<span style='color:red'><b>Error:</b> {exc}</span>"
-            )
+            self._status_html.value = f"<span style='color:red'><b>Error:</b> {exc}</span>"
         finally:
             self._run_btn.disabled = False
 
@@ -838,6 +861,7 @@ class DesignWidget:
 
             # --- Metrics summary ---
             from IPython.display import display as _d
+
             _d(_widgets.HTML("<h4>Run Summary</h4>"))
             metrics_html = (
                 "<table style='border-collapse:collapse;font-size:13px'>"
@@ -881,6 +905,7 @@ class DesignWidget:
             return
 
         from IPython.display import display as _d
+
         report = result["report"]
         n_opt = int(report["n"])
         n_max = max(int(state["max_n"]), n_opt + 10)
@@ -897,16 +922,25 @@ class DesignWidget:
 
         target_power = float(state["power_target"])
         fig = _go.Figure()
-        fig.add_trace(_go.Scatter(
-            x=n_vals, y=powers, mode="lines", name="Power",
-            line=dict(color="#1f77b4", width=2),
-        ))
+        fig.add_trace(
+            _go.Scatter(
+                x=n_vals,
+                y=powers,
+                mode="lines",
+                name="Power",
+                line=dict(color="#1f77b4", width=2),
+            )
+        )
         fig.add_hline(
-            y=target_power, line_dash="dash", line_color="orange",
+            y=target_power,
+            line_dash="dash",
+            line_color="orange",
             annotation_text=f"Target {target_power:.2f}",
         )
         fig.add_vline(
-            x=n_opt, line_dash="dot", line_color="green",
+            x=n_opt,
+            line_dash="dot",
+            line_color="green",
             annotation_text=f"n = {n_opt}",
         )
         fig.update_layout(
@@ -924,6 +958,7 @@ class DesignWidget:
 # ---------------------------------------------------------------------------
 # Public factory function
 # ---------------------------------------------------------------------------
+
 
 def design_widget(
     formula: str = "~ 1 + A + B",

@@ -43,6 +43,7 @@ output:
   basename: design
   excel: true     # also write design.xlsx; csv/json always written
 """
+
 from __future__ import annotations
 
 import argparse
@@ -55,6 +56,7 @@ from typing import Any, Dict, Optional, List, Union
 
 try:
     import yaml  # type: ignore
+
     _HAS_YAML = True
 except Exception:  # pragma: no cover - optional dep
     _HAS_YAML = False
@@ -63,8 +65,12 @@ import pandas as pd
 
 from .api import find_optimal_design, find_multiresponse_design
 from .config import (
-    PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig,
-    DesignOptions, MultiResponseOptions, ResponseSpec,
+    PowerContrastConfig,
+    PowerR2Config,
+    PowerGLMContrastConfig,
+    DesignOptions,
+    MultiResponseOptions,
+    ResponseSpec,
 )
 from .utils import safe_name_slug
 from .contrasts import scenario_contrast_for_run
@@ -78,7 +84,7 @@ _CLI_CODING_REMEDY = (
     "Reduce the number of levels in the combined term, or replace the "
     "'scenario_a'/'scenario_b'/'sesoi' contrast block with explicit 'L' and "
     "'delta' entries. See the user guide section 3.3, \"Formulas whose coding "
-    "is learned from the data\"."
+    'is learned from the data".'
 )
 
 #: Remedy when the coding is data-dependent AND split-plot options are set.
@@ -126,7 +132,11 @@ def _scenario_contrast(
     (UX-46).
     """
     return scenario_contrast_for_run(
-        formula, factors, scenario_a, scenario_b, sesoi,
+        formula,
+        factors,
+        scenario_a,
+        scenario_b,
+        sesoi,
         design_opts=design_opts,
         sizing_formula=sizing_formula,
         remedies={
@@ -160,17 +170,20 @@ def _ensure_utf8_output() -> None:
 # Parsing helpers
 # -------------------------
 
+
 def _load_config(path: Path) -> Dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() in {".yml", ".yaml"}:
         if not _HAS_YAML:
-            logger.error("PyYAML is required to read YAML configs. Install with: pip install pyyaml")
+            logger.error(
+                "PyYAML is required to read YAML configs. Install with: pip install pyyaml"
+            )
             raise RuntimeError("PyYAML is not installed.")
         try:
             return yaml.safe_load(text)  # type: ignore
         except Exception as e:
             raise ValueError(f"Failed to parse YAML file at {path}: {e}") from e
-            
+
     # Fallback to JSON
     try:
         return json.loads(text)
@@ -192,13 +205,18 @@ def _validate_config_keys(cfg: Dict[str, Any]) -> None:
         raise KeyError("Config validation failed: 'formula' key is required.")
     if "factors" not in cfg:
         raise KeyError("Config validation failed: 'factors' key is required.")
-        
-    if "responses" not in cfg and "contrast" not in cfg and "r2_target" not in cfg and "family" not in cfg:
+
+    if (
+        "responses" not in cfg
+        and "contrast" not in cfg
+        and "r2_target" not in cfg
+        and "family" not in cfg
+    ):
         raise KeyError(
             "Config validation failed: Must contain either a 'responses' list (multi-response), "
             "a 'contrast' block, an 'r2_target' key, or a 'family' key (GLM mode)."
         )
-        
+
     if "contrast" in cfg:
         c = cfg.get("contrast")
         if not isinstance(c, dict):
@@ -215,7 +233,7 @@ def _validate_config_keys(cfg: Dict[str, Any]) -> None:
                 "Config 'contrast' block validation failed: "
                 "Must contain [scenario_a, scenario_b, sesoi] OR explicit [L, delta]."
             )
-            
+
 
 def _as_factors(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize factor specs from config to the package FactorSpec.
@@ -234,10 +252,8 @@ def _as_factors(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
     factors: Dict[str, Any] = {}
     if not isinstance(raw, dict):
-        raise ValueError(
-            f"Config 'factors' must be a dictionary, not {type(raw).__name__}."
-        )
-        
+        raise ValueError(f"Config 'factors' must be a dictionary, not {type(raw).__name__}.")
+
     for k, v in raw.items():
         if isinstance(v, dict):
             t = (v.get("type") or "").lower()
@@ -249,10 +265,14 @@ def _as_factors(raw: Dict[str, Any]) -> Dict[str, Any]:
             elif t == "categorical":
                 levels = v.get("levels")
                 if not isinstance(levels, (list, tuple)) or len(levels) == 0:
-                    raise ValueError(f"Factor '{k}': categorical requires non-empty 'levels: [...]'")
+                    raise ValueError(
+                        f"Factor '{k}': categorical requires non-empty 'levels: [...]'"
+                    )
                 factors[k] = list(levels)
             else:
-                raise ValueError(f"Factor '{k}': unknown type {t!r}; use 'continuous' or 'categorical'")
+                raise ValueError(
+                    f"Factor '{k}': unknown type {t!r}; use 'continuous' or 'categorical'"
+                )
         elif isinstance(v, (list, tuple)):
             # Heuristic: list of strings => categorical; 2-number list => continuous; else categorical
             if len(v) == 2 and all(isinstance(x, (int, float)) for x in v):
@@ -265,10 +285,13 @@ def _as_factors(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _make_power_cfg(
-    cfg: Dict[str, Any], formula: str, factors: Dict[str, Any],
+    cfg: Dict[str, Any],
+    formula: str,
+    factors: Dict[str, Any],
     design_opts: DesignOptions,
 ):
     import numpy as np  # noqa: PLC0415
+
     alpha = float(cfg.get("alpha", 0.05))
     power = float(cfg.get("power", 0.8))
     sigma = float(cfg.get("sigma", 1.0))
@@ -284,8 +307,12 @@ def _make_power_cfg(
         c = cfg.get("contrast") or {}
         if {"scenario_a", "scenario_b", "sesoi"} <= c.keys():
             L, delta = _scenario_contrast(
-                formula, factors, c["scenario_a"], c["scenario_b"],
-                float(c["sesoi"]), design_opts,
+                formula,
+                factors,
+                c["scenario_a"],
+                c["scenario_b"],
+                float(c["sesoi"]),
+                design_opts,
             )
         elif "L" in c and "delta" in c:
             L = np.asarray(c["L"], dtype=float)
@@ -296,16 +323,29 @@ def _make_power_cfg(
                 "[scenario_a, scenario_b, sesoi] or explicit [L, delta]."
             )
         return build_power_cfg(
-            dict(power_mode="glm", L=L, delta=delta, baseline=float(baseline),
-                 family=str(family), link=link, alpha=alpha, power=power, max_n=max_n),
+            dict(
+                power_mode="glm",
+                L=L,
+                delta=delta,
+                baseline=float(baseline),
+                family=str(family),
+                link=link,
+                alpha=alpha,
+                power=power,
+                max_n=max_n,
+            ),
         )
 
     if "contrast" in cfg:
         c = cfg["contrast"] or {}
         if {"scenario_a", "scenario_b", "sesoi"} <= c.keys():
             L, delta = _scenario_contrast(
-                formula, factors, c["scenario_a"], c["scenario_b"],
-                float(c["sesoi"]), design_opts,
+                formula,
+                factors,
+                c["scenario_a"],
+                c["scenario_b"],
+                float(c["sesoi"]),
+                design_opts,
             )
         elif "L" in c and "delta" in c:
             L = np.asarray(c["L"], dtype=float)
@@ -313,29 +353,42 @@ def _make_power_cfg(
         else:
             raise ValueError("Internal error: Invalid contrast config structure.")
         return build_power_cfg(
-            dict(power_mode="contrast", L=L, delta=delta,
-                 alpha=alpha, power=power, sigma=sigma, max_n=max_n),
+            dict(
+                power_mode="contrast",
+                L=L,
+                delta=delta,
+                alpha=alpha,
+                power=power,
+                sigma=sigma,
+                max_n=max_n,
+            ),
         )
 
     # Otherwise R^2 mode
     if "r2_target" not in cfg:
         raise ValueError("Internal error: Missing r2_target or contrast block.")
     return build_power_cfg(
-        dict(power_mode="r2", r2_target=float(cfg["r2_target"]),
-             alpha=alpha, power=power, sigma=sigma, max_n=max_n),
+        dict(
+            power_mode="r2",
+            r2_target=float(cfg["r2_target"]),
+            alpha=alpha,
+            power=power,
+            sigma=sigma,
+            max_n=max_n,
+        ),
     )
 
 
 def _make_multi_response_cfg(
-    cfg: Dict[str, Any], formula: str, factors: Dict[str, Any],
+    cfg: Dict[str, Any],
+    formula: str,
+    factors: Dict[str, Any],
     design_opts: DesignOptions,
 ) -> MultiResponseOptions:
     """Parse the ``responses:`` YAML block into a :class:`MultiResponseOptions`."""
     raw_responses = cfg.get("responses")
     if not isinstance(raw_responses, list) or len(raw_responses) < 2:
-        raise ValueError(
-            "Config 'responses' must be a list of at least 2 response entries."
-        )
+        raise ValueError("Config 'responses' must be a list of at least 2 response entries.")
 
     global_alpha = float(cfg.get("alpha", 0.05))
     global_power = float(cfg.get("power", 0.8))
@@ -371,6 +424,7 @@ def _make_multi_response_cfg(
                 )
             elif "L" in c and "delta" in c:
                 import numpy as np  # local import
+
                 L = np.asarray(c["L"], dtype=float)
                 delta = np.asarray(c["delta"], dtype=float)
             else:
@@ -389,20 +443,41 @@ def _make_multi_response_cfg(
                     )
                 pcfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig] = (
                     build_power_cfg(
-                        dict(power_mode="glm", L=L, delta=delta,
-                             baseline=float(r_baseline), family=r_family, link=r_link,
-                             alpha=r_alpha, power=r_power, max_n=r_max_n),
+                        dict(
+                            power_mode="glm",
+                            L=L,
+                            delta=delta,
+                            baseline=float(r_baseline),
+                            family=r_family,
+                            link=r_link,
+                            alpha=r_alpha,
+                            power=r_power,
+                            max_n=r_max_n,
+                        ),
                     )
                 )
             else:
                 pcfg = build_power_cfg(
-                    dict(power_mode="contrast", L=L, delta=delta,
-                         alpha=r_alpha, power=r_power, sigma=r_sigma, max_n=r_max_n),
+                    dict(
+                        power_mode="contrast",
+                        L=L,
+                        delta=delta,
+                        alpha=r_alpha,
+                        power=r_power,
+                        sigma=r_sigma,
+                        max_n=r_max_n,
+                    ),
                 )
         elif "r2_target" in r:
             pcfg = build_power_cfg(
-                dict(power_mode="r2", r2_target=float(r["r2_target"]),
-                     alpha=r_alpha, power=r_power, sigma=r_sigma, max_n=r_max_n),
+                dict(
+                    power_mode="r2",
+                    r2_target=float(r["r2_target"]),
+                    alpha=r_alpha,
+                    power=r_power,
+                    sigma=r_sigma,
+                    max_n=r_max_n,
+                ),
             )
         else:
             raise KeyError(
@@ -427,10 +502,16 @@ def _apply_sp_cli_args(cfg: Dict[str, Any], args) -> Dict[str, Any]:
     Returns a shallow copy of *cfg* with the updated ``split_plot`` key;
     the original dict is never mutated.
     """
-    if not any(x is not None for x in (
-        args.htc_factors, args.n_whole_plots, args.eta,
-        args.subplots_per_wp, args.df_method,
-    )):
+    if not any(
+        x is not None
+        for x in (
+            args.htc_factors,
+            args.n_whole_plots,
+            args.eta,
+            args.subplots_per_wp,
+            args.df_method,
+        )
+    ):
         return cfg  # nothing to do
 
     cfg = dict(cfg)  # shallow copy so original isn't mutated
@@ -755,12 +836,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--html-report",
         action="store_true",
         help="Write a self-contained HTML report alongside the CSV outputs "
-             "(requires lattice-doe[report])",
+        "(requires lattice-doe[report])",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate config and output path, then exit without running design generation."
+        help="Validate config and output path, then exit without running design generation.",
     )
     parser.add_argument(
         "--template",
@@ -769,9 +850,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Print a commented example config (contrast | r2 | glm-binomial | glm-poisson) to stdout and exit.",
     )
     parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Enable verbose logging output (DEBUG level)"
+        "-v", "--verbose", action="store_true", help="Enable verbose logging output (DEBUG level)"
     )
     parser.add_argument(
         "--progress",
@@ -918,10 +997,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=float,
         metavar="ETA",
         default=None,
-        help=(
-            "Variance ratio σ²_wp / σ²_sp (≥ 0). Default 1.0. "
-            "Overrides 'split_plot.eta'."
-        ),
+        help=("Variance ratio σ²_wp / σ²_sp (≥ 0). Default 1.0. " "Overrides 'split_plot.eta'."),
     )
     parser.add_argument(
         "--subplots-per-wp",
@@ -962,10 +1038,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
             return 1
 
-        creds = (
-            args.sheets_credentials
-            or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        )
+        creds = args.sheets_credentials or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         try:
             result = sheets_run(args.sheets, credentials=creds)
         except SheetsError as e:
@@ -985,11 +1058,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Handle --excel-template (create a starter workbook and exit)
     if args.excel_template:
         try:
-            from lattice_doe.excel_template import create_excel_template, ExcelError  # noqa: PLC0415
+            from lattice_doe.excel_template import (
+                create_excel_template,
+                ExcelError,
+            )  # noqa: PLC0415
         except ImportError:
             print(
-                "Error: Excel support requires openpyxl.\n"
-                "  pip install 'lattice-doe[extras]'",
+                "Error: Excel support requires openpyxl.\n" "  pip install 'lattice-doe[extras]'",
                 file=sys.stderr,
             )
             return 1
@@ -1007,8 +1082,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             from lattice_doe.excel_template import excel_run, ExcelError  # noqa: PLC0415
         except ImportError:
             print(
-                "Error: Excel support requires openpyxl.\n"
-                "  pip install 'lattice-doe[extras]'",
+                "Error: Excel support requires openpyxl.\n" "  pip install 'lattice-doe[extras]'",
                 file=sys.stderr,
             )
             return 1
@@ -1043,7 +1117,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         level=log_level,
         format="%(asctime)s [%(levelname)-7s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        stream=sys.stderr  # Log to stderr to separate from stdout results
+        stream=sys.stderr,  # Log to stderr to separate from stdout results
     )
     logger.debug("Verbose logging enabled.")
 
@@ -1054,14 +1128,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not cfg_path.exists():
             # Use FileNotFoundError for specific I/O error
             raise FileNotFoundError(f"Config file not found: {cfg_path.resolve()}")
-            
+
         logger.info(f"Loading config from: {cfg_path.resolve()}")
         cfg = _load_config(cfg_path)
-        
+
         # 2. Validate Config Structure
         logger.debug("Validating config keys...")
         _validate_config_keys(cfg)
-        
+
         # 3. Parse Config Sections (can raise ValueError)
         logger.debug("Parsing config sections...")
         formula = str(cfg["formula"])
@@ -1081,9 +1155,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         _is_multiresponse = bool(args.multi_response) or "responses" in cfg
         if _is_multiresponse:
             power_cfg = None
-            multi_cfg = _make_multi_response_cfg(
-                cfg, formula, factors, design_opts
-            )
+            multi_cfg = _make_multi_response_cfg(cfg, formula, factors, design_opts)
         else:
             power_cfg = _make_power_cfg(cfg, formula, factors, design_opts)
             multi_cfg = None
@@ -1093,16 +1165,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         basename = out_cfg.get("basename", args.out)
         out_path = Path(basename)
         out_dir = out_path.parent
-        
+
         # Create parent directory
         logger.debug(f"Ensuring output directory exists: {out_dir.resolve()}")
         out_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Check write permissions
         if not os.access(out_dir, os.W_OK):
-            raise PermissionError(
-                f"Output directory is not writable: {out_dir.resolve()}"
-            )
+            raise PermissionError(f"Output directory is not writable: {out_dir.resolve()}")
         logger.debug("Output directory is writable.")
 
         # 5. Handle --dry-run
@@ -1202,13 +1272,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             _mm_slugs: set = set()
             _mm_files: Dict[str, str] = {}
             for _rname, _rmm in result["model_matrices"].items():
-                _fname = (
-                    out_path.name
-                    + f"_model_matrix_{safe_name_slug(_rname, _mm_slugs)}.csv"
-                )
+                _fname = out_path.name + f"_model_matrix_{safe_name_slug(_rname, _mm_slugs)}.csv"
                 _rmm.to_csv(out_path.with_name(_fname), index=False)
                 _mm_files[_rname] = _fname
             report["model_matrix_files"] = _mm_files
+
         def _json_default(obj: Any) -> Any:
             if isinstance(obj, Path):
                 return str(obj)
@@ -1227,12 +1295,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         html_report_flag = args.html_report or bool(out_cfg.get("html_report", False))
         if html_report_flag:
             if _is_multiresponse:
-                logger.warning("HTML report is not yet supported for multi-response designs; skipped.")
+                logger.warning(
+                    "HTML report is not yet supported for multi-response designs; skipped."
+                )
                 report_html = None
             else:
                 report_html = out_path.with_name(out_path.name + "_report.html")
                 try:
                     from .report import generate_report
+
                     generate_report(
                         result=result,
                         formula=formula,
@@ -1266,9 +1337,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Optional robustness report (single-response only)
         if args.robustness_report:
             if _is_multiresponse:
-                logger.warning("--robustness-report is not supported for multi-response designs; skipped.")
+                logger.warning(
+                    "--robustness-report is not supported for multi-response designs; skipped."
+                )
             try:
                 from lattice_doe.analysis import robustness_report  # noqa: PLC0415
+
                 rob = robustness_report(
                     design_df=design_df,
                     formula=formula,
@@ -1288,14 +1362,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"{'best_power':>22}: {s['best_power']:.3f}")
                 print("  Threshold crossings (where power = target):")
                 if t["max_sigma_for_target"] is not None:
-                    print(f"{'max_sigma':>22}: {t['max_sigma_for_target']:.4g}"
-                          "  (σ must not exceed this)")
+                    print(
+                        f"{'max_sigma':>22}: {t['max_sigma_for_target']:.4g}"
+                        "  (σ must not exceed this)"
+                    )
                 if t["min_effect_for_target"] is not None:
-                    effect_label = "min_effect_scale" if rob["mode"] == "contrast" else "min_r2_target"
+                    effect_label = (
+                        "min_effect_scale" if rob["mode"] == "contrast" else "min_r2_target"
+                    )
                     print(f"{'':>22}  ({effect_label}: {t['min_effect_for_target']:.4g})")
                 if t["min_alpha_for_target"] is not None:
-                    print(f"{'min_alpha':>22}: {t['min_alpha_for_target']:.4g}"
-                          "  (α must not be below this)")
+                    print(
+                        f"{'min_alpha':>22}: {t['min_alpha_for_target']:.4g}"
+                        "  (α must not be below this)"
+                    )
             except Exception as _rob_err:
                 logger.warning(f"Robustness report failed: {_rob_err}")
 
@@ -1365,16 +1445,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     except FileNotFoundError as e:
         logger.error(f"[Config Error] {e}")
         return 2
-        
+
     except (KeyError, ValueError) as e:
         # Catches validation errors, parsing errors
         logger.error(f"[Config Error] {e}")
         return 2
-        
+
     except PermissionError as e:
         logger.error(f"[IO Error] {e}")
         return 2
-        
+
     except IOError as e:
         logger.error(f"[IO Error] Failed to write output files: {e}")
         return 2

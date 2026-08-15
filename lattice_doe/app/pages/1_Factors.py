@@ -25,7 +25,7 @@ render_sidebar()
 
 # lattice_doe is installed via `pip install -e ".[app]"` so importable directly.
 try:
-    from lattice_doe.design import build_model_matrix
+    from lattice_doe.design import build_model_matrix  # noqa: F401 — import IS the probe
 
     _HAS_IOPT = True
 except ImportError:

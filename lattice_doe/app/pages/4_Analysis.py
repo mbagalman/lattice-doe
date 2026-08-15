@@ -57,9 +57,7 @@ _HAS_YAML = importlib.util.find_spec("yaml") is not None
 def _factors_to_spec(factors: list[dict]) -> dict:
     spec: dict = {}
     for f in factors:
-        spec[f["name"]] = (
-            (f["low"], f["high"]) if f["type"] == "Continuous" else list(f["levels"])
-        )
+        spec[f["name"]] = (f["low"], f["high"]) if f["type"] == "Continuous" else list(f["levels"])
     return spec
 
 
@@ -113,8 +111,6 @@ def _build_power_cfg(ss: dict, design_opts: DesignOptions):
         )
 
 
-
-
 def _jsonify(obj):
     """Recursively convert numpy scalars/arrays to JSON-safe Python types."""
     if isinstance(obj, np.integer):
@@ -157,6 +153,7 @@ def _build_yaml(ss: dict) -> str:
                     scenario_a[name] = levels[0]
                     scenario_b[name] = levels[-1]
         return scenario_a, scenario_b
+
     factor_block: dict = {}
     for f in factors:
         if f["type"] == "Continuous":
@@ -174,14 +171,8 @@ def _build_yaml(ss: dict) -> str:
     if ss.get("power_mode") == "contrast":
         cfg["sigma"] = float(ss.get("sigma", 1.0))
         if ss.get("contrast_input_mode") == "scenario":
-            scenario_a = {
-                f["name"]: ss.get(f"scen_a_{f['name']}")
-                for f in factors
-            }
-            scenario_b = {
-                f["name"]: ss.get(f"scen_b_{f['name']}")
-                for f in factors
-            }
+            scenario_a = {f["name"]: ss.get(f"scen_a_{f['name']}") for f in factors}
+            scenario_b = {f["name"]: ss.get(f"scen_b_{f['name']}") for f in factors}
             cfg["contrast"] = {
                 "scenario_a": scenario_a,
                 "scenario_b": scenario_b,
@@ -196,7 +187,12 @@ def _build_yaml(ss: dict) -> str:
                     L = _parse_matrix(L_text)
                     delta = _parse_vector(delta_text)
                     # Export explicit contrast only when dimensions are valid.
-                    if L.ndim == 2 and L.shape[0] > 0 and delta.ndim == 1 and len(delta) == L.shape[0]:
+                    if (
+                        L.ndim == 2
+                        and L.shape[0] > 0
+                        and delta.ndim == 1
+                        and len(delta) == L.shape[0]
+                    ):
                         cfg["contrast"] = {
                             "L": L.tolist(),
                             "delta": delta.tolist(),
@@ -302,9 +298,7 @@ with col_yaml:
         with st.expander("Preview YAML"):
             st.code(yaml_str, language="yaml")
     else:
-        st.info(
-            "Install `pyyaml` to enable YAML export: `pip install pyyaml`"
-        )
+        st.info("Install `pyyaml` to enable YAML export: `pip install pyyaml`")
 
 # G2 — JSON report download
 with col_json:
@@ -333,8 +327,7 @@ if not _HAS_RESULT:
 
 if not _HAS_IOPT:
     st.error(
-        "lattice_doe is not importable. "
-        "Run `pip install -e '.[app]'` from the project root."
+        "lattice_doe is not importable. " "Run `pip install -e '.[app]'` from the project root."
     )
     st.stop()
 
@@ -352,9 +345,7 @@ design_opts = ss.get("result_design_opts") or build_design_opts_from_state(ss)
 # In compound mode each response was powered on its OWN formula, power
 # configuration and model matrix — reconstructing the global configuration
 # would silently analyze a different model.
-_is_mr_result = bool(
-    isinstance(result, dict) and result.get("report", {}).get("responses")
-)
+_is_mr_result = bool(isinstance(result, dict) and result.get("report", {}).get("responses"))
 if _is_mr_result:
     try:
         from components.mr_config import build_multi_response_cfg
@@ -414,9 +405,7 @@ else:
 # in a multi-response configuration can carry its OWN target, so the bound
 # power_cfg is the authority — the global widget value is only the fallback
 # when no configuration could be reconstructed.
-_target_power = (
-    float(power_cfg.power) if _cfg_ok else float(ss.get("power_target", 0.80))
-)
+_target_power = float(power_cfg.power) if _cfg_ok else float(ss.get("power_target", 0.80))
 
 # ---------------------------------------------------------------------------
 # Stale-analysis guard (UX-68): every cached analysis below belongs to ONE
@@ -443,10 +432,17 @@ _analysis_ctx = (
 )
 if ss.get("_analysis_ctx") != _analysis_ctx:
     for _stale_key in (
-        "_sensitivity_result", "_sensitivity_contrast", "_mde_result",
-        "_comparison_result", "_sp_eta_result",
-        "sens_sigma_min", "sens_sigma_max", "sens_sigma_pts",
-        "sens_r2_min", "sens_r2_max", "sens_r2_pts",
+        "_sensitivity_result",
+        "_sensitivity_contrast",
+        "_mde_result",
+        "_comparison_result",
+        "_sp_eta_result",
+        "sens_sigma_min",
+        "sens_sigma_max",
+        "sens_sigma_pts",
+        "sens_r2_min",
+        "sens_r2_max",
+        "sens_r2_pts",
         "mde_power_target",
     ):
         ss.pop(_stale_key, None)
@@ -479,12 +475,18 @@ else:
         sigma_nom = float(getattr(power_cfg, "sigma", ss.get("sigma", 1.0)))
         with col1:
             sigma_min = st.number_input(
-                "\u03c3 min", min_value=1e-4, value=sigma_nom * 0.5, format="%.4g",
+                "\u03c3 min",
+                min_value=1e-4,
+                value=sigma_nom * 0.5,
+                format="%.4g",
                 key="sens_sigma_min",
             )
         with col2:
             sigma_max = st.number_input(
-                "\u03c3 max", min_value=1e-4, value=sigma_nom * 2.0, format="%.4g",
+                "\u03c3 max",
+                min_value=1e-4,
+                value=sigma_nom * 2.0,
+                format="%.4g",
                 key="sens_sigma_max",
             )
         with col3:
@@ -495,13 +497,21 @@ else:
         r2_nom = float(getattr(power_cfg, "r2_target", ss.get("r2_target", 0.15)))
         with col1:
             r2_min = st.number_input(
-                "R\u00b2 min", min_value=0.001, max_value=0.99, value=max(0.01, r2_nom * 0.3),
-                format="%.3f", key="sens_r2_min",
+                "R\u00b2 min",
+                min_value=0.001,
+                max_value=0.99,
+                value=max(0.01, r2_nom * 0.3),
+                format="%.3f",
+                key="sens_r2_min",
             )
         with col2:
             r2_max = st.number_input(
-                "R\u00b2 max", min_value=0.001, max_value=0.99, value=min(0.99, r2_nom * 3.0),
-                format="%.3f", key="sens_r2_max",
+                "R\u00b2 max",
+                min_value=0.001,
+                max_value=0.99,
+                value=min(0.99, r2_nom * 3.0),
+                format="%.3f",
+                key="sens_r2_max",
             )
         with col3:
             r2_pts = st.slider("Points", 5, 50, 25, key="sens_r2_pts")
@@ -861,11 +871,19 @@ if _sp_report is not None:
     col_e1, col_e2, col_e3 = st.columns(3)
     with col_e1:
         eta_min = st.number_input(
-            "\u03b7 min", min_value=0.0, value=0.0, format="%.2f", key="sp_eta_min",
+            "\u03b7 min",
+            min_value=0.0,
+            value=0.0,
+            format="%.2f",
+            key="sp_eta_min",
         )
     with col_e2:
         eta_max = st.number_input(
-            "\u03b7 max", min_value=0.01, value=5.0, format="%.2f", key="sp_eta_max",
+            "\u03b7 max",
+            min_value=0.01,
+            value=5.0,
+            format="%.2f",
+            key="sp_eta_max",
         )
     with col_e3:
         eta_pts = st.slider("Points", 5, 50, 20, key="sp_eta_pts")
@@ -895,14 +913,19 @@ if _sp_report is not None:
             import plotly.graph_objects as go
 
             fig_eta = go.Figure()
-            fig_eta.add_trace(go.Scatter(
-                x=eta_df["eta"], y=eta_df["power"],
-                mode="lines+markers", name="Power",
-                line=dict(color="#1f77b4", width=2),
-            ))
+            fig_eta.add_trace(
+                go.Scatter(
+                    x=eta_df["eta"],
+                    y=eta_df["power"],
+                    mode="lines+markers",
+                    name="Power",
+                    line=dict(color="#1f77b4", width=2),
+                )
+            )
             fig_eta.add_hline(
                 y=_target_power,
-                line_dash="dash", line_color="red",
+                line_dash="dash",
+                line_color="red",
                 annotation_text=f"Target {_target_power:.0%}",
                 annotation_position="top right",
             )
@@ -910,7 +933,8 @@ if _sp_report is not None:
                 xaxis_title="\u03b7 = \u03c3\u00b2_wp / \u03c3\u00b2_sp",
                 yaxis_title="Statistical power",
                 yaxis=dict(range=[0, 1.05]),
-                height=380, margin=dict(t=30, b=40),
+                height=380,
+                margin=dict(t=30, b=40),
             )
             st.plotly_chart(fig_eta, use_container_width=True)
         else:

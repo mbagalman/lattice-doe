@@ -22,6 +22,7 @@ generate_power_curves, power_sensitivity, min_detectable_effect,
 compare_criteria) live in ``analysis.py`` and are re-exported via
 ``lattice_doe.__init__``.
 """
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -32,24 +33,40 @@ import numpy as np
 import pandas as pd
 import warnings
 
-from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions, MultiResponseOptions
+from .config import (
+    PowerContrastConfig,
+    PowerR2Config,
+    PowerGLMContrastConfig,
+    DesignOptions,
+    MultiResponseOptions,
+)
 from .config import glm_fisher_weight
 from .candidate import (
-    build_candidate, build_split_plot_candidate, build_search_candidate,
+    build_candidate,
+    build_split_plot_candidate,
+    build_search_candidate,
 )
 from .contrasts import coding_is_data_dependent
 from .model_matrix import build_model_matrix, align_contrast_to_columns
 from .iopt_search import build_i_opt_design_with_idx, build_split_plot_design, build_compound_design
 from .split_plot import (
-    build_whole_plot_indicator, htc_factor_cols_from_names,
-    classify_contrasts, split_plot_df_denom, split_plot_r2_df_denom,
+    build_whole_plot_indicator,
+    htc_factor_cols_from_names,
+    classify_contrasts,
+    split_plot_df_denom,
+    split_plot_r2_df_denom,
 )
 from .diag_metrics import compute_design_metrics
 from .diag_export import export_diagnostics
 from .power import (
-    contrast_power, global_r2_power, _r2_df_num,
-    contrast_power_sp, global_r2_power_sp,
-    eval_response_power, combine_powers, hotelling_t2_power,
+    contrast_power,
+    global_r2_power,
+    _r2_df_num,
+    contrast_power_sp,
+    global_r2_power_sp,
+    eval_response_power,
+    combine_powers,
+    hotelling_t2_power,
     glm_contrast_power,
 )
 from .utils import validate_factors, normalize_factors, model_matrix_preview, FactorSpec
@@ -62,11 +79,7 @@ def _buckets_df(design_df: pd.DataFrame) -> pd.DataFrame:
     if hasattr(pd.DataFrame, "value_counts"):
         return design_df.value_counts(dropna=False).rename("count").reset_index()
     # fallback for older pandas
-    return (
-        design_df.groupby(list(design_df.columns), dropna=False)
-        .size()
-        .reset_index(name="count")
-    )
+    return design_df.groupby(list(design_df.columns), dropna=False).size().reset_index(name="count")
 
 
 def _validate_api_inputs(
@@ -102,7 +115,7 @@ def _validate_api_inputs(
             f"power_cfg.max_n ({power_cfg.max_n}) must be greater than "
             f"the number of model parameters p ({p})."
         )
-        
+
     return p
 
 
@@ -111,8 +124,7 @@ def _validate_htc_factors(htc_factors: List[str], factors: Dict[str, Any]) -> No
     bad = [f for f in htc_factors if f not in factors]
     if bad:
         raise ValueError(
-            f"htc_factors {bad} not found in factors dict. "
-            f"Valid factor names: {list(factors)}."
+            f"htc_factors {bad} not found in factors dict. " f"Valid factor names: {list(factors)}."
         )
 
 
@@ -206,9 +218,7 @@ def _attach_model_matrix(
         if col_names is not None and len(col_names) == X.shape[1]
         else [f"x{j}" for j in range(X.shape[1])]
     )
-    result["model_matrix"] = pd.DataFrame(
-        X, columns=cols, index=result["design_df"].index
-    )
+    result["model_matrix"] = pd.DataFrame(X, columns=cols, index=result["design_df"].index)
     coding_note = coding_is_data_dependent(formula, factors) if warn else None
     if coding_note is not None:
         msg = (
@@ -277,8 +287,11 @@ def _mr_envelope(
     }
     if X is not None and formula is not None and factors is not None:
         _attach_model_matrix(
-            env, X, _names_for(formula, design_df, np.asarray(X).shape[1]),
-            formula, factors,
+            env,
+            X,
+            _names_for(formula, design_df, np.asarray(X).shape[1]),
+            formula,
+            factors,
             warn=responses is None,  # consolidated per-response warning below
         )
     if responses is not None and factors is not None:
@@ -436,7 +449,10 @@ def find_optimal_design(
             )
 
     cand, candidate_points = build_search_candidate(
-        formula, factors, design_opts, on_size=_announce_candidate_size,
+        formula,
+        factors,
+        design_opts,
+        on_size=_announce_candidate_size,
     )
     X_cand, _treat_col_names = build_model_matrix(formula, cand)
 
@@ -482,8 +498,7 @@ def find_optimal_design(
             )
             _cand_aug_tmp = pd.concat([_cand_aug_tmp, _pad], ignore_index=True)
         _cand_aug_tmp[design_opts.block_factor_name] = [
-            _blk_labels[i % design_opts.n_blocks]
-            for i in range(len(_cand_aug_tmp))
+            _blk_labels[i % design_opts.n_blocks] for i in range(len(_cand_aug_tmp))
         ]
         try:
             _X_aug_sample, _aug_col_names = build_model_matrix(aug_formula, _cand_aug_tmp)
@@ -574,8 +589,8 @@ def find_optimal_design(
         _n_sp_cand = max(10, int(candidate_points * _n_etc / _n_all)) if _n_etc > 0 else 1
 
         max_n_wp = power_cfg.max_n // subplots_per_wp
-        lo_wp = sp_opts.n_whole_plots   # user's minimum
-        hi_wp = max_n_wp + 1           # exclusive sentinel
+        lo_wp = sp_opts.n_whole_plots  # user's minimum
+        hi_wp = max_n_wp + 1  # exclusive sentinel
 
         best: Optional[Dict[str, Any]] = None
         it = 0
@@ -589,14 +604,21 @@ def find_optimal_design(
             """Build SP design at n_wp_, compute power; return result dict or None."""
             n_total_ = n_wp_ * subplots_per_wp
             sp_cand_ = build_split_plot_candidate(
-                factors, sp_opts.htc_factors, n_wp_, subplots_per_wp,
+                factors,
+                sp_opts.htc_factors,
+                n_wp_,
+                subplots_per_wp,
                 random_state=design_opts.random_state,
                 candidate_points=candidate_points,
                 constraint_func=design_opts.constraint_func,
             )
             design_df_, X_ = build_split_plot_design(
-                sp_cand_, formula, n_wp_, subplots_per_wp,
-                sp_opts.htc_factors, sp_opts.eta,
+                sp_cand_,
+                formula,
+                n_wp_,
+                subplots_per_wp,
+                sp_opts.htc_factors,
+                sp_opts.eta,
                 factors=factors,
                 criterion=design_opts.criterion,
                 starts=design_opts.starts,
@@ -612,13 +634,21 @@ def find_optimal_design(
                 _, _p_names = build_model_matrix(formula, design_df_)
                 _all_fcols = [c for c in design_df_.columns if c != "__wp_id__"]
                 _htc_cols = htc_factor_cols_from_names(
-                    _p_names, sp_opts.htc_factors, _all_fcols,
+                    _p_names,
+                    sp_opts.htc_factors,
+                    _all_fcols,
                 )
                 try:
                     pr_ = contrast_power_sp(
-                        cast(np.ndarray, L_eff), power_cfg.delta, X_, Z_,
-                        sigma_sp=sigma_sp, eta=sp_opts.eta, alpha=power_cfg.alpha,
-                        df_method=sp_opts.df_method, jitter=design_opts.xtx_jitter,
+                        cast(np.ndarray, L_eff),
+                        power_cfg.delta,
+                        X_,
+                        Z_,
+                        sigma_sp=sigma_sp,
+                        eta=sp_opts.eta,
+                        alpha=power_cfg.alpha,
+                        df_method=sp_opts.df_method,
+                        jitter=design_opts.xtx_jitter,
                         htc_factor_cols=_htc_cols,
                     )
                 except ValueError as _e:
@@ -632,12 +662,18 @@ def find_optimal_design(
                 _, _p_names = build_model_matrix(formula, design_df_)
                 _all_fcols = [c for c in design_df_.columns if c != "__wp_id__"]
                 _htc_cols = htc_factor_cols_from_names(
-                    _p_names, sp_opts.htc_factors, _all_fcols,
+                    _p_names,
+                    sp_opts.htc_factors,
+                    _all_fcols,
                 )
                 try:
                     pr_ = global_r2_power_sp(
-                        power_cfg.r2_target, X_, Z_, sigma_sp=sigma_sp,
-                        eta=sp_opts.eta, alpha=power_cfg.alpha,
+                        power_cfg.r2_target,
+                        X_,
+                        Z_,
+                        sigma_sp=sigma_sp,
+                        eta=sp_opts.eta,
+                        alpha=power_cfg.alpha,
                         df_method=sp_opts.df_method,
                         lambda_mode=power_cfg.lambda_mode,
                         jitter=design_opts.xtx_jitter,
@@ -658,11 +694,10 @@ def find_optimal_design(
             elif mode == "contrast":
                 _is_wp_r = classify_contrasts(
                     np.atleast_2d(np.asarray(L_eff, dtype=float)),
-                    _htc_cols, X_.shape[1],
+                    _htc_cols,
+                    X_.shape[1],
                 )
-                _dfs_r = split_plot_df_denom(
-                    X_, Z_, _is_wp_r, sp_opts.df_method, _htc_cols or None
-                )
+                _dfs_r = split_plot_df_denom(X_, Z_, _is_wp_r, sp_opts.df_method, _htc_cols or None)
                 if np.all(_dfs_r == _dfs_r[0]):
                     df_denom_ = int(_dfs_r[0])
                 else:
@@ -671,9 +706,7 @@ def find_optimal_design(
                     df_denom_ = int(_dfs_r.min())
                     df_num_ = 1
             else:
-                df_denom_ = int(
-                    split_plot_r2_df_denom(X_, Z_, _htc_cols or None)
-                )
+                df_denom_ = int(split_plot_r2_df_denom(X_, Z_, _htc_cols or None))
             return {
                 "design_df": design_df_,
                 "buckets_df": _buckets_df(design_df_),
@@ -758,8 +791,7 @@ def find_optimal_design(
             if ev["report"]["achieved_power"] + tol >= target:
                 # Achiever replaces any non-achiever fallback (SR-25).
                 _best_achieves = (
-                    best is not None
-                    and best["report"]["achieved_power"] + tol >= target
+                    best is not None and best["report"]["achieved_power"] + tol >= target
                 )
                 if not _best_achieves or n_wp <= best["_n_wp"]:
                     best = ev
@@ -838,27 +870,34 @@ def find_optimal_design(
             warnings.warn(_msg, RuntimeWarning)
             _run_warnings.append(_msg)
 
-        best["report"].update({
-            "iteration": it,
-            "elapsed_sec": round(float(elapsed_sec), 4),
-            "search_strategy": "+".join(_strategy_parts),
-            "verify_window": int(_verify_window),
-            "random_state": int(design_opts.random_state) if design_opts.random_state is not None else None,
-            "warnings": list(_run_warnings),
-            **_termination_fields(
-                target_met=final_power + power_cfg.tol_power >= target,
-                capped=False,
-                it_count=it,
-                max_iter=power_cfg.max_iter,
-            ),
-        })
+        best["report"].update(
+            {
+                "iteration": it,
+                "elapsed_sec": round(float(elapsed_sec), 4),
+                "search_strategy": "+".join(_strategy_parts),
+                "verify_window": int(_verify_window),
+                "random_state": (
+                    int(design_opts.random_state) if design_opts.random_state is not None else None
+                ),
+                "warnings": list(_run_warnings),
+                **_termination_fields(
+                    target_met=final_power + power_cfg.tol_power >= target,
+                    capped=False,
+                    it_count=it,
+                    max_iter=power_cfg.max_iter,
+                ),
+            }
+        )
 
         if export_diagnostics_to:
             try:
                 export_paths = export_diagnostics(
-                    X=best["_X"], design_df=best["design_df"],
+                    X=best["_X"],
+                    design_df=best["design_df"],
                     output_path=export_diagnostics_to,
-                    feature_names=None, formats=["html", "csv"], include_data=True,
+                    feature_names=None,
+                    formats=["html", "csv"],
+                    include_data=True,
                 )
                 best["report"]["diagnostic_exports"] = {k: str(v) for k, v in export_paths.items()}
             except Exception as e:
@@ -867,9 +906,13 @@ def find_optimal_design(
         if export_report_to is not None:
             try:
                 from .report import generate_report
+
                 report_path = generate_report(
-                    result=best, formula=formula, factors=factors,
-                    power_cfg=power_cfg, output_path=export_report_to,
+                    result=best,
+                    formula=formula,
+                    factors=factors,
+                    power_cfg=power_cfg,
+                    output_path=export_report_to,
                     include_power_curve=False,
                 )
                 best["report"]["report_path"] = str(report_path)
@@ -896,9 +939,11 @@ def find_optimal_design(
         # built WP/SP pools — a design_df refit re-learns any data-dependent
         # coding from just these n rows.
         _attach_model_matrix(
-            best, best["_X"],
+            best,
+            best["_X"],
             _names_for(formula, best["design_df"], np.asarray(best["_X"]).shape[1]),
-            formula, factors,
+            formula,
+            factors,
         )
         best.pop("_n_wp", None)
         best.pop("_X", None)
@@ -928,9 +973,7 @@ def find_optimal_design(
 
     _n_cand = len(cand)
     _prealloc_replicates = (
-        design_opts.preallocate_categorical
-        and not is_blocked
-        and bool(_spec_cat_cols)
+        design_opts.preallocate_categorical and not is_blocked and bool(_spec_cat_cols)
     )
     if _prealloc_replicates:
         # Pre-allocation treats per-cell allocation counts as replication
@@ -948,9 +991,9 @@ def find_optimal_design(
 
     # --- Run-metadata tracking (enriches the final report) ---
     t_start = time.perf_counter()
-    _run_warnings: List[str] = []          # compact list of warning messages issued
-    _verify_window: int = 0                # Phase 2 window size (0 if Phase 2 didn't run)
-    _ran_phase2: bool = False              # True if at least one Phase 2 iteration executed
+    _run_warnings: List[str] = []  # compact list of warning messages issued
+    _verify_window: int = 0  # Phase 2 window size (0 if Phase 2 didn't run)
+    _ran_phase2: bool = False  # True if at least one Phase 2 iteration executed
     _strategy_parts: List[str] = ["bisection"]  # build search_strategy string incrementally
 
     # Common kwargs forwarded to every build_i_opt_design_with_idx call
@@ -975,29 +1018,33 @@ def find_optimal_design(
     )
 
     # Kwargs for build_blocked_design (blocked mode only)
-    _blocked_kwargs: Dict[str, Any] = dict(
-        cand=cand,
-        formula=formula,
-        n_blocks=design_opts.n_blocks,
-        block_sizes=design_opts.block_sizes,
-        block_factor_name=design_opts.block_factor_name,
-        aug_formula=aug_formula,
-        criterion=design_opts.criterion,
-        n_start=design_opts.starts,
-        algo=design_opts.algo,
-        max_iter=design_opts.max_iter,
-        random_state=design_opts.random_state,
-        workers=design_opts.workers,
-        parallel_seed_stride=design_opts.parallel_seed_stride,
-        jitter=design_opts.xtx_jitter,
-        preallocate_categorical=design_opts.preallocate_categorical,
-        alloc_min_per_cell=design_opts.alloc_min_per_cell,
-        alloc_max_per_cell=design_opts.alloc_max_per_cell,
-        alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
-        alloc_wynn_tol=design_opts.alloc_wynn_tol,
-        cat_cells_cap=design_opts.cat_cells_cap,
-        factors=factors,
-    ) if is_blocked else {}
+    _blocked_kwargs: Dict[str, Any] = (
+        dict(
+            cand=cand,
+            formula=formula,
+            n_blocks=design_opts.n_blocks,
+            block_sizes=design_opts.block_sizes,
+            block_factor_name=design_opts.block_factor_name,
+            aug_formula=aug_formula,
+            criterion=design_opts.criterion,
+            n_start=design_opts.starts,
+            algo=design_opts.algo,
+            max_iter=design_opts.max_iter,
+            random_state=design_opts.random_state,
+            workers=design_opts.workers,
+            parallel_seed_stride=design_opts.parallel_seed_stride,
+            jitter=design_opts.xtx_jitter,
+            preallocate_categorical=design_opts.preallocate_categorical,
+            alloc_min_per_cell=design_opts.alloc_min_per_cell,
+            alloc_max_per_cell=design_opts.alloc_max_per_cell,
+            alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
+            alloc_wynn_tol=design_opts.alloc_wynn_tol,
+            cat_cells_cap=design_opts.cat_cells_cap,
+            factors=factors,
+        )
+        if is_blocked
+        else {}
+    )
 
     if _reporter is not None:
         _reporter.emit(
@@ -1034,9 +1081,7 @@ def find_optimal_design(
             design_df, X = build_blocked_design(n=n, **_blocked_kwargs)
             selected_idx = None
         else:
-            design_df, selected_idx, _ = build_i_opt_design_with_idx(
-                n=n, **_search_kwargs
-            )
+            design_df, selected_idx, _ = build_i_opt_design_with_idx(n=n, **_search_kwargs)
             X = X_cand[selected_idx, :]
 
         # 2) Compute power
@@ -1046,8 +1091,11 @@ def find_optimal_design(
             df_num = int(np.linalg.matrix_rank(power_cfg.L))
         elif mode == "contrast":
             power, lam = contrast_power(
-                L=cast(np.ndarray, L_eff), delta=power_cfg.delta, X=X,
-                sigma=power_cfg.sigma, alpha=power_cfg.alpha,
+                L=cast(np.ndarray, L_eff),
+                delta=power_cfg.delta,
+                X=X,
+                sigma=power_cfg.sigma,
+                alpha=power_cfg.alpha,
                 jitter=design_opts.xtx_jitter,
             )
             df_num = int(np.linalg.matrix_rank(power_cfg.L))
@@ -1110,9 +1158,7 @@ def find_optimal_design(
                 it += 1  # count the re-evaluation
                 # Update cand in shared kwargs after candidate growth
                 _search_kwargs["cand"] = cand
-                design_df, selected_idx, _ = build_i_opt_design_with_idx(
-                    n=n, **_search_kwargs
-                )
+                design_df, selected_idx, _ = build_i_opt_design_with_idx(n=n, **_search_kwargs)
                 X = X_cand[selected_idx, :]
                 if mode == "glm":
                     _glm_res = glm_contrast_power(glm_cfg_eff, X, jitter=design_opts.xtx_jitter)
@@ -1120,15 +1166,20 @@ def find_optimal_design(
                     df_num = int(np.linalg.matrix_rank(power_cfg.L))
                 elif mode == "contrast":
                     power, lam = contrast_power(
-                        L=cast(np.ndarray, L_eff), delta=power_cfg.delta, X=X,
-                        sigma=power_cfg.sigma, alpha=power_cfg.alpha,
+                        L=cast(np.ndarray, L_eff),
+                        delta=power_cfg.delta,
+                        X=X,
+                        sigma=power_cfg.sigma,
+                        alpha=power_cfg.alpha,
                         jitter=design_opts.xtx_jitter,
                     )
                     df_num = int(np.linalg.matrix_rank(power_cfg.L))
                 else:
                     power, lam = global_r2_power(
-                        r2_target=power_cfg.r2_target, X=X,
-                        alpha=power_cfg.alpha, lambda_mode=power_cfg.lambda_mode,
+                        r2_target=power_cfg.r2_target,
+                        X=X,
+                        alpha=power_cfg.alpha,
+                        lambda_mode=power_cfg.lambda_mode,
                     )
                     df_num = _r2_df_num(X)
                 if np.isnan(power):
@@ -1158,10 +1209,14 @@ def find_optimal_design(
             "starts": design_opts.starts,
             "workers": design_opts.workers,
             "candidate_points": int(candidate_points),
-            "block_structure": {
-                "n_blocks": design_opts.n_blocks,
-                "block_factor_name": design_opts.block_factor_name,
-            } if is_blocked else None,
+            "block_structure": (
+                {
+                    "n_blocks": design_opts.n_blocks,
+                    "block_factor_name": design_opts.block_factor_name,
+                }
+                if is_blocked
+                else None
+            ),
             "p_treat": int(p_treat),
         }
         if mode == "glm":
@@ -1194,10 +1249,7 @@ def find_optimal_design(
             # comparing n against a non-achiever's n discarded every achiever
             # found after an initial failing probe); among achievers, keep
             # the smallest n.
-            _best_achieves = (
-                best is not None
-                and best["report"]["achieved_power"] + tol >= target
-            )
+            _best_achieves = best is not None and best["report"]["achieved_power"] + tol >= target
             if not _best_achieves or int(n) <= int(best["report"]["n"]):
                 best = {
                     "design_df": design_df,
@@ -1266,9 +1318,7 @@ def find_optimal_design(
                 design_df_v, X_v = build_blocked_design(n=n_check, **_blocked_kwargs)
                 sel_idx_v = None
             else:
-                design_df_v, sel_idx_v, _ = build_i_opt_design_with_idx(
-                    n=n_check, **_search_kwargs
-                )
+                design_df_v, sel_idx_v, _ = build_i_opt_design_with_idx(n=n_check, **_search_kwargs)
                 X_v = X_cand[sel_idx_v, :]
             if mode == "glm":
                 _glm_res_v = glm_contrast_power(glm_cfg_eff, X_v, jitter=design_opts.xtx_jitter)
@@ -1276,22 +1326,23 @@ def find_optimal_design(
                 df_num_v = int(np.linalg.matrix_rank(power_cfg.L))
             elif mode == "contrast":
                 power_v, lam_v = contrast_power(
-                    L=cast(np.ndarray, L_eff), delta=power_cfg.delta, X=X_v,
-                    sigma=power_cfg.sigma, alpha=power_cfg.alpha,
+                    L=cast(np.ndarray, L_eff),
+                    delta=power_cfg.delta,
+                    X=X_v,
+                    sigma=power_cfg.sigma,
+                    alpha=power_cfg.alpha,
                     jitter=design_opts.xtx_jitter,
                 )
                 df_num_v = int(np.linalg.matrix_rank(power_cfg.L))
             else:
                 power_v, lam_v = global_r2_power(
-                    r2_target=power_cfg.r2_target, X=X_v,
-                    alpha=power_cfg.alpha, lambda_mode=power_cfg.lambda_mode,
+                    r2_target=power_cfg.r2_target,
+                    X=X_v,
+                    alpha=power_cfg.alpha,
+                    lambda_mode=power_cfg.lambda_mode,
                     df_num=_blocked_r2_df_num,
                 )
-                df_num_v = (
-                    _blocked_r2_df_num
-                    if _blocked_r2_df_num is not None
-                    else _r2_df_num(X_v)
-                )
+                df_num_v = _blocked_r2_df_num if _blocked_r2_df_num is not None else _r2_df_num(X_v)
             if np.isnan(power_v) or power_v + tol < target:
                 continue  # not feasible; keep scanning
             df_denom_v = int(X_v.shape[0] - np.linalg.matrix_rank(X_v))
@@ -1313,10 +1364,14 @@ def find_optimal_design(
                 "starts": design_opts.starts,
                 "workers": design_opts.workers,
                 "candidate_points": int(candidate_points),
-                "block_structure": {
-                    "n_blocks": design_opts.n_blocks,
-                    "block_factor_name": design_opts.block_factor_name,
-                } if is_blocked else None,
+                "block_structure": (
+                    {
+                        "n_blocks": design_opts.n_blocks,
+                        "block_factor_name": design_opts.block_factor_name,
+                    }
+                    if is_blocked
+                    else None
+                ),
                 "p_treat": int(p_treat),
             }
             if mode == "glm":
@@ -1378,7 +1433,7 @@ def find_optimal_design(
             f"Result validation failed: Final design_df has {len(best['design_df'])} rows, "
             f"but report indicates n={final_n}."
         )
-    
+
     if is_blocked:
         final_X = best["_X"]
         # For blocked designs, p_full was estimated from the full candidate set.
@@ -1394,9 +1449,9 @@ def find_optimal_design(
             f"Result validation failed: Final design matrix X has shape {final_X.shape}, "
             f"but report indicates (n, p_full) = ({final_n}, {p_full})."
         )
-    
+
     if np.isnan(best["report"]["achieved_power"]):
-         raise RuntimeError(f"Result validation failed: Final reported power is NaN.")
+        raise RuntimeError("Result validation failed: Final reported power is NaN.")
     # --- End validation ---
 
     # --- Expose the authoritative model matrix (UX-53/UX-57) ---
@@ -1409,13 +1464,14 @@ def find_optimal_design(
             else _names_for(aug_formula, best["design_df"], final_X.shape[1])
         )
     else:
-        _mm_names = (
-            list(_treat_col_names)
-            if len(_treat_col_names) == final_X.shape[1]
-            else None
-        )
+        _mm_names = list(_treat_col_names) if len(_treat_col_names) == final_X.shape[1] else None
     _attach_model_matrix(
-        best, final_X, _mm_names, formula, factors, run_warnings=_run_warnings,
+        best,
+        final_X,
+        _mm_names,
+        formula,
+        factors,
+        run_warnings=_run_warnings,
     )
     if is_blocked and _mm_names is not None:
         # Tested-versus-nuisance metadata (UX-62): the block dummies are
@@ -1426,25 +1482,27 @@ def find_optimal_design(
         ]
 
     # --- Enrich final report with run-metadata ---
-    best["report"].update({
-        "elapsed_sec": round(float(elapsed_sec), 4),
-        "search_strategy": "+".join(_strategy_parts),
-        "verify_window": int(_verify_window),
-        "random_state": int(design_opts.random_state) if design_opts.random_state is not None else None,
-        "warnings": list(_run_warnings),
-        **_termination_fields(
-            target_met=final_power + power_cfg.tol_power >= target_power,
-            capped=_capped_max_n < power_cfg.max_n,
-            it_count=it,
-            max_iter=power_cfg.max_iter,
-        ),
-    })
+    best["report"].update(
+        {
+            "elapsed_sec": round(float(elapsed_sec), 4),
+            "search_strategy": "+".join(_strategy_parts),
+            "verify_window": int(_verify_window),
+            "random_state": (
+                int(design_opts.random_state) if design_opts.random_state is not None else None
+            ),
+            "warnings": list(_run_warnings),
+            **_termination_fields(
+                target_met=final_power + power_cfg.tol_power >= target_power,
+                capped=_capped_max_n < power_cfg.max_n,
+                it_count=it,
+                max_iter=power_cfg.max_iter,
+            ),
+        }
+    )
 
     # 6. Optional export
     if (export_diagnostics_to or export_report_to) and _reporter is not None:
-        _reporter.emit(
-            Phase.WRITING_OUTPUT, message="Writing exports", force=True
-        )
+        _reporter.emit(Phase.WRITING_OUTPUT, message="Writing exports", force=True)
 
     if export_diagnostics_to:
         try:
@@ -1456,9 +1514,7 @@ def find_optimal_design(
                 formats=["html", "csv"],
                 include_data=True,
             )
-            best["report"]["diagnostic_exports"] = {
-                k: str(v) for k, v in export_paths.items()
-            }
+            best["report"]["diagnostic_exports"] = {k: str(v) for k, v in export_paths.items()}
         except Exception as e:
             # Don’t fail main computation due to export issues
             best["report"]["diagnostic_exports_error"] = str(e)
@@ -1467,6 +1523,7 @@ def find_optimal_design(
     if export_report_to is not None:
         try:
             from .report import generate_report
+
             report_path = generate_report(
                 result=best,
                 formula=formula,
@@ -1556,10 +1613,7 @@ def find_multiresponse_design(
         the old flat keys must be updated.
     """
     # 1. Detect compound path — any response formula differs from the global formula.
-    _compound = any(
-        r.formula is not None and r.formula != formula
-        for r in multi_cfg.responses
-    )
+    _compound = any(r.formula is not None and r.formula != formula for r in multi_cfg.responses)
 
     if design_opts is None:
         design_opts = DesignOptions()
@@ -1583,7 +1637,10 @@ def find_multiresponse_design(
             )
 
     cand, candidate_points = build_search_candidate(
-        formula, factors, design_opts, on_size=_announce_mr_candidate_size,
+        formula,
+        factors,
+        design_opts,
+        on_size=_announce_mr_candidate_size,
     )
     X_cand, p_names_global = build_model_matrix(formula, cand)
     p = X_cand.shape[1]
@@ -1604,9 +1661,7 @@ def find_multiresponse_design(
     if rule == "min":
         target = max(r.power_cfg.power for r in multi_cfg.responses)
     else:
-        target = combine_powers(
-            [r.power_cfg.power for r in multi_cfg.responses], weights, rule
-        )
+        target = combine_powers([r.power_cfg.power for r in multi_cfg.responses], weights, rule)
     tol = min(r.power_cfg.tol_power for r in multi_cfg.responses)
     max_iter = min(r.power_cfg.max_iter for r in multi_cfg.responses)
     max_n = min(r.power_cfg.max_n for r in multi_cfg.responses)
@@ -1634,6 +1689,7 @@ def find_multiresponse_design(
             )
         from .config import PowerR2Config as _PowerR2Config
         from .config import PowerGLMContrastConfig as _PowerGLMContrastConfig
+
         for r in multi_cfg.responses:
             if isinstance(r.power_cfg, _PowerR2Config):
                 raise NotImplementedError(
@@ -1681,8 +1737,7 @@ def find_multiresponse_design(
     # =========================================================================
     if is_sp:
         _glm_sp_responses = [
-            r.name for r in multi_cfg.responses
-            if isinstance(r.power_cfg, PowerGLMContrastConfig)
+            r.name for r in multi_cfg.responses if isinstance(r.power_cfg, PowerGLMContrastConfig)
         ]
         if _glm_sp_responses:
             raise NotImplementedError(
@@ -1719,14 +1774,21 @@ def find_multiresponse_design(
         def _sp_eval_mr(n_wp_: int) -> Optional[Dict[str, Any]]:
             n_total_ = n_wp_ * subplots_per_wp
             sp_cand_ = build_split_plot_candidate(
-                factors, sp_opts.htc_factors, n_wp_, subplots_per_wp,
+                factors,
+                sp_opts.htc_factors,
+                n_wp_,
+                subplots_per_wp,
                 random_state=design_opts.random_state,
                 candidate_points=candidate_points,
                 constraint_func=design_opts.constraint_func,
             )
             design_df_, X_ = build_split_plot_design(
-                sp_cand_, formula, n_wp_, subplots_per_wp,
-                sp_opts.htc_factors, sp_opts.eta,
+                sp_cand_,
+                formula,
+                n_wp_,
+                subplots_per_wp,
+                sp_opts.htc_factors,
+                sp_opts.eta,
                 factors=factors,
                 criterion=design_opts.criterion,
                 starts=design_opts.starts,
@@ -1743,7 +1805,9 @@ def find_multiresponse_design(
             try:
                 per_r_ = [
                     eval_response_power(
-                        r, X_, p_names_,
+                        r,
+                        X_,
+                        p_names_,
                         jitter=design_opts.xtx_jitter,
                         split_plot_opts=sp_opts,
                         Z=Z_,
@@ -1762,9 +1826,12 @@ def find_multiresponse_design(
             if np.isnan(combined_):
                 return None
             return {
-                "_design_df": design_df_, "_X": X_,
-                "_n_wp": n_wp_, "_n_total": n_total_,
-                "_per_r": per_r_, "_combined": combined_,
+                "_design_df": design_df_,
+                "_X": X_,
+                "_n_wp": n_wp_,
+                "_n_total": n_total_,
+                "_per_r": per_r_,
+                "_combined": combined_,
             }
 
         if _reporter is not None:
@@ -1811,16 +1878,13 @@ def find_multiresponse_design(
                 )
             if ev["_combined"] + tol >= target:
                 # Achiever replaces any non-achiever fallback (SR-25).
-                _best_achieves = (
-                    best is not None and best["_combined"] + tol >= target
-                )
+                _best_achieves = best is not None and best["_combined"] + tol >= target
                 if not _best_achieves or n_wp <= best["_n_wp"]:
                     best = ev
                 hi_wp = n_wp
             else:
                 if best is None or (
-                    best["_combined"] + tol < target
-                    and ev["_combined"] > best["_combined"]
+                    best["_combined"] + tol < target and ev["_combined"] > best["_combined"]
                 ):
                     best = ev
                 lo_wp = n_wp + 1
@@ -1902,37 +1966,46 @@ def find_multiresponse_design(
                 target_power=target,
                 force=True,
             )
-        return _mr_envelope(best["_design_df"], {
-            "n": int(n_final),
-            "p": int(p),
-            "achieved_power": float(combined_final),
-            "target_power": float(target),
-            "responses": [
-                {"name": rd["name"], "power": rd["power"], "lam": rd["lam"], "n": int(n_final)}
-                for rd in _per_r_final
-            ],
-            "combination_rule": rule,
-            "compound_criterion": False,
-            "criterion": design_opts.criterion,
-            "elapsed_sec": round(float(elapsed_sec), 4),
-            "search_strategy": "+".join(_strategy_parts),
-            "n_whole_plots": int(best["_n_wp"]),
-            "subplots_per_wp": int(subplots_per_wp),
-            "iteration": int(it),
-            "warnings": list(_run_warnings),
-            **_termination_fields(
-                target_met=combined_final + tol >= target,
-                capped=False,
-                it_count=it,
-                max_iter=max_iter,
-            ),
-        }, X=best["_X"], formula=formula, factors=factors,
+        return _mr_envelope(
+            best["_design_df"],
+            {
+                "n": int(n_final),
+                "p": int(p),
+                "achieved_power": float(combined_final),
+                "target_power": float(target),
+                "responses": [
+                    {"name": rd["name"], "power": rd["power"], "lam": rd["lam"], "n": int(n_final)}
+                    for rd in _per_r_final
+                ],
+                "combination_rule": rule,
+                "compound_criterion": False,
+                "criterion": design_opts.criterion,
+                "elapsed_sec": round(float(elapsed_sec), 4),
+                "search_strategy": "+".join(_strategy_parts),
+                "n_whole_plots": int(best["_n_wp"]),
+                "subplots_per_wp": int(subplots_per_wp),
+                "iteration": int(it),
+                "warnings": list(_run_warnings),
+                **_termination_fields(
+                    target_met=combined_final + tol >= target,
+                    capped=False,
+                    it_count=it,
+                    max_iter=max_iter,
+                ),
+            },
+            X=best["_X"],
+            formula=formula,
+            factors=factors,
             responses=[
-                (r.name, formula, best["_X"],
-                 _names_for(formula, best["_design_df"],
-                            np.asarray(best["_X"]).shape[1]))
+                (
+                    r.name,
+                    formula,
+                    best["_X"],
+                    _names_for(formula, best["_design_df"], np.asarray(best["_X"]).shape[1]),
+                )
                 for r in multi_cfg.responses
-            ])
+            ],
+        )
 
     # =========================================================================
     # OLS compound-criterion path (responses with different formulas)
@@ -1986,7 +2059,9 @@ def find_multiresponse_design(
             per_r_: List[Dict[str, Any]] = []
             for r_k, X_cand_k, p_names_k in zip(multi_cfg.responses, candidates_list, p_names_list):
                 X_k = X_cand_k[idx_]
-                per_r_.append(eval_response_power(r_k, X_k, p_names_k, jitter=design_opts.xtx_jitter))
+                per_r_.append(
+                    eval_response_power(r_k, X_k, p_names_k, jitter=design_opts.xtx_jitter)
+                )
             combined_ = combine_powers([d["power"] for d in per_r_], weights, rule)
             if np.isnan(combined_):
                 return None
@@ -2029,8 +2104,7 @@ def find_multiresponse_design(
                 _reporter.emit(
                     Phase.OPTIMIZING,
                     message=(
-                        f"n={n_c}: combined power={ev_c['_combined']:.4f} "
-                        f"(target {target:.4f})"
+                        f"n={n_c}: combined power={ev_c['_combined']:.4f} " f"(target {target:.4f})"
                     ),
                     iteration=it_c,
                     trial_n=int(n_c),
@@ -2039,16 +2113,13 @@ def find_multiresponse_design(
                 )
             if ev_c["_combined"] + tol >= target:
                 # Achiever replaces any non-achiever fallback (SR-25).
-                _best_achieves_c = (
-                    best_c is not None and best_c["_combined"] + tol >= target
-                )
+                _best_achieves_c = best_c is not None and best_c["_combined"] + tol >= target
                 if not _best_achieves_c or n_c <= best_c["_n"]:
                     best_c = ev_c
                 hi_c = n_c
             else:
                 if best_c is None or (
-                    best_c["_combined"] + tol < target
-                    and ev_c["_combined"] > best_c["_combined"]
+                    best_c["_combined"] + tol < target and ev_c["_combined"] > best_c["_combined"]
                 ):
                     best_c = ev_c
                 lo_c = n_c + 1
@@ -2067,7 +2138,9 @@ def find_multiresponse_design(
                     target_power=target,
                     force=True,
                 )
-            for n_check_c in range(n_star_c - 1, max(p_compound, n_star_c - verify_window_c - 1), -1):
+            for n_check_c in range(
+                n_star_c - 1, max(p_compound, n_star_c - verify_window_c - 1), -1
+            ):
                 if it_c >= max_iter:
                     break
                 _ran_phase2_c = True
@@ -2130,34 +2203,49 @@ def find_multiresponse_design(
                 target_power=target,
                 force=True,
             )
-        return _mr_envelope(best_c["_design_df"], {
-            "n": int(n_final_c),
-            "p": int(p_compound),
-            "achieved_power": float(combined_final_c),
-            "target_power": float(target),
-            "responses": [
-                {"name": rd["name"], "power": rd["power"], "lam": rd["lam"], "n": int(n_final_c)}
-                for rd in _per_r_final_c
-            ],
-            "combination_rule": rule,
-            "compound_criterion": True,
-            "criterion": design_opts.criterion,
-            "elapsed_sec": round(float(elapsed_sec_c), 4),
-            "search_strategy": "+".join(_strategy_parts_c),
-            "iteration": int(it_c),
-            "warnings": list(_run_warnings_c),
-            **_termination_fields(
-                target_met=combined_final_c + tol >= target,
-                capped=_capped_max_n_c < max_n,
-                it_count=it_c,
-                max_iter=max_iter,
-            ),
-        }, X=X_cand[best_c["_idx"], :], formula=formula, factors=factors,
+        return _mr_envelope(
+            best_c["_design_df"],
+            {
+                "n": int(n_final_c),
+                "p": int(p_compound),
+                "achieved_power": float(combined_final_c),
+                "target_power": float(target),
+                "responses": [
+                    {
+                        "name": rd["name"],
+                        "power": rd["power"],
+                        "lam": rd["lam"],
+                        "n": int(n_final_c),
+                    }
+                    for rd in _per_r_final_c
+                ],
+                "combination_rule": rule,
+                "compound_criterion": True,
+                "criterion": design_opts.criterion,
+                "elapsed_sec": round(float(elapsed_sec_c), 4),
+                "search_strategy": "+".join(_strategy_parts_c),
+                "iteration": int(it_c),
+                "warnings": list(_run_warnings_c),
+                **_termination_fields(
+                    target_met=combined_final_c + tol >= target,
+                    capped=_capped_max_n_c < max_n,
+                    it_count=it_c,
+                    max_iter=max_iter,
+                ),
+            },
+            X=X_cand[best_c["_idx"], :],
+            formula=formula,
+            factors=factors,
             responses=[
-                (r.name, r.formula if r.formula is not None else formula,
-                 candidates_list[_k][best_c["_idx"], :], p_names_list[_k])
+                (
+                    r.name,
+                    r.formula if r.formula is not None else formula,
+                    candidates_list[_k][best_c["_idx"], :],
+                    p_names_list[_k],
+                )
                 for _k, r in enumerate(multi_cfg.responses)
-            ])
+            ],
+        )
 
     # =========================================================================
     # OLS path (shared formula)
@@ -2193,9 +2281,7 @@ def find_multiresponse_design(
         _L_common = np.asarray(multi_cfg.responses[0].power_cfg.L, dtype=float)
         if _L_common.ndim == 1:
             _L_common = _L_common.reshape(1, -1)
-        _Delta_joint = np.column_stack(
-            [np.asarray(r.power_cfg.delta) for r in multi_cfg.responses]
-        )
+        _Delta_joint = np.column_stack([np.asarray(r.power_cfg.delta) for r in multi_cfg.responses])
         _sigma_joint_arr = np.asarray(multi_cfg.sigma_joint, dtype=float)
 
         # Pre-flight structural validation (SR-29): every n-independent
@@ -2277,7 +2363,10 @@ def find_multiresponse_design(
             # raised now is a real error and must propagate rather than
             # silently switch the search objective mid-bisection.
             ht2_ = hotelling_t2_power(
-                _L_common, _Delta_joint, X_, _sigma_joint_arr,
+                _L_common,
+                _Delta_joint,
+                X_,
+                _sigma_joint_arr,
                 alpha=multi_cfg.responses[0].power_cfg.alpha,
                 jitter=design_opts.xtx_jitter,
             )
@@ -2289,8 +2378,12 @@ def find_multiresponse_design(
         if np.isnan(combined_):
             return None
         return {
-            "_design_df": df_, "_idx": idx_, "_X": X_,
-            "_per_r": per_r_, "_combined": combined_, "_ht2": _ht2_result,
+            "_design_df": df_,
+            "_idx": idx_,
+            "_X": X_,
+            "_per_r": per_r_,
+            "_combined": combined_,
+            "_ht2": _ht2_result,
         }
 
     if _reporter is not None:
@@ -2336,16 +2429,13 @@ def find_multiresponse_design(
             )
         if ev["_combined"] + tol >= target:
             # Achiever replaces any non-achiever fallback (SR-25).
-            _best_achieves = (
-                best is not None and best["_combined"] + tol >= target
-            )
+            _best_achieves = best is not None and best["_combined"] + tol >= target
             if not _best_achieves or n <= best["_n"]:
                 best = ev
             hi = n
         else:
             if best is None or (
-                best["_combined"] + tol < target
-                and ev["_combined"] > best["_combined"]
+                best["_combined"] + tol < target and ev["_combined"] > best["_combined"]
             ):
                 best = ev
             lo = n + 1
@@ -2467,12 +2557,16 @@ def find_multiresponse_design(
             target_power=target,
             force=True,
         )
-    return _mr_envelope(best["_design_df"], _report,
-                        X=best["_X"], formula=formula, factors=factors,
-                        responses=[
-                            (r.name, formula, best["_X"], list(p_names_global))
-                            for r in multi_cfg.responses
-                        ])
+    return _mr_envelope(
+        best["_design_df"],
+        _report,
+        X=best["_X"],
+        formula=formula,
+        factors=factors,
+        responses=[
+            (r.name, formula, best["_X"], list(p_names_global)) for r in multi_cfg.responses
+        ],
+    )
 
 
 __all__ = ["find_optimal_design", "find_multiresponse_design"]

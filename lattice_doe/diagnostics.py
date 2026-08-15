@@ -8,6 +8,7 @@ All implementations have moved to:
 
 This module will be removed in a future major version.
 """
+
 from .diag_metrics import compute_leverages, compute_design_metrics
 from .diag_plots import create_diagnostic_plots
 from .diag_export import export_diagnostics

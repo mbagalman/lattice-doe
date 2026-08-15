@@ -24,14 +24,18 @@ class PowerCurveByNRequest(StrictRequestModel):
     )
     n_points: int = Field(20, ge=2, description="Number of n values to evaluate.")
 
-    model_config = {"json_schema_extra": {
-        "examples": [{
-            "formula": "~ 1 + A + B",
-            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-            "power_cfg": {"type": "r2", "r2_target": 0.15},
-            "n_points": 15,
-        }]
-    }}
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "formula": "~ 1 + A + B",
+                    "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+                    "power_cfg": {"type": "r2", "r2_target": 0.15},
+                    "n_points": 15,
+                }
+            ]
+        }
+    }
 
 
 class PowerCurveByEffectRequest(StrictRequestModel):
@@ -47,7 +51,5 @@ class PowerCurveByEffectRequest(StrictRequestModel):
 class PowerCurveResponse(BaseModel):
     """Response body for power curve endpoints."""
 
-    rows: List[Dict[str, Any]] = Field(
-        ..., description="Power curve data as rows-of-records."
-    )
+    rows: List[Dict[str, Any]] = Field(..., description="Power curve data as rows-of-records.")
     columns: List[str] = Field(..., description="Column names.")

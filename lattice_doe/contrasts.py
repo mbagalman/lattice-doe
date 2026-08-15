@@ -36,6 +36,7 @@ categoricals derived from continuous factors. Those raise
 :class:`ContrastCodingError` unless the caller passes ``coding_data``, which
 then becomes the exclusive coding authority.
 """
+
 from __future__ import annotations
 
 import ast
@@ -119,11 +120,7 @@ class ContrastCodingError(ValueError):
         super().__init__(f"{reason} {remedy}".strip())
 
 
-def _validate_scenario(
-    scenario_name: str,
-    scenario: Scenario,
-    factors: FactorSpec
-) -> None:
+def _validate_scenario(scenario_name: str, scenario: Scenario, factors: FactorSpec) -> None:
     """
     Validate a scenario dict against the project's factor specification.
 
@@ -184,7 +181,7 @@ def _validate_scenario(
                     f"Validation failed for '{scenario_name}', factor '{factor_name}': "
                     f"Value '{value}' is not one of the allowed categorical levels: {levels}."
                 )
-        
+
         else:
             raise TypeError(
                 f"Invalid factor specification for '{factor_name}'. "
@@ -193,15 +190,13 @@ def _validate_scenario(
 
 
 _CONTRAST_CROSS_CAP = 100_000  # max cross rows per combination-derived GROUP
-_ANCHOR_CHUNK_ROWS = 5_000     # rows per chunk in the incremental coding scan
+_ANCHOR_CHUNK_ROWS = 5_000  # rows per chunk in the incremental coding scan
 
 #: Patsy stateful transforms: their coding parameters (knots, means, scales…)
 #: are LEARNED from the input data, so an internally generated anchor would
 #: silently produce a numerically different — same-width — contrast than the
 #: realized design coding. They therefore require authoritative coding_data.
-_STATEFUL_TRANSFORMS = frozenset(
-    {"bs", "cr", "cc", "te", "center", "standardize", "scale"}
-)
+_STATEFUL_TRANSFORMS = frozenset({"bs", "cr", "cc", "te", "center", "standardize", "scale"})
 
 
 def _formula_factor_codes(formula: str) -> List[str]:
@@ -262,9 +257,7 @@ def _learned_stateful_calls(code: str) -> set:
         tree = ast.parse(code.strip(), mode="eval")
     except SyntaxError:
         # Conservative fallback: any call-shaped stateful name is learned.
-        return set(
-            re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(", code)
-        ) & _STATEFUL_TRANSFORMS
+        return set(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(", code)) & _STATEFUL_TRANSFORMS
     learned: set = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -372,9 +365,7 @@ def _coding_dependency_reason(
     # *named* `scale` codes like any other column, UX-44), and only a call
     # with parameters left to learn: a spline with literal knots and bounds
     # codes identically on any data, so it is NOT data-dependent (UX-55).
-    stateful = sorted(
-        set().union(*(_learned_stateful_calls(c) for c in codes))
-    ) if codes else []
+    stateful = sorted(set().union(*(_learned_stateful_calls(c) for c in codes))) if codes else []
     if stateful:
         return (
             f"Formula uses stateful Patsy transform(s) {stateful} whose "
@@ -395,10 +386,7 @@ def _coding_dependency_reason(
     # only as a conservative fallback for terms the probe cannot evaluate.
     _probe: Optional[pd.DataFrame] = None
     for code, names, calls in zip(codes, code_names, code_calls):
-        cont_refs = sorted(
-            n for n in names
-            if n in factors and _spec_is_continuous(factors[n])
-        )
+        cont_refs = sorted(n for n in names if n in factors and _spec_is_continuous(factors[n]))
         if not cont_refs:
             # Terms over categorical factors only: every level combination is
             # enumerable from the spec, so the coding is derivable.
@@ -446,9 +434,7 @@ def _spanning_probe(factors: FactorSpec, rows: int = 5) -> "pd.DataFrame":
     return pd.DataFrame(cols)
 
 
-def coding_is_data_dependent(
-    formula: str, factors: FactorSpec
-) -> Optional[str]:
+def coding_is_data_dependent(formula: str, factors: FactorSpec) -> Optional[str]:
     """Why *formula*'s coding cannot be derived from *factors* alone, or None.
 
     Returns a human-readable reason string when :func:`contrast_from_scenarios`
@@ -477,9 +463,7 @@ def coding_is_data_dependent(
     )
 
 
-def _derived_result_is_categorical(
-    code: str, probe: "pd.DataFrame"
-) -> Optional[bool]:
+def _derived_result_is_categorical(code: str, probe: "pd.DataFrame") -> Optional[bool]:
     """Whether a factor-code expression *evaluates* to a categorical column.
 
     Only a categorical result needs joint level enumeration: its level set is
@@ -526,10 +510,8 @@ def _iter_anchor_chunks(
         return
     for names, block in group_blocks:
         for start in range(0, len(block), chunk_rows):
-            rows = block[start:start + chunk_rows]
-            frame: Dict[str, list] = {
-                k: [v] * len(rows) for k, v in base_row.items()
-            }
+            rows = block[start : start + chunk_rows]
+            frame: Dict[str, list] = {k: [v] * len(rows) for k, v in base_row.items()}
             for i, nm in enumerate(names):
                 frame[nm] = [r[i] for r in rows]
             yield pd.DataFrame(frame)
@@ -636,9 +618,7 @@ def contrast_from_scenarios(
     _validate_scenario("scenario_a", scenario_a, factors)
     _validate_scenario("scenario_b", scenario_b, factors)
     if not isinstance(sesoi, (int, float)) or sesoi <= 0:
-        raise ValueError(
-            f"sesoi must be a positive number, but got {sesoi}."
-        )
+        raise ValueError(f"sesoi must be a positive number, but got {sesoi}.")
 
     scenarios_df = pd.concat(
         [pd.DataFrame([scenario_a]), pd.DataFrame([scenario_b])],
@@ -654,6 +634,7 @@ def contrast_from_scenarios(
         # an error, raised below.
         def _iter_maker() -> Iterator[pd.DataFrame]:
             return iter([coding_data])
+
     else:
         # Internal anchor (TD-7): every level of every REFERENCED categorical
         # factor must be visible to Patsy, or dummy columns get silently
@@ -664,21 +645,17 @@ def contrast_from_scenarios(
         codes = _formula_factor_codes(formula)
         code_names = [_code_identifiers(c) for c in codes]
         code_calls = [_code_calls(c) for c in codes]
-        referenced = {
-            name for name in factors
-            if any(name in names for names in code_names)
-        }
+        referenced = {name for name in factors if any(name in names for names in code_names)}
 
         # Codings that are learned from realized data cannot be reproduced
         # from the spec; the caller must name an authority instead.
-        _reason = _coding_dependency_reason(
-            factors, codes, code_names, code_calls
-        )
+        _reason = _coding_dependency_reason(factors, codes, code_names, code_calls)
         if _reason:
             raise ContrastCodingError(_reason)
 
         cat_ref = {
-            k: list(v) for k, v in factors.items()
+            k: list(v)
+            for k, v in factors.items()
             if k in referenced and not _spec_is_continuous(factors[k])
         }
 
@@ -697,14 +674,13 @@ def contrast_from_scenarios(
         # Small frame used only to decide the RESULT TYPE of derived terms.
         # A handful of rows is enough — the dtype of an expression does not
         # depend on how many combinations it sees.
-        _probe_rows = min(
-            max((len(v) for v in cat_ref.values()), default=1), 8
+        _probe_rows = min(max((len(v) for v in cat_ref.values()), default=1), 8)
+        probe = pd.DataFrame(
+            {
+                **{k: [v[i % len(v)] for i in range(_probe_rows)] for k, v in cat_ref.items()},
+                **{k: [v] * _probe_rows for k, v in pinned.items()},
+            }
         )
-        probe = pd.DataFrame({
-            **{k: [v[i % len(v)] for i in range(_probe_rows)]
-               for k, v in cat_ref.items()},
-            **{k: [v] * _probe_rows for k, v in pinned.items()},
-        })
 
         # Only factors whose values are COMBINED inside a single derived
         # expression that is itself CATEGORICAL (e.g. C(a + b)) need joint
@@ -717,7 +693,7 @@ def contrast_from_scenarios(
         # Each such term keeps its OWN group, scanned in its own segment.
         # Overlapping terms are NOT unioned: C(a + b) + C(b + c) needs the
         # a×b cross and the b×c cross, never the a×b×c cross (UX-47).
-        _combo: List[Tuple[List[str], str]] = []   # (factor names, term code)
+        _combo: List[Tuple[List[str], str]] = []  # (factor names, term code)
         _seen: set = set()
         for code, names in zip(codes, code_names):
             group = {n for n in names if n in cat_ref}
@@ -728,7 +704,7 @@ def contrast_from_scenarios(
             if _derived_result_is_categorical(code, probe) is False:
                 continue
             key = frozenset(group)
-            if key in _seen:      # two terms over the same factors: one scan
+            if key in _seen:  # two terms over the same factors: one scan
                 continue
             _seen.add(key)
             _combo.append((sorted(group), code))
@@ -853,34 +829,32 @@ def scenario_contrast_for_run(
     coding_data = None
     if reason is not None:
         if design_opts is None:
-            raise ContrastCodingError(
-                reason, r.get("preview", PY_NO_DESIGN_OPTS_REMEDY)
-            )
+            raise ContrastCodingError(reason, r.get("preview", PY_NO_DESIGN_OPTS_REMEDY))
         if design_opts.split_plot is not None:
-            raise ContrastCodingError(
-                reason, r.get("split_plot", PY_SPLIT_PLOT_REMEDY)
-            )
+            raise ContrastCodingError(reason, r.get("split_plot", PY_SPLIT_PLOT_REMEDY))
         if design_opts.allow_candidate_growth:
-            raise ContrastCodingError(
-                reason, r.get("growth", PY_GROWTH_REMEDY)
-            )
+            raise ContrastCodingError(reason, r.get("growth", PY_GROWTH_REMEDY))
         from .candidate import build_search_candidate
 
         coding_data, _ = build_search_candidate(
-            sizing_formula or formula, factors, design_opts,
+            sizing_formula or formula,
+            factors,
+            design_opts,
         )
     try:
         return contrast_from_scenarios(
-            formula, factors, scenario_a, scenario_b, sesoi,
+            formula,
+            factors,
+            scenario_a,
+            scenario_b,
+            sesoi,
             coding_data=coding_data,
         )
     except ContrastCodingError as exc:
         # Rewrap even without an override: contrast_from_scenarios' own
         # remedy recommends its coding_data= parameter, which this function
         # does not accept — the advice must fit the API that raised it.
-        raise ContrastCodingError(
-            exc.reason, r.get("coding", PY_RUN_CODING_REMEDY)
-        ) from exc
+        raise ContrastCodingError(exc.reason, r.get("coding", PY_RUN_CODING_REMEDY)) from exc
 
 
 __all__ = [

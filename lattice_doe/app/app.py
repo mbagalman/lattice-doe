@@ -33,16 +33,22 @@ st.markdown("---")
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.markdown("#### 1 · Factors")
-    st.markdown("Define your experimental factors (continuous or categorical) and the Patsy model formula.")
+    st.markdown(
+        "Define your experimental factors (continuous or categorical) and the Patsy model formula."
+    )
 with col2:
     st.markdown("#### 2 · Power Config")
-    st.markdown("Choose contrast-based or global R² power mode, set effect assumptions, and configure the design search.")
+    st.markdown(
+        "Choose contrast-based or global R² power mode, set effect assumptions, and configure the design search."
+    )
 with col3:
     st.markdown("#### 3 · Run & Results")
     st.markdown("Generate the optimal design, inspect the report, and download design files.")
 with col4:
     st.markdown("#### 4 · Analysis")
-    st.markdown("Run sensitivity analysis, find the minimum detectable effect, and compare optimality criteria.")
+    st.markdown(
+        "Run sensitivity analysis, find the minimum detectable effect, and compare optimality criteria."
+    )
 
 st.markdown("---")
 st.markdown(

@@ -27,16 +27,17 @@ All functions that return V⁻¹ return the *scaled* inverse::
 
 so that σ²_sp cancels when the caller computes e.g. M = X' Ṽ⁻¹ X / σ²_sp.
 """
+
 from __future__ import annotations
 
 import re
 from typing import List, Optional
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Whole-plot indicator matrix
 # ---------------------------------------------------------------------------
+
 
 def build_whole_plot_indicator(n_total: int, n_wp: int, subplots_per_wp: int) -> np.ndarray:
     """Build the n_total × n_wp whole-plot indicator matrix Z.
@@ -79,6 +80,7 @@ def build_whole_plot_indicator(n_total: int, n_wp: int, subplots_per_wp: int) ->
 # ---------------------------------------------------------------------------
 # Scaled covariance inverse using the Woodbury identity
 # ---------------------------------------------------------------------------
+
 
 def build_split_plot_covariance_inv(Z: np.ndarray, eta: float) -> np.ndarray:
     """Compute Ṽ⁻¹ = (η Z Z' + I_n)⁻¹ using the Woodbury matrix identity.
@@ -124,14 +126,14 @@ def build_split_plot_covariance_inv(Z: np.ndarray, eta: float) -> np.ndarray:
         return np.eye(n, dtype=np.float64)
 
     # D = I_{n_wp} + η Z'Z  →  diagonal entries = 1 + η * (wp_size_i)
-    ZtZ_diag = np.sum(Z ** 2, axis=0)          # shape (n_wp,); wp_sizes
-    D_diag = 1.0 + eta * ZtZ_diag              # shape (n_wp,)
-    D_inv_diag = 1.0 / D_diag                  # shape (n_wp,)
+    ZtZ_diag = np.sum(Z**2, axis=0)  # shape (n_wp,); wp_sizes
+    D_diag = 1.0 + eta * ZtZ_diag  # shape (n_wp,)
+    D_inv_diag = 1.0 / D_diag  # shape (n_wp,)
 
     # Ṽ⁻¹ = I − η Z diag(D_inv) Z'
     # = I − η (Z * D_inv_diag) Z'   [broadcast scale each column of Z]
-    ZD = Z * D_inv_diag[np.newaxis, :]         # shape (n, n_wp)
-    correction = eta * (ZD @ Z.T)              # shape (n, n)
+    ZD = Z * D_inv_diag[np.newaxis, :]  # shape (n, n_wp)
+    correction = eta * (ZD @ Z.T)  # shape (n, n)
 
     V_inv = np.eye(n, dtype=np.float64) - correction
     return V_inv
@@ -140,6 +142,7 @@ def build_split_plot_covariance_inv(Z: np.ndarray, eta: float) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # GLS information matrix
 # ---------------------------------------------------------------------------
+
 
 def gls_information_matrix(
     X: np.ndarray,
@@ -182,6 +185,7 @@ def gls_information_matrix(
 # ---------------------------------------------------------------------------
 # Map HTC factor names → model-matrix column indices
 # ---------------------------------------------------------------------------
+
 
 def htc_factor_cols_from_names(
     p_names: List[str],
@@ -244,6 +248,7 @@ def htc_factor_cols_from_names(
 # Contrast classification (WP vs SP)
 # ---------------------------------------------------------------------------
 
+
 def classify_contrasts(
     L: np.ndarray,
     htc_factor_cols: List[int],
@@ -285,6 +290,7 @@ def classify_contrasts(
 # ---------------------------------------------------------------------------
 # Whole-plot model sub-matrix rank
 # ---------------------------------------------------------------------------
+
 
 def split_plot_rank_wp(
     X: np.ndarray,
@@ -349,6 +355,7 @@ def split_plot_r2_df_denom(
 # Per-contrast denominator degrees of freedom
 # ---------------------------------------------------------------------------
 
+
 def split_plot_df_denom(
     X: np.ndarray,
     Z: np.ndarray,
@@ -405,8 +412,7 @@ def split_plot_df_denom(
     """
     if df_method not in ("auto", "conservative", "sp_only"):
         raise ValueError(
-            f"df_method must be 'auto', 'conservative', or 'sp_only'; "
-            f"got {df_method!r}."
+            f"df_method must be 'auto', 'conservative', or 'sp_only'; " f"got {df_method!r}."
         )
 
     n_total, n_wp = Z.shape

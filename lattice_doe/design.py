@@ -18,6 +18,7 @@ continues to work without modification.
 Do not add new implementation here.  New code belongs in one of the
 modules above.
 """
+
 from __future__ import annotations
 
 # Re-export candidate generation

@@ -27,6 +27,7 @@ Design notes
   start is not yet emitted (it would require instrumenting the parallel-capable
   Fedorov engine).
 """
+
 from __future__ import annotations
 
 import time

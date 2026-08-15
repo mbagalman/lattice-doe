@@ -50,6 +50,7 @@ Key schemas (all keys optional unless noted)
     ``responses`` list of response-spec dicts (required, ≥ 2)
     Optional: ``power_combination``, ``sigma_joint``
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Type, Union
@@ -78,6 +79,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _coerce_L(val: Any, error_cls: Type[Exception], ctx: str) -> np.ndarray:
     """Convert *val* to a float 2-D ndarray; raise *error_cls* if absent/invalid."""
@@ -111,6 +113,7 @@ def _ctx_prefix(context: str) -> str:
 # Public builders
 # ---------------------------------------------------------------------------
 
+
 def build_power_cfg(
     d: Dict[str, Any],
     *,
@@ -137,56 +140,70 @@ def build_power_cfg(
     _ctx = _ctx_prefix(context)
     mode = str(d.get("power_mode", "contrast")).lower()
 
-    alpha     = float(d.get("alpha",     0.05))
-    power     = float(d.get("power",     0.80))
-    max_n     = int(d.get("max_n",       500))
-    max_iter  = int(d.get("max_iter",    200))
+    alpha = float(d.get("alpha", 0.05))
+    power = float(d.get("power", 0.80))
+    max_n = int(d.get("max_n", 500))
+    max_iter = int(d.get("max_iter", 200))
     tol_power = float(d.get("tol_power", 1e-3))
 
     if mode == "r2":
         r2_target = d.get("r2_target")
         if r2_target is None:
             raise error_cls(f"{_ctx}r2 mode requires 'r2_target'.")
-        sigma       = float(d.get("sigma",       1.0))
-        lambda_mode = str(d.get("lambda_mode",   "n"))
+        sigma = float(d.get("sigma", 1.0))
+        lambda_mode = str(d.get("lambda_mode", "n"))
         try:
             return PowerR2Config(
                 r2_target=float(r2_target),
-                alpha=alpha, power=power, sigma=sigma,
-                max_n=max_n, max_iter=max_iter, tol_power=tol_power,
+                alpha=alpha,
+                power=power,
+                sigma=sigma,
+                max_n=max_n,
+                max_iter=max_iter,
+                tol_power=tol_power,
                 lambda_mode=lambda_mode,
             )
         except (ValueError, TypeError) as e:
             raise error_cls(f"{_ctx}invalid PowerR2Config: {e}") from e
 
     if mode == "glm":
-        L     = _coerce_L(d.get("L"), error_cls, _ctx)
+        L = _coerce_L(d.get("L"), error_cls, _ctx)
         delta = _coerce_delta(d.get("delta"), error_cls, _ctx)
         baseline = d.get("baseline")
         if baseline is None:
             raise error_cls(f"{_ctx}glm mode requires 'baseline'.")
         family = str(d.get("family", "binomial"))
-        link   = d.get("link") or None
+        link = d.get("link") or None
         try:
             return PowerGLMContrastConfig(
-                L=L, delta=delta,
+                L=L,
+                delta=delta,
                 baseline=float(baseline),
-                family=family, link=link,
-                alpha=alpha, power=power,
-                max_n=max_n, max_iter=max_iter, tol_power=tol_power,
+                family=family,
+                link=link,
+                alpha=alpha,
+                power=power,
+                max_n=max_n,
+                max_iter=max_iter,
+                tol_power=tol_power,
             )
         except (ValueError, TypeError) as e:
             raise error_cls(f"{_ctx}invalid PowerGLMContrastConfig: {e}") from e
 
     # Default: contrast
-    L     = _coerce_L(d.get("L"), error_cls, _ctx)
+    L = _coerce_L(d.get("L"), error_cls, _ctx)
     delta = _coerce_delta(d.get("delta"), error_cls, _ctx)
     sigma = float(d.get("sigma", 1.0))
     try:
         return PowerContrastConfig(
-            L=L, delta=delta,
-            alpha=alpha, power=power, sigma=sigma,
-            max_n=max_n, max_iter=max_iter, tol_power=tol_power,
+            L=L,
+            delta=delta,
+            alpha=alpha,
+            power=power,
+            sigma=sigma,
+            max_n=max_n,
+            max_iter=max_iter,
+            tol_power=tol_power,
         )
     except (ValueError, TypeError) as e:
         raise error_cls(f"{_ctx}invalid PowerContrastConfig: {e}") from e
@@ -211,9 +228,9 @@ def build_split_plot_opts(
         Human-readable prefix prepended to error messages.
     """
     _ctx = _ctx_prefix(context)
-    htc_factors   = list(d.get("htc_factors", []))
+    htc_factors = list(d.get("htc_factors", []))
     n_whole_plots = int(d.get("n_whole_plots", 4))
-    eta           = float(d.get("eta", 1.0))
+    eta = float(d.get("eta", 1.0))
 
     spwp_raw = d.get("subplots_per_wp")
     if spwp_raw is None:
@@ -269,27 +286,27 @@ def build_design_opts(
     _ctx = _ctx_prefix(context)
 
     kwargs: Dict[str, Any] = dict(
-        criterion              = str(d.get("criterion",           "I")),
-        starts                 = int(d.get("starts",              5)),
-        max_iter               = int(d.get("max_iter",            1000)),
-        random_state           = int(d.get("random_state",        123)),
-        candidate_points       = int(d.get("candidate_points",    2000)),
-        auto_candidate         = bool(d.get("auto_candidate",     False)),
-        cand_min               = int(d.get("cand_min",            1000)),
-        cand_max               = int(d.get("cand_max",            10000)),
-        cat_cells_cap          = int(d.get("cat_cells_cap",       10000)),
-        per_cell_alpha         = float(d.get("per_cell_alpha",    1.5)),
-        per_cell_min           = int(d.get("per_cell_min",        5)),
-        per_cell_max           = int(d.get("per_cell_max",        20)),
-        allow_candidate_growth = bool(d.get("allow_candidate_growth", False)),
-        growth_factor          = float(d.get("growth_factor",     2.0)),
-        xtx_jitter             = float(d.get("xtx_jitter",        1e-8)),
-        algo                   = str(d.get("algo",                "fedorov")),
-        parallel_seed_stride   = int(d.get("parallel_seed_stride", 10000)),
-        workers                = d.get("workers"),          # None is valid
-        block_factor_name      = str(d.get("block_factor_name",  "Block")),
-        preallocate_categorical= bool(d.get("preallocate_categorical", False)),
-        alloc_min_per_cell     = int(d.get("alloc_min_per_cell", 1)),
+        criterion=str(d.get("criterion", "I")),
+        starts=int(d.get("starts", 5)),
+        max_iter=int(d.get("max_iter", 1000)),
+        random_state=int(d.get("random_state", 123)),
+        candidate_points=int(d.get("candidate_points", 2000)),
+        auto_candidate=bool(d.get("auto_candidate", False)),
+        cand_min=int(d.get("cand_min", 1000)),
+        cand_max=int(d.get("cand_max", 10000)),
+        cat_cells_cap=int(d.get("cat_cells_cap", 10000)),
+        per_cell_alpha=float(d.get("per_cell_alpha", 1.5)),
+        per_cell_min=int(d.get("per_cell_min", 5)),
+        per_cell_max=int(d.get("per_cell_max", 20)),
+        allow_candidate_growth=bool(d.get("allow_candidate_growth", False)),
+        growth_factor=float(d.get("growth_factor", 2.0)),
+        xtx_jitter=float(d.get("xtx_jitter", 1e-8)),
+        algo=str(d.get("algo", "fedorov")),
+        parallel_seed_stride=int(d.get("parallel_seed_stride", 10000)),
+        workers=d.get("workers"),  # None is valid
+        block_factor_name=str(d.get("block_factor_name", "Block")),
+        preallocate_categorical=bool(d.get("preallocate_categorical", False)),
+        alloc_min_per_cell=int(d.get("alloc_min_per_cell", 1)),
     )
 
     # Conditional: n_blocks (only when ≥ 2)
@@ -315,9 +332,7 @@ def build_design_opts(
     # Nested split-plot options
     sp_d = d.get("split_plot")
     if sp_d is not None and isinstance(sp_d, dict):
-        kwargs["split_plot"] = build_split_plot_opts(
-            sp_d, error_cls=error_cls, context=context
-        )
+        kwargs["split_plot"] = build_split_plot_opts(sp_d, error_cls=error_cls, context=context)
 
     try:
         return DesignOptions(**kwargs)
@@ -360,7 +375,7 @@ def build_response_spec(
         context=f"{context}: response '{name}'" if context else f"response '{name}'",
     )
     formula = d.get("formula") or None
-    weight  = float(d.get("weight", 1.0))
+    weight = float(d.get("weight", 1.0))
 
     try:
         return ResponseSpec(name=name, power_cfg=pcfg, formula=formula, weight=weight)
@@ -391,14 +406,10 @@ def build_multi_response(
     raw_responses: List[Dict[str, Any]] = d.get("responses", [])
     if len(raw_responses) < 2:
         raise error_cls(
-            f"{_ctx}multi-response requires at least 2 responses; "
-            f"got {len(raw_responses)}."
+            f"{_ctx}multi-response requires at least 2 responses; " f"got {len(raw_responses)}."
         )
 
-    specs = [
-        build_response_spec(r, error_cls=error_cls, context=context)
-        for r in raw_responses
-    ]
+    specs = [build_response_spec(r, error_cls=error_cls, context=context) for r in raw_responses]
 
     power_combination = str(d.get("power_combination", "min"))
 

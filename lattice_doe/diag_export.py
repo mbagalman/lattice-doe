@@ -1,4 +1,5 @@
 """Diagnostic file export (CSV, PNG, HTML)."""
+
 from __future__ import annotations
 
 import base64
@@ -12,9 +13,11 @@ import pandas as pd
 
 try:
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
+
     _HAS_MATPLOTLIB = True
 except ImportError:
     _HAS_MATPLOTLIB = False
@@ -61,9 +64,7 @@ def export_diagnostics(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not os.access(output_path.parent, os.W_OK):
-        raise PermissionError(
-            f"No write permissions for output directory: {output_path.parent}"
-        )
+        raise PermissionError(f"No write permissions for output directory: {output_path.parent}")
 
     # Compute all metrics
     metrics = compute_design_metrics(X, include_vif=True, X_cand=None, feature_names=feature_names)
@@ -93,10 +94,12 @@ def export_diagnostics(
             }
             summary_df = pd.DataFrame(summary_data)
 
-            lev_df = pd.DataFrame({
-                "run": range(1, len(metrics["leverages"]) + 1),
-                "leverage": metrics["leverages"],
-            })
+            lev_df = pd.DataFrame(
+                {
+                    "run": range(1, len(metrics["leverages"]) + 1),
+                    "leverage": metrics["leverages"],
+                }
+            )
 
             if "csv" in formats:
                 summary_path = output_path.with_suffix(".summary.csv")

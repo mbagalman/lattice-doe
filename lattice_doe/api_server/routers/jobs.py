@@ -13,6 +13,7 @@ stream events instead of holding one request open for 30–120 s:
 When the concurrency limit is reached, submissions return ``503`` with a
 ``Retry-After`` header.
 """
+
 from __future__ import annotations
 
 import json
@@ -118,9 +119,7 @@ async def submit_design(request: DesignRequest, http: Request) -> JSONResponse:
     status_code=202,
     summary="Submit a multi-response design search as an asynchronous job",
 )
-async def submit_multiresponse(
-    request: MultiResponseDesignRequest, http: Request
-) -> JSONResponse:
+async def submit_multiresponse(request: MultiResponseDesignRequest, http: Request) -> JSONResponse:
     return _submit(http, "multiresponse_design", _multiresponse_runner(request))
 
 
