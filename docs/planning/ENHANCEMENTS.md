@@ -47,10 +47,15 @@ Move an item to **In Progress** or **Completed** when work starts/finishes.
 
 | # | Enhancement | Description | Est. LOE | Value | Key files |
 |---|---|---|---|---|---|
+| 27 | **PyPI release** | Publish `lattice-doe` to PyPI so `pip install lattice-doe[all]` works (today install requires a source checkout). CI already builds and smoke-tests the wheel; remaining work is a release checklist (version/changelog/tag), a TestPyPI dry run, and `twine upload`. From external feedback triage 2026-08-15. | 1–2 days | High | `pyproject.toml`, `README.md`, `.github/workflows/ci.yml` |
+| 28 | **Contributor on-ramp** | Add `CONTRIBUTING.md` (dev setup, test/format/type gates, PR expectations) plus GitHub issue and PR templates, so external adopters can file usable reports. From external feedback triage 2026-08-15. | 0.5–1 day | Medium | `CONTRIBUTING.md` (new), `.github/` |
+
 ### Medium effort · High value
 
 | # | Enhancement | Description | Est. LOE | Value | Key files |
 |---|---|---|---|---|---|
+| 29 | **Examples gallery (notebooks)** | An `examples/` directory of runnable Jupyter notebooks walking real-world scenarios end-to-end (constrained screening, GLM dose–response, split-plot process experiment, multi-response, augmentation). Doubles as showcase material for the README and a future PyPI page. From external feedback triage 2026-08-15. | 3–5 days | High | `examples/` (new), `README.md` |
+| 30 | **Hosted API reference** | Generate a browsable API reference from the existing docstrings (Sphinx + napoleon or mkdocstrings) and publish it (Read the Docs or GitHub Pages), linked from the README. Complements the narrative markdown docs, which intentionally don't enumerate every function. From external feedback triage 2026-08-15. | 2–4 days | Medium-High | `docs/`, `pyproject.toml` |
 
 ### High effort · High value
 
@@ -491,6 +496,33 @@ Severity: 🔴 Critical · 🟠 High · 🟡 Medium · 🔵 Low
 
 ---
 
+## External Feedback Triage (2026-08-15)
+
+An external AI-generated review of the repo ("Lattice-DOE Feedback", provenance unrecorded)
+was triaged against the current repo state; the source file was discarded after triage.
+Disposition of its suggestions:
+
+- **Already handled — no action:** README problem-statement opener; weasyprint system-deps
+  note for non-Docker users (README, PDF-export section); CI (`.github/workflows/ci.yml`
+  runs the fast suite plus a wheel build + smoke-install — the review, like the 2026-03-16
+  documentation review, predates it); coordinate-exchange search
+  (`DesignOptions.algo="coordinate"`); inequality constraints (the constraint DSL already
+  allows comparison/boolean operators); user-configurable ridge (`jitter=` is a public
+  kwarg on all power functions, and `diag_metrics` reports condition numbers); simulation
+  caveats for GLM/split-plot approximations (SR-2 warning + docstring scope notes; core
+  formulas Monte Carlo-verified in the 2026-07-12 audit).
+- **Already tracked — not duplicated:** Bayesian/robust design (Backlog #24, still open);
+  stricter private-API surface (AR-4 idea below).
+- **Promoted to Backlog:** #27 PyPI release, #28 contributor on-ramp, #29 examples
+  gallery, #30 hosted API reference.
+- **Added to Ideas below:** commercial-tool benchmarks, live Streamlit demo, methods
+  note/arXiv preprint, custom candidate sets, constraint-aware candidate top-up,
+  statsmodels post-design verification.
+- **Discarded:** minor factual errors (claimed no CI, 16 test files, no leftover
+  patch-note comments) and praise with no action attached.
+
+---
+
 ## Ideas / Future Consideration
 
 Add rough ideas here before they are fleshed out enough to promote to the backlog.
@@ -505,3 +537,9 @@ Add rough ideas here before they are fleshed out enough to promote to the backlo
 - **Satterthwaite / Kenward-Roger denominator df for split-plot power (SR-3):** Replace the WP-vs-SP stratum classification heuristic in `contrast_power_sp` with a Satterthwaite or Kenward-Roger df calculation. This is important for unbalanced split-plot designs and configurations with multiple variance components. Would require estimating the Satterthwaite df from the GLS information matrix and the variance component structure.
 - **Correlated multi-response power beyond OLS shared-formula (SR-4):** Extend `sigma_joint` / Hotelling T² support to cover (a) GLM multi-response runs and (b) multi-response split-plot designs. Currently both combinations are explicitly rejected. A principled extension would require a multivariate Wald test that incorporates the GLS variance structure for split-plot or the GLM Wald chi-square covariance for GLM responses.
 - **Narrow `__init__` export surface (AR-4):** The top-level package re-exports low-level internals (`build_whole_plot_indicator`, `build_split_plot_covariance_inv`, `gls_information_matrix`, `build_candidate`, `build_split_plot_candidate`, `build_model_matrix`) that most users will never call directly. Narrowing `__all__` to the core analytical surface and moving optional integrations (Sheets, Excel, widgets, split-plot covariance utilities) behind explicit submodule imports would give the public API a cleaner shape. Not urgent; would require a deprecation cycle if any downstream callers rely on top-level access. Key file: `lattice_doe/__init__.py`.
+- **Benchmark suite vs. commercial DOE software (JMP, Design-Expert, SAS)** on standard test problems (D/I-efficiency and run counts at fixed power) — credibility material for the README and any methods note
+- **Live Streamlit demo** on Streamlit Community Cloud, linked from the README (PDF export is unavailable there — already documented)
+- **Short methods note / arXiv preprint** describing the power-assured search: minimal-n bisection + verification window, then criterion-optimal design at that n
+- **User-supplied custom candidate sets:** accept a DataFrame of allowed runs in place of lattice/LHS generation (discrete mixture spaces, pre-approved run lists); today candidates are always generated internally
+- **Constraint-aware candidate top-up:** when `constraint_func` filters out many points, resample until the requested `candidate_points` survive instead of proceeding with the shrunken set (today `build_candidate` warns but continues; tight constraints + `auto_candidate` can undersample feasible pockets)
+- **`statsmodels` post-design verification:** helper that simulates responses from the returned design and fits the planned model, confirming empirical power/coverage (complements the Monte Carlo power idea above)
