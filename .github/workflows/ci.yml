@@ -7,15 +7,20 @@ on:
 
 jobs:
   test:
-    name: Test (Python 3.11, fast suite)
+    name: Test (Python ${{ matrix.python-version }}, fast suite)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pyproject.toml advertises py39-py312 (TD-10): test all of them.
+        python-version: ['3.9', '3.10', '3.11', '3.12']
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Install package + test deps
@@ -26,8 +31,76 @@ jobs:
           pip install -e ".[cli]"
           pip install pytest pytest-cov pytest-anyio
 
-      - name: Run fast test suite
+      - name: Run fast test suite (coverage figure is fast-suite-only)
+        # The slow tests (127, incl. the api_server integration tests) run in
+        # the scheduled slow-suite workflow; the coverage printed here
+        # understates modules whose tests are slow-marked. The full-suite
+        # coverage number comes from slow-suite.yml.
         run: pytest -m "not slow"
+
+  gates:
+    name: Static gates (ruff + mypy, no-grow baselines)
+    runs-on: ubuntu-latest
+    env:
+      # Baselines measured 2026-08-15 after IA-1/TD-9 (ledgered in
+      # docs/planning/ENHANCEMENTS.md, TD-11). The gates fail on GROWTH only;
+      # when a cleanup lowers a count, ratchet the baseline down here in the
+      # same PR. Tool versions and Python are pinned below because both
+      # counts are version-sensitive.
+      RUFF_BASELINE: 54
+      MYPY_BASELINE: 216
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          # Matches the environment the baselines were measured on.
+          python-version: '3.14'
+          cache: pip
+
+      - name: Install package + pinned linters
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[cli]"
+          pip install ruff==0.15.12 mypy==1.20.2
+
+      - name: ruff no-grow gate
+        run: |
+          # --quiet suppresses the "Found N errors" / fixable-hint summary
+          # lines so wc -l counts findings only.
+          ruff check lattice_doe/ --output-format=concise --exit-zero --quiet > ruff.out
+          count=$(wc -l < ruff.out)
+          echo "ruff findings: $count (baseline: $RUFF_BASELINE)"
+          if [ "$count" -gt "$RUFF_BASELINE" ]; then
+            echo "::error::ruff findings grew above the baseline. New findings:"
+            cat ruff.out
+            exit 1
+          fi
+          if [ "$count" -lt "$RUFF_BASELINE" ]; then
+            echo "::notice::ruff findings dropped to $count - ratchet RUFF_BASELINE down."
+          fi
+
+      - name: mypy no-grow gate
+        run: |
+          mypy lattice_doe/ > mypy.out 2>&1 || true
+          # Guard against a tool crash reading as "0 errors": require the
+          # summary line before trusting the count.
+          if ! grep -qE "Found [0-9]+ errors?|Success: no issues" mypy.out; then
+            echo "::error::mypy did not complete"
+            cat mypy.out
+            exit 1
+          fi
+          count=$(grep -c "error:" mypy.out || true)
+          echo "mypy errors: $count (baseline: $MYPY_BASELINE)"
+          if [ "$count" -gt "$MYPY_BASELINE" ]; then
+            echo "::error::mypy errors grew above the baseline. Diff against a clean checkout to find the new ones."
+            tail -40 mypy.out
+            exit 1
+          fi
+          if [ "$count" -lt "$MYPY_BASELINE" ]; then
+            echo "::notice::mypy errors dropped to $count - ratchet MYPY_BASELINE down."
+          fi
 
   build:
     name: Build wheel + smoke-install
