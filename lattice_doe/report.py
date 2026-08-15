@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 import numpy as np
+import pandas as pd
 
 __all__ = ["generate_report"]
 
@@ -92,18 +93,13 @@ def _build_config_ctx(formula: str, factors: dict, power_cfg: Any) -> dict:
         if isinstance(spec, (list, tuple)):
             # Detect categorical vs continuous:
             # categorical = list of strings; continuous = 2-element numeric tuple/list
-            is_continuous = (
-                len(spec) == 2
-                and all(isinstance(v, (int, float)) for v in spec)
-            )
+            is_continuous = len(spec) == 2 and all(isinstance(v, (int, float)) for v in spec)
             if is_continuous:
                 factor_list.append(
                     {"name": name, "type": "continuous", "low": spec[0], "high": spec[1]}
                 )
             else:
-                factor_list.append(
-                    {"name": name, "type": "categorical", "levels": list(spec)}
-                )
+                factor_list.append({"name": name, "type": "categorical", "levels": list(spec)})
         else:
             # Fallback: treat as opaque string
             factor_list.append({"name": name, "type": "unknown", "spec": str(spec)})
@@ -305,6 +301,8 @@ def _build_power_curve_figure(
             n_points=25,
         )
         curve_df = curve_result["data"]
+        if not isinstance(curve_df, pd.DataFrame):  # narrows the result-dict union
+            return None
     except Exception:
         return None
 
@@ -315,22 +313,27 @@ def _build_power_curve_figure(
         import plotly.graph_objects as go
 
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=curve_df["n"], y=curve_df["power"],
-            mode="lines+markers",
-            name="Power",
-            line=dict(color="#1f77b4", width=2),
-            marker=dict(size=5),
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=curve_df["n"],
+                y=curve_df["power"],
+                mode="lines+markers",
+                name="Power",
+                line=dict(color="#1f77b4", width=2),
+                marker=dict(size=5),
+            )
+        )
         fig.add_hline(
             y=target_power,
-            line_dash="dash", line_color="#d62728",
+            line_dash="dash",
+            line_color="#d62728",
             annotation_text=f"Target {target_power:.0%}",
             annotation_position="bottom right",
         )
         fig.add_vline(
             x=n_result,
-            line_dash="dot", line_color="#2ca02c",
+            line_dash="dot",
+            line_color="#2ca02c",
             annotation_text=f"n={n_result}",
             annotation_position="top left",
         )
@@ -352,22 +355,22 @@ def _build_power_curve_figure(
     # --- Fallback: Matplotlib ---
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots(figsize=(7, 3))
-        ax.plot(curve_df["n"], curve_df["power"], color="#1f77b4", marker="o",
-                markersize=4, linewidth=2)
-        ax.axhline(target_power, color="#d62728", linestyle="--",
-                   label=f"Target {target_power:.0%}")
-        ax.axvline(n_result, color="#2ca02c", linestyle=":",
-                   label=f"n = {n_result}")
+        ax.plot(
+            curve_df["n"], curve_df["power"], color="#1f77b4", marker="o", markersize=4, linewidth=2
+        )
+        ax.axhline(
+            target_power, color="#d62728", linestyle="--", label=f"Target {target_power:.0%}"
+        )
+        ax.axvline(n_result, color="#2ca02c", linestyle=":", label=f"n = {n_result}")
         ax.set_xlabel("Sample size (n)")
         ax.set_ylabel("Power")
         ax.set_ylim(0, 1.05)
-        ax.yaxis.set_major_formatter(
-            matplotlib.ticker.PercentFormatter(xmax=1.0, decimals=0)
-        )
+        ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1.0, decimals=0))
         ax.legend(fontsize=9)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
