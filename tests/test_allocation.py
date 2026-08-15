@@ -8,6 +8,7 @@ Tests cover:
     bounds propagation, DesignOptions passthrough, formula interaction
 """
 import numpy as np
+import pandas as pd
 import pytest
 
 from lattice_doe import DesignOptions, i_optimal_allocation
@@ -15,6 +16,8 @@ from lattice_doe.allocation import (
     _round_allocation,
     _wynn_multiplicative_I,
 )
+from lattice_doe.candidate import spec_cat_cols
+from lattice_doe.iopt_search import build_i_opt_design_with_idx
 
 
 # ---------------------------------------------------------------------------
@@ -288,3 +291,96 @@ class TestDesignOptionsAllocationValidation:
         assert opts.alloc_max_per_cell is None
         assert opts.alloc_wynn_max_iter == 500
         assert opts.alloc_wynn_tol == 1e-6
+
+
+# ---------------------------------------------------------------------------
+# TD-9: cat_cols resolved inside the builder from the factor spec
+# ---------------------------------------------------------------------------
+
+class TestTD9FactorsResolution:
+    """P2 regression (IA-2/TD-9): five review findings (SR-28/30/31/33/IA-2)
+    were call sites enabling preallocate_categorical without threading
+    spec-derived cat_cols, silently skipping allocation for numeric-coded
+    categoricals. The builder now resolves cat_cols from an optional
+    ``factors`` argument; priority is explicit cat_cols > factors > dtype
+    inference."""
+
+    @staticmethod
+    def _skewed_cand():
+        # Level 2 is sparse, so an unconstrained search starves it: the
+        # dtype-inference path selects {0: 4, 1: 4, 2: 1} while allocation
+        # with alloc_min_per_cell=2 selects {0: 3, 1: 3, 2: 3}.
+        g = np.array([0] * 20 + [1] * 20 + [2] * 4)
+        x = np.concatenate([
+            np.linspace(-1, 1, 20), np.linspace(-1, 1, 20),
+            np.linspace(-0.2, 0.2, 4),
+        ])
+        return pd.DataFrame({"g": g, "x": x})
+
+    @staticmethod
+    def _counts(cand, idx):
+        return {int(k): int(v) for k, v in
+                cand.loc[idx, "g"].value_counts().sort_index().items()}
+
+    _KW = dict(formula="1 + C(g) + x", n=9, random_state=0,
+               preallocate_categorical=True, alloc_min_per_cell=2)
+
+    def test_spec_cat_cols_exact(self):
+        factors = {"g": [0, 1, 2], "x": (-1.0, 1.0), "m": ["a", "b"]}
+        assert spec_cat_cols(factors) == ["g", "m"]
+
+    def test_factors_resolves_numeric_coded_categorical(self):
+        cand = self._skewed_cand()
+        _, idx, _ = build_i_opt_design_with_idx(
+            cand=cand, factors={"g": [0, 1, 2], "x": (-1.0, 1.0)}, **self._KW
+        )
+        assert self._counts(cand, idx) == {0: 3, 1: 3, 2: 3}
+
+    def test_factors_matches_explicit_cat_cols_selection(self):
+        cand = self._skewed_cand()
+        _, via_factors, _ = build_i_opt_design_with_idx(
+            cand=cand, factors={"g": [0, 1, 2], "x": (-1.0, 1.0)}, **self._KW
+        )
+        _, via_cat_cols, _ = build_i_opt_design_with_idx(
+            cand=cand, cat_cols=["g"], **self._KW
+        )
+        assert sorted(via_factors.tolist()) == sorted(via_cat_cols.tolist())
+
+    def test_explicit_cat_cols_overrides_factors(self):
+        # factors (wrongly) claims g is continuous; explicit cat_cols wins.
+        cand = self._skewed_cand()
+        _, idx, _ = build_i_opt_design_with_idx(
+            cand=cand, factors={"g": (0.0, 2.0), "x": (-1.0, 1.0)},
+            cat_cols=["g"], **self._KW
+        )
+        assert self._counts(cand, idx) == {0: 3, 1: 3, 2: 3}
+
+    def test_empty_cat_cols_disables_spec_resolution(self):
+        # cat_cols=[] is an explicit "no categorical columns" override: the
+        # search must match the no-metadata dtype-inference path exactly.
+        cand = self._skewed_cand()
+        _, off, _ = build_i_opt_design_with_idx(
+            cand=cand, factors={"g": [0, 1, 2], "x": (-1.0, 1.0)},
+            cat_cols=[], **self._KW
+        )
+        _, neither, _ = build_i_opt_design_with_idx(cand=cand, **self._KW)
+        assert sorted(off.tolist()) == sorted(neither.tolist())
+
+    def test_dtype_fallback_documents_numeric_coded_miss(self):
+        # Without factors or cat_cols, dtype inference classifies numeric-
+        # coded g as continuous, so allocation is skipped and the per-cell
+        # minimum silently violated. Documented fallback for direct callers;
+        # every production call site passes factors (TD-9).
+        cand = self._skewed_cand()
+        _, idx, _ = build_i_opt_design_with_idx(cand=cand, **self._KW)
+        assert self._counts(cand, idx) == {0: 4, 1: 4, 2: 1}
+
+    def test_string_categorical_dtype_fallback_still_allocates(self):
+        # Backcompat: string-level categoricals are caught by dtype
+        # inference, so direct callers without factors still get allocation.
+        cand = self._skewed_cand()
+        cand["g"] = cand["g"].map({0: "a", 1: "b", 2: "c"})
+        _, idx, _ = build_i_opt_design_with_idx(cand=cand, **self._KW)
+        counts = cand.loc[idx, "g"].value_counts()
+        assert sorted(counts.index) == ["a", "b", "c"]
+        assert int(counts.min()) >= 2

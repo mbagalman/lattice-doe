@@ -34,7 +34,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 # module, so there is no circularity.
 from .utils import FactorSpec
 
-from .candidate import build_candidate, build_search_candidate
+from .candidate import build_candidate, build_search_candidate, spec_cat_cols
 from .model_matrix import build_model_matrix
 from .config import DesignOptions
 from .split_plot import (
@@ -879,6 +879,7 @@ def build_i_opt_design_with_idx(
     alloc_wynn_tol: float = 1e-6,
     cat_cells_cap: int = 10_000,
     cat_cols: Optional[List[str]] = None,
+    factors: Optional[FactorSpec] = None,
 ) -> Tuple[pd.DataFrame, np.ndarray, List[str]]:
     """Build an I-optimal design and also return selected row indices.
 
@@ -934,10 +935,18 @@ def build_i_opt_design_with_idx(
     cat_cells_cap : int, default 10 000
         Maximum number of categorical cells; raises if exceeded.
     cat_cols : list of str, optional
-        Names of the categorical factor columns, taken from the original
-        factor specification (SR-28). When omitted, categorical columns are
-        inferred from non-numeric dtypes — which misclassifies numeric-coded
-        categories such as ``[0, 1, 2]`` levels as continuous.
+        Explicit names of the categorical factor columns. Takes priority
+        over *factors* when both are given.
+    factors : dict, optional
+        The factor specification the candidate set was built from. When
+        *cat_cols* is omitted, categorical column names are resolved here
+        from the spec (``spec_cat_cols``), so every call site that passes
+        *factors* gets correct classification of numeric-coded categories
+        such as ``[0, 1, 2]`` levels (TD-9 — five review findings,
+        SR-28/30/31/33/IA-2, were call sites forgetting to thread
+        ``cat_cols``). Only when *both* are omitted are categorical columns
+        inferred from non-numeric dtypes, which misclassifies numeric-coded
+        categories as continuous.
 
     Returns
     -------
@@ -948,6 +957,13 @@ def build_i_opt_design_with_idx(
     """
     if len(cand) == 0:
         raise ValueError("Candidate set 'cand' is empty.")
+
+    # Resolve categorical columns from the factor spec when the caller did
+    # not pass them explicitly — the builder is the single place this
+    # happens, so call sites cannot silently fall back to dtype inference
+    # by forgetting cat_cols (TD-9).
+    if cat_cols is None and factors is not None:
+        cat_cols = spec_cat_cols(factors)
 
     # Pre-allocation path — delegates entirely to _preallocated_design
     if preallocate_categorical:

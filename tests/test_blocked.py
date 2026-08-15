@@ -916,3 +916,69 @@ class TestSR17BlockedR2DfNum:
     def test_unblocked_df_num_unchanged(self):
         rep = self._run(n_blocks=None)["report"]
         assert rep["df_num"] == 2
+
+
+# ---------------------------------------------------------------------------
+# IA-2 / TD-9: blocked designs must thread the factor spec into the
+# per-block searches so categorical pre-allocation engages for
+# numeric-coded categoricals
+# ---------------------------------------------------------------------------
+
+class TestIA2BlockedPreallocation:
+    """P2 regression (IA-2): build_blocked_design forwarded every allocation
+    option except cat_cols and had no way to derive it, so numeric-coded
+    categoricals fell to dtype inference, allocation was silently skipped,
+    and alloc_min_per_cell was accepted but unenforced (counts {4, 4, 1}
+    per block on this fixture). Fixed by TD-9: the factor spec is threaded
+    through and resolved inside the builder."""
+
+    @staticmethod
+    def _skewed_cand():
+        g = np.array([0] * 20 + [1] * 20 + [2] * 4)
+        x = np.concatenate([
+            np.linspace(-1, 1, 20), np.linspace(-1, 1, 20),
+            np.linspace(-0.2, 0.2, 4),
+        ])
+        return pd.DataFrame({"g": g, "x": x})
+
+    def test_numeric_coded_categorical_honors_min_per_cell(self):
+        cand = self._skewed_cand()
+        design_df, _ = build_blocked_design(
+            cand=cand, formula="1 + C(g) + x", n=18, n_blocks=2,
+            block_sizes=[9, 9], block_factor_name="Block",
+            aug_formula="1 + C(g) + x + C(Block)",
+            criterion="I", n_start=3, algo="fedorov", max_iter=200,
+            random_state=0, workers=None, parallel_seed_stride=10_000,
+            jitter=1e-8, preallocate_categorical=True, alloc_min_per_cell=2,
+            alloc_max_per_cell=None, alloc_wynn_max_iter=500,
+            alloc_wynn_tol=1e-6, cat_cells_cap=10_000,
+            factors={"g": [0, 1, 2], "x": (-1.0, 1.0)},
+        )
+        per_block = (
+            design_df.groupby("Block")["g"].value_counts().unstack(fill_value=0)
+        )
+        # Pre-fix both blocks were {0: 4, 1: 4, 2: 1} — bound violated.
+        for block in per_block.index:
+            counts = {int(k): int(v) for k, v in per_block.loc[block].items()}
+            assert counts == {0: 3, 1: 3, 2: 3}, block
+
+    def test_find_optimal_design_blocked_threads_factors(self):
+        # Public-path lock: factors must reach the per-block searches
+        # through _blocked_kwargs. Bounds hold in every block.
+        factors = {"g": [0, 1, 2], "x": (-1.0, 1.0)}
+        cfg = PowerContrastConfig(
+            alpha=0.05, power=0.8,
+            L=[[0, 1, 0, 0], [0, 0, 1, 0]], delta=[1.2, 1.2], sigma=1.0,
+        )
+        opts = DesignOptions(
+            random_state=0, starts=2, n_blocks=2,
+            preallocate_categorical=True, alloc_min_per_cell=2,
+            candidate_points=60,
+        )
+        res = find_optimal_design("1 + C(g) + x", factors, cfg, opts)
+        per_block = (
+            res["design_df"].groupby("Block")["g"]
+            .value_counts().unstack(fill_value=0)
+        )
+        assert per_block.shape[1] == 3
+        assert bool((per_block >= 2).all().all())

@@ -38,6 +38,11 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+# Runtime import (not TYPE_CHECKING): typing.get_type_hints() on the public
+# functions must be able to resolve the alias. utils has no imports from this
+# module, so there is no circularity.
+from .utils import FactorSpec
+
 from .model_matrix import build_model_matrix
 
 
@@ -119,6 +124,7 @@ def build_blocked_design(
     alloc_wynn_max_iter: int,
     alloc_wynn_tol: float,
     cat_cells_cap: int,
+    factors: Optional[FactorSpec] = None,
 ) -> Tuple[pd.DataFrame, np.ndarray]:
     """Run within-block I-optimal searches and combine into a blocked design.
 
@@ -146,6 +152,12 @@ def build_blocked_design(
     criterion, n_start, algo, max_iter, random_state, workers, ... :
         Forwarded to ``build_i_opt_design_with_idx`` for each within-block search.
         Each block gets seed ``random_state + b_idx * parallel_seed_stride``.
+    factors : dict, optional
+        The factor specification, forwarded to each within-block search so
+        the builder can classify numeric-coded categoricals correctly for
+        pre-allocation (IA-2/TD-9). Without it, dtype inference silently
+        skipped allocation — and its per-cell bounds — for specs such as
+        ``{"g": [0, 1, 2]}``.
 
     Returns
     -------
@@ -207,6 +219,7 @@ def build_blocked_design(
             alloc_wynn_max_iter=alloc_wynn_max_iter,
             alloc_wynn_tol=alloc_wynn_tol,
             cat_cells_cap=cat_cells_cap,
+            factors=factors,
         )
         design_b = design_b.copy()
         design_b[block_factor_name] = b_label

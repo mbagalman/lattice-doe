@@ -922,9 +922,9 @@ def find_optimal_design(
     # Categorical columns from the factor SPEC, not dtype inference (SR-28):
     # numeric-coded categories like {"g": [0, 1, 2]} have numeric dtype but
     # are categorical factors.
-    from .candidate import _is_continuous_spec as _is_cont_spec
+    from .candidate import spec_cat_cols
 
-    _spec_cat_cols = [k for k, v in factors.items() if not _is_cont_spec(v)]
+    _spec_cat_cols = spec_cat_cols(factors)
 
     _n_cand = len(cand)
     _prealloc_replicates = (
@@ -971,11 +971,11 @@ def find_optimal_design(
         alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
         alloc_wynn_tol=design_opts.alloc_wynn_tol,
         cat_cells_cap=design_opts.cat_cells_cap,
-        cat_cols=_spec_cat_cols,
+        factors=factors,
     )
 
     # Kwargs for build_blocked_design (blocked mode only)
-    _blocked_kwargs = dict(
+    _blocked_kwargs: Dict[str, Any] = dict(
         cand=cand,
         formula=formula,
         n_blocks=design_opts.n_blocks,
@@ -996,6 +996,7 @@ def find_optimal_design(
         alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
         alloc_wynn_tol=design_opts.alloc_wynn_tol,
         cat_cells_cap=design_opts.cat_cells_cap,
+        factors=factors,
     ) if is_blocked else {}
 
     if _reporter is not None:
@@ -2164,11 +2165,9 @@ def find_multiresponse_design(
     # Spec-derived categorical names, not dtype inference (SR-28/SR-30):
     # numeric-coded categories like {"g": [0, 1, 2]} have numeric dtype but
     # are categorical factors.
-    from .candidate import _is_continuous_spec as _is_cont_spec_mr
+    from .candidate import spec_cat_cols as _spec_cat_cols_fn
 
-    _spec_cat_cols_mr = [
-        k for k, v in factors.items() if not _is_cont_spec_mr(v)
-    ]
+    _spec_cat_cols_mr = _spec_cat_cols_fn(factors)
     _search_kwargs: Dict[str, Any] = dict(
         cand=cand,
         formula=formula,
@@ -2186,7 +2185,7 @@ def find_multiresponse_design(
         alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
         alloc_wynn_tol=design_opts.alloc_wynn_tol,
         cat_cells_cap=design_opts.cat_cells_cap,
-        cat_cols=_spec_cat_cols_mr,
+        factors=factors,
     )
 
     # Hotelling T² pre-computation: extract shared L and joint Delta

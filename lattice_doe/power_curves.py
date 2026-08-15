@@ -29,7 +29,7 @@ import warnings
 
 from .config import PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig, DesignOptions
 from .config import glm_fisher_weight
-from .candidate import build_search_candidate, _is_continuous_spec
+from .candidate import build_search_candidate, _is_continuous_spec, spec_cat_cols
 from .utils import normalize_factors, FactorSpec
 from .model_matrix import build_model_matrix
 from .iopt_search import build_i_opt_design_with_idx
@@ -140,9 +140,12 @@ def power_curve_by_n(
     # Generate n values (use geometric spacing for better resolution at small n)
     n_values = np.unique(np.geomspace(min_n, max_n, n_points).astype(int))
 
-    # Fail fast if any requested n exceeds the candidate pool size
+    # Fail fast if any requested n exceeds the candidate pool size. With
+    # categorical pre-allocation the requested n is reachable via replication
+    # (SR-33), so the guard only applies when allocation is off.
     n_cand = len(cand)
-    if max(n_values) > n_cand:
+    _prealloc_active = design_opts.preallocate_categorical and bool(spec_cat_cols(factors))
+    if max(n_values) > n_cand and not _prealloc_active:
         raise ValueError(
             f"Largest requested n ({max(n_values)}) exceeds the candidate set size "
             f"({n_cand}). Increase candidate_points in DesignOptions or reduce n_range."
@@ -163,6 +166,18 @@ def power_curve_by_n(
             max_iter=design_opts.max_iter,
             random_state=design_opts.random_state,
             jitter=design_opts.xtx_jitter,
+            # Forward the allocation options (previously dropped here, so the
+            # sweep silently ignored preallocate_categorical) and the factor
+            # spec for categorical resolution inside the builder (TD-9). The
+            # builder falls back to a plain search at n too small for the
+            # per-cell minimums, so small-n sweep points remain feasible.
+            preallocate_categorical=design_opts.preallocate_categorical,
+            alloc_min_per_cell=design_opts.alloc_min_per_cell,
+            alloc_max_per_cell=design_opts.alloc_max_per_cell,
+            alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
+            alloc_wynn_tol=design_opts.alloc_wynn_tol,
+            cat_cells_cap=design_opts.cat_cells_cap,
+            factors=factors,
         )
 
         # Slice the candidate-coded matrix rather than recoding design_df:
@@ -351,6 +366,16 @@ def power_curve_by_effect(
         max_iter=design_opts.max_iter,
         random_state=design_opts.random_state,
         jitter=design_opts.xtx_jitter,
+        # Forward the allocation options (previously dropped here, so the
+        # fixed-n design silently ignored preallocate_categorical) and the
+        # factor spec for categorical resolution inside the builder (TD-9).
+        preallocate_categorical=design_opts.preallocate_categorical,
+        alloc_min_per_cell=design_opts.alloc_min_per_cell,
+        alloc_max_per_cell=design_opts.alloc_max_per_cell,
+        alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
+        alloc_wynn_tol=design_opts.alloc_wynn_tol,
+        cat_cells_cap=design_opts.cat_cells_cap,
+        factors=factors,
     )
 
     # Built ONCE and reused across the loop — sliced from the candidate-coded
@@ -653,11 +678,8 @@ def power_surface_2d(
                 alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
                 alloc_wynn_tol=design_opts.alloc_wynn_tol,
                 cat_cells_cap=design_opts.cat_cells_cap,
-                # Spec-derived categorical names, not dtype inference (SR-28)
-                cat_cols=[
-                    k for k, v in factors.items()
-                    if not _is_continuous_spec(v)
-                ],
+                # Spec-derived categorical resolution inside the builder (SR-28/TD-9)
+                factors=factors,
             )
             _x_cache[n_val] = X_cand[sel_idx, :]
         return _x_cache[n_val]

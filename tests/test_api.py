@@ -200,6 +200,42 @@ class TestPowerCurveByN:
         with pytest.raises(ValueError, match="exceeds the candidate set size"):
             power_curve_by_n(FORMULA, FACTORS, _contrast_cfg(), design_opts=tiny_opts)
 
+    def test_preallocation_replication_allows_n_beyond_pool(self):
+        # TD-9 regression: the sweep now forwards the allocation options
+        # (previously dropped) and the factor spec, so a numeric-coded pure-
+        # categorical space (pool = 3 distinct rows) reaches n > pool via
+        # replication instead of tripping the fail-fast guard (SR-33
+        # semantics). Pre-fix this raised "exceeds the candidate set size".
+        factors = {"g": [0, 1, 2]}
+        cfg = PowerContrastConfig(
+            alpha=0.05, power=0.8,
+            L=[[0, 1, 0], [0, 0, 1]], delta=[1.0, 1.0], sigma=1.0,
+        )
+        opts = DesignOptions(
+            random_state=0, starts=2,
+            preallocate_categorical=True, alloc_min_per_cell=1,
+        )
+        df = power_curve_by_n(
+            "1 + C(g)", factors, cfg, design_opts=opts,
+            n_range=(6, 12), n_points=3, plot=False,
+        )
+        assert df["n"].tolist() == [6, 8, 12]
+
+    def test_guard_still_fires_without_preallocation(self):
+        # The fail-fast guard (CR-3) must be unchanged when allocation is
+        # off: n beyond the pool is genuinely infeasible then.
+        factors = {"g": [0, 1, 2]}
+        cfg = PowerContrastConfig(
+            alpha=0.05, power=0.8,
+            L=[[0, 1, 0], [0, 0, 1]], delta=[1.0, 1.0], sigma=1.0,
+        )
+        opts = DesignOptions(random_state=0, starts=2)
+        with pytest.raises(ValueError, match="exceeds the candidate set size"):
+            power_curve_by_n(
+                "1 + C(g)", factors, cfg, design_opts=opts,
+                n_range=(6, 12), n_points=3, plot=False,
+            )
+
 
 # ---------------------------------------------------------------------------
 # power_curve_by_effect
@@ -251,6 +287,27 @@ class TestPowerCurveByEffect:
             power_curve_by_effect(
                 FORMULA, FACTORS, n=5, power_cfg=_contrast_cfg(), design_opts=tiny_opts
             )
+
+    def test_preallocation_replication_allows_n_beyond_pool(self):
+        # TD-9 regression: the fixed-n design build now forwards the
+        # allocation options (previously dropped) and the factor spec, so
+        # n=9 on a 3-row numeric-coded categorical pool succeeds via
+        # replication. Pre-fix the builder raised "exceeds the candidate
+        # set size n_cand=3".
+        factors = {"g": [0, 1, 2]}
+        cfg = PowerContrastConfig(
+            alpha=0.05, power=0.8,
+            L=[[0, 1, 0], [0, 0, 1]], delta=[1.0, 1.0], sigma=1.0,
+        )
+        opts = DesignOptions(
+            random_state=0, starts=2,
+            preallocate_categorical=True, alloc_min_per_cell=1,
+        )
+        df = power_curve_by_effect(
+            "1 + C(g)", factors, n=9, power_cfg=cfg, design_opts=opts,
+        )
+        assert len(df) > 0
+        assert "power" in df.columns
 
 
 # ---------------------------------------------------------------------------

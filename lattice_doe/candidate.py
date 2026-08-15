@@ -47,6 +47,27 @@ def _is_continuous_spec(spec: Any) -> bool:
     return _spec_is_continuous(spec)
 
 
+def spec_cat_cols(factors: FactorSpec) -> List[str]:
+    """Names of the categorical factors per the factor specification.
+
+    The single derivation used everywhere spec-derived categorical column
+    names are needed (TD-9): dtype inference on a candidate DataFrame
+    misclassifies numeric-coded categories such as ``{"g": [0, 1, 2]}`` as
+    continuous, silently bypassing categorical pre-allocation (SR-28).
+
+    Parameters
+    ----------
+    factors : dict
+        Factor specifications (normalized or legacy forms).
+
+    Returns
+    -------
+    list of str
+        Factor names classified as categorical, in spec order.
+    """
+    return [k for k, v in factors.items() if not _is_continuous_spec(v)]
+
+
 # ---------------------------------------------------------------------
 # Adaptive candidate sizing
 # ---------------------------------------------------------------------

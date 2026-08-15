@@ -1675,7 +1675,7 @@ def power_curve_by_n_multiresponse(
         columns; exactly ``n_points`` rows.
     """
     # Deferred imports keep module load fast and avoid circular refs.
-    from .candidate import build_search_candidate, _is_continuous_spec
+    from .candidate import build_search_candidate
     from .iopt_search import build_i_opt_design_with_idx, build_compound_design
     from .utils import validate_factors, normalize_factors
     from .power import eval_response_power, combine_powers as _combine
@@ -1738,10 +1738,8 @@ def power_curve_by_n_multiresponse(
         alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
         alloc_wynn_tol=design_opts.alloc_wynn_tol,
         cat_cells_cap=design_opts.cat_cells_cap,
-        # Spec-derived categorical names, not dtype inference (SR-33)
-        cat_cols=[
-            k for k, v in factors.items() if not _is_continuous_spec(v)
-        ],
+        # Spec-derived categorical resolution inside the builder (SR-33/TD-9)
+        factors=factors,
     )
 
     # n sweep: exactly n_points values (may include integer duplicates for small ranges)
@@ -1883,7 +1881,7 @@ def multiresponse_sensitivity(
         If any response uses ``PowerR2Config``; sigma scaling is undefined
         for R²-mode responses.
     """
-    from .candidate import build_search_candidate, _is_continuous_spec
+    from .candidate import build_search_candidate, spec_cat_cols
     from .iopt_search import build_i_opt_design_with_idx
     from .utils import validate_factors, normalize_factors
     from .config import PowerR2Config as _PowerR2Config
@@ -1920,7 +1918,7 @@ def multiresponse_sensitivity(
 
     # With categorical pre-allocation the requested n is reachable via
     # replication (SR-33); otherwise keep the historical clip to the pool.
-    _spec_cats_ms = [k for k, v in factors.items() if not _is_continuous_spec(v)]
+    _spec_cats_ms = spec_cat_cols(factors)
     if design_opts.preallocate_categorical and _spec_cats_ms:
         n_safe = int(fixed_n)
     else:
@@ -1943,7 +1941,7 @@ def multiresponse_sensitivity(
         alloc_wynn_max_iter=design_opts.alloc_wynn_max_iter,
         alloc_wynn_tol=design_opts.alloc_wynn_tol,
         cat_cells_cap=design_opts.cat_cells_cap,
-        cat_cols=_spec_cats_ms,
+        factors=factors,
     )
     X = X_cand[idx_]
 
