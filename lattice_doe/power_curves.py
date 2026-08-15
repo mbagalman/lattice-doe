@@ -20,7 +20,7 @@ The module supports both interactive (matplotlib) and data-only outputs.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional, Union, Literal, Tuple
+from typing import Any, Dict, Optional, Union, Literal, Tuple
 import numpy as np
 import pandas as pd
 
@@ -43,6 +43,11 @@ try:
     _HAS_MATPLOTLIB = True
 except ImportError:
     _HAS_MATPLOTLIB = False
+    # Annotation fallback (IA-3): "Figure" appears in public return
+    # annotations, and typing.get_type_hints() on those functions must
+    # resolve in a core-only install (no matplotlib) — same contract as
+    # IA-1, enforced by the __all__-wide sweep test.
+    Figure = Any  # type: ignore[assignment, misc]
 
 
 def power_curve_by_n(

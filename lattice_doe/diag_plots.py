@@ -1,7 +1,7 @@
 """Matplotlib diagnostic figures."""
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,9 @@ try:
     _HAS_MATPLOTLIB = True
 except ImportError:
     _HAS_MATPLOTLIB = False
+    # Annotation fallback (IA-3): get_type_hints() on create_diagnostic_plots
+    # must resolve without matplotlib — same contract as IA-1.
+    Figure = Any  # type: ignore[assignment, misc]
 
 from .diag_metrics import _compute_vif, _has_intercept, compute_leverages
 

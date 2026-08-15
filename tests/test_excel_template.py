@@ -862,6 +862,7 @@ class TestExcelGLMSupport:
             assert "baseline" in col_a_values
 
 
+@requires_openpyxl
 class TestCompoundMatrixExcelExport:
     """UX-66: the Excel writer must export every compound per-response
     matrix as a safely named sheet plus a name-to-sheet index (sheet titles
