@@ -45,10 +45,14 @@ jobs:
       # Baselines measured 2026-08-15 after IA-1/TD-9 (ledgered in
       # docs/planning/ENHANCEMENTS.md, TD-11). The gates fail on GROWTH only;
       # when a cleanup lowers a count, ratchet the baseline down here in the
-      # same PR. Tool versions and Python are pinned below because both
-      # counts are version-sensitive.
+      # same PR. Tool versions, Python, AND the numpy/pandas/stubs versions
+      # are all pinned below because the mypy count depends on every one of
+      # them. Note the mypy baseline is what THIS pinned environment
+      # measures (verified in a local clone of it); a full dev environment
+      # measures slightly higher (~216) because installed-and-typed soft
+      # deps (matplotlib etc.) surface extra errors.
       RUFF_BASELINE: 54
-      MYPY_BASELINE: 216
+      MYPY_BASELINE: 208
     steps:
       - uses: actions/checkout@v4
 
@@ -60,13 +64,18 @@ jobs:
           cache: pip
 
       - name: Install package + pinned linters
-        # pandas-stubs is pinned because the mypy baseline depends on it:
-        # without stubs, pandas is Any (ignore_missing_imports) and the
-        # count collapses (measured: 1 vs 216 on the first run, IA-3 era).
+        # The measurement environment is FULLY pinned — every version here
+        # changes the mypy count:
+        # - pandas-stubs: without it pandas is Any (ignore_missing_imports)
+        #   and most errors vanish
+        # - numpy: 2.5+ stubs use PEP 695 `type` statements, which abort
+        #   mypy entirely under the project's python_version = "3.9"
+        #   ("errors prevented further checking" — the step below fails on
+        #   that marker rather than trusting the 1-error abort count)
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[cli]"
-          pip install ruff==0.15.12 mypy==1.20.2 pandas-stubs==3.0.3.260530
+          pip install ruff==0.15.12 mypy==1.20.2 pandas-stubs==3.0.3.260530 numpy==2.4.2 pandas==2.3.3
 
       - name: ruff no-grow gate
         run: |
@@ -94,6 +103,16 @@ jobs:
             cat mypy.out
             exit 1
           fi
+          # An aborted run ("errors prevented further checking") checks
+          # NOTHING and reports a tiny count — that is a failure, not a
+          # pass (this bit run 3: numpy 2.5 stubs + python_version=3.9
+          # aborted with 1 error and the gate went green on zero analysis).
+          if grep -q "errors prevented further checking" mypy.out; then
+            echo "::error::mypy aborted before checking the project"
+            cat mypy.out
+            exit 1
+          fi
+          tail -1 mypy.out
           count=$(grep -c "error:" mypy.out || true)
           echo "mypy errors: $count (baseline: $MYPY_BASELINE)"
           if [ "$count" -gt "$MYPY_BASELINE" ]; then
