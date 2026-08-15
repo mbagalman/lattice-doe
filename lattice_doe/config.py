@@ -17,11 +17,13 @@ import ast as _ast
 import math as _math
 import warnings as _warnings
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Literal, Union, TYPE_CHECKING
+from typing import Callable, List, Optional, Literal, Union
 import numpy as np  # core dependency
 
-if TYPE_CHECKING:
-    import pandas as pd
+# Runtime import (not TYPE_CHECKING): typing.get_type_hints() on DesignOptions
+# must be able to resolve the pd.Series annotation on constraint_func. pandas
+# is a core dependency, so this adds no install-time requirement.
+import pandas as pd
 
 
 # ---------------------------------------------------------------------

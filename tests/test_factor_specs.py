@@ -299,6 +299,50 @@ class TestDiscriminatedSpecsAnalysisBoundaries:
             hints = typing.get_type_hints(fn)  # NameError before the fix
             assert hints["factors"] == FactorSpec, fn.__name__
 
+    def test_all_public_exports_hints_resolvable_at_runtime(self):
+        """P2 regression (IA-1): the UX-39 sweep above only covers
+        factors-taking functions, so three exports with TYPE_CHECKING-only
+        annotation imports slipped through (DesignOptions -> pd,
+        glm_contrast_power -> PowerGLMContrastConfig, eval_response_power ->
+        ResponseSpec). Sweep every function and class in __all__ so the next
+        sibling cannot: get_type_hints() must not raise on any of them."""
+        import inspect
+        import typing
+        import lattice_doe
+
+        checked = 0
+        for name in lattice_doe.__all__:
+            obj = getattr(lattice_doe, name)
+            if not (inspect.isfunction(obj) or inspect.isclass(obj)):
+                continue  # typing aliases (FactorSpec etc.) have no hints
+            typing.get_type_hints(obj)  # NameError before the IA-1 fix
+            checked += 1
+        # Guard the sweep itself: if __all__ ever collapses, fail loudly
+        # rather than silently checking nothing.
+        assert checked >= 40, f"only {checked} exports swept"
+
+    def test_ia1_exact_hint_targets(self):
+        """The three IA-1 annotations must resolve to the real config/pandas
+        types, not merely stop raising (a bare string annotation left behind
+        would also 'not raise' under a lenient introspector)."""
+        import typing
+        from typing import Callable, Optional
+
+        import pandas as pd
+
+        from lattice_doe import DesignOptions, eval_response_power, glm_contrast_power
+        from lattice_doe.config import PowerGLMContrastConfig, ResponseSpec, SplitPlotOptions
+
+        hints = typing.get_type_hints(glm_contrast_power)
+        assert hints["cfg"] is PowerGLMContrastConfig
+
+        hints = typing.get_type_hints(eval_response_power)
+        assert hints["response"] is ResponseSpec
+        assert hints["split_plot_opts"] == Optional[SplitPlotOptions]
+
+        hints = typing.get_type_hints(DesignOptions)
+        assert hints["constraint_func"] == Optional[Callable[[pd.Series], bool]]
+
     def test_factor_spec_aliases_exported_top_level(self):
         import lattice_doe
         for name in ("FactorSpec", "FactorSpecValue",

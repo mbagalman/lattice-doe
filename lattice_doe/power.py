@@ -31,11 +31,19 @@ Notes:
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Dict, List, Literal, NamedTuple, Optional
+from typing import Dict, List, Literal, NamedTuple, Optional
 import numpy as np
 
-if TYPE_CHECKING:
-    from .config import ResponseSpec, SplitPlotOptions
+# Runtime import (not TYPE_CHECKING): typing.get_type_hints() on the public
+# functions must be able to resolve these annotations. config has no
+# intra-package imports, so there is no circularity.
+from .config import (
+    PowerContrastConfig,
+    PowerGLMContrastConfig,
+    ResponseSpec,
+    SplitPlotOptions,
+    glm_fisher_weight,
+)
 
 try:
     # Only import when actually computing power
@@ -357,7 +365,6 @@ def glm_contrast_power(
         NamedTuple with ``power`` (float) and ``lam`` (float).
     """
     _require_scipy()
-    from .config import glm_fisher_weight  # avoid circular at module level
 
     X = np.asarray(X)
     if X.ndim != 2:
@@ -973,8 +980,6 @@ def eval_response_power(
         Keys: ``"name"``, ``"power"``, ``"lam"``, ``"df2"``,
         and ``"df1"`` (contrast mode only).
     """
-    from .config import PowerContrastConfig, PowerGLMContrastConfig  # avoid circular at module level
-
     cfg = response.power_cfg
     n, p = X.shape
     df2 = int(n - int(np.linalg.matrix_rank(X)))
