@@ -18,7 +18,7 @@ import base64
 import io
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -48,7 +48,7 @@ def _get_jinja_env():
     )
 
 
-def _fig_to_base64(fig) -> str | None:
+def _fig_to_base64(fig) -> Optional[str]:
     """Convert a Plotly or Matplotlib figure to a base64-encoded PNG string.
 
     Returns None if conversion fails or the figure type is unrecognised.
@@ -208,7 +208,7 @@ def _df_to_html(df: Any, max_rows: int) -> tuple[str, bool, int]:
 # ---------------------------------------------------------------------------
 
 
-def _build_diagnostics_ctx(report: dict) -> dict | None:
+def _build_diagnostics_ctx(report: dict) -> Optional[dict]:
     """Build the template context dict for the Diagnostics section (B4).
 
     Returns None when diagnostics are absent, so the template section is skipped.
@@ -267,7 +267,7 @@ def _build_power_curve_figure(
     formula: str,
     factors: dict,
     power_cfg: Any,
-) -> str | None:
+) -> Optional[str]:
     """Generate a power-vs-n curve and return it as a base64 PNG string (B5).
 
     Tries Plotly first (rasterised via kaleido), then Matplotlib.
@@ -462,7 +462,7 @@ def generate_report(
     formula: str,
     factors: dict,
     power_cfg: Any,
-    output_path: str | Path,
+    output_path: Union[str, Path],
     title: str = "Lattice DOE Report",
     include_power_curve: bool = True,
     design_rows_shown: int = 30,

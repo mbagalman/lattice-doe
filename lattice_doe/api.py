@@ -336,7 +336,7 @@ def find_optimal_design(
     export_diagnostics_to: Optional[str] = None,
     export_report_to: Optional[str] = None,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,  # ADDED
-    on_progress: "Optional[Callable[[ProgressEvent], None] | ProgressReporter]" = None,
+    on_progress: "Optional[Union[Callable[[ProgressEvent], None], ProgressReporter]]" = None,
 ) -> Dict[str, Any]:
     """
     Build an I-optimal design and ensure (or approach) the requested power.
@@ -1504,7 +1504,7 @@ def find_multiresponse_design(
     factors: FactorSpec,
     multi_cfg: MultiResponseOptions,
     design_opts: Optional[DesignOptions] = None,
-    on_progress: "Optional[Callable[[ProgressEvent], None] | ProgressReporter]" = None,
+    on_progress: "Optional[Union[Callable[[ProgressEvent], None], ProgressReporter]]" = None,
 ) -> Dict[str, Any]:
     """Find the minimum-n I-optimal design achieving target power for all responses.
 

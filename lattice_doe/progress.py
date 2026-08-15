@@ -32,7 +32,7 @@ from __future__ import annotations
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 
 class Phase(str, Enum):
@@ -126,7 +126,7 @@ class ProgressReporter:
 
     def emit(
         self,
-        phase: "Phase | str",
+        phase: "Union[Phase, str]",
         *,
         message: str = "",
         iteration: int = 0,
@@ -170,7 +170,7 @@ class ProgressReporter:
 
 
 def _coerce_reporter(
-    on_progress: "ProgressReporter | Callable[[ProgressEvent], None] | None",
+    on_progress: "Optional[Union[ProgressReporter, Callable[[ProgressEvent], None]]]",
 ) -> Optional[ProgressReporter]:
     """Return a ProgressReporter for a reporter, a bare callback, or None."""
     if on_progress is None:

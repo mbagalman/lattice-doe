@@ -10,7 +10,7 @@ any other module that needs to evaluate a Patsy formula over a DataFrame.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 if TYPE_CHECKING:  # circular-import-safe: utils lazily imports this module
     from .utils import FactorSpec
@@ -46,7 +46,7 @@ def resolve_design_matrix(
     formula: str,
     design_df: pd.DataFrame,
     factors: "FactorSpec",
-    model_matrix: "pd.DataFrame | None" = None,
+    model_matrix: "Optional[pd.DataFrame]" = None,
 ) -> Tuple[np.ndarray, List[str]]:
     """The model matrix for an EXISTING design, honoring the coding authority.
 
@@ -139,7 +139,7 @@ def align_contrast_to_columns(
 def tested_column_indices(
     names: List[str],
     treat_names: List[str],
-) -> "List[int] | None":
+) -> "Optional[List[int]]":
     """Positions of the TESTED (treatment-model) columns inside *names*.
 
     Returns None when the two name lists are identical — the matrix is not
