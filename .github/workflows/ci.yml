@@ -60,10 +60,13 @@ jobs:
           cache: pip
 
       - name: Install package + pinned linters
+        # pandas-stubs is pinned because the mypy baseline depends on it:
+        # without stubs, pandas is Any (ignore_missing_imports) and the
+        # count collapses (measured: 1 vs 216 on the first run, IA-3 era).
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[cli]"
-          pip install ruff==0.15.12 mypy==1.20.2
+          pip install ruff==0.15.12 mypy==1.20.2 pandas-stubs==3.0.3.260530
 
       - name: ruff no-grow gate
         run: |
