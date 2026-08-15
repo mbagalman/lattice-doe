@@ -51,8 +51,8 @@ jobs:
       # measures (verified in a local clone of it); a full dev environment
       # measures slightly higher (~216) because installed-and-typed soft
       # deps (matplotlib etc.) surface extra errors.
-      RUFF_BASELINE: 54
-      MYPY_BASELINE: 208
+      RUFF_BASELINE: 0
+      MYPY_BASELINE: 206
     steps:
       - uses: actions/checkout@v4
 
@@ -75,7 +75,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[cli]"
-          pip install ruff==0.15.12 mypy==1.20.2 pandas-stubs==3.0.3.260530 numpy==2.4.2 pandas==2.3.3
+          pip install ruff==0.15.12 mypy==1.20.2 black==26.5.1 pandas-stubs==3.0.3.260530 numpy==2.4.2 pandas==2.3.3
+
+      - name: black format gate
+        # The package went fully black-clean in TD-11; keep it that way.
+        run: black --check --line-length 100 lattice_doe/
 
       - name: ruff no-grow gate
         run: |
