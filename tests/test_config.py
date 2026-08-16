@@ -1,5 +1,6 @@
 # tests/test_config.py
 """Unit tests for config.py dataclasses."""
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -19,10 +20,10 @@ from lattice_doe.config import (
     _compile_constraint_expr,
 )
 
-
 # ---------------------------------------------------------------------------
 # PowerContrastConfig
 # ---------------------------------------------------------------------------
+
 
 class TestPowerContrastConfig:
     def test_valid_construction(self):
@@ -87,6 +88,7 @@ class TestPowerContrastConfig:
 # PowerR2Config
 # ---------------------------------------------------------------------------
 
+
 class TestPowerR2Config:
     def test_valid_construction(self):
         cfg = PowerR2Config(r2_target=0.2)
@@ -129,6 +131,7 @@ class TestPowerR2Config:
 # ---------------------------------------------------------------------------
 # DesignOptions
 # ---------------------------------------------------------------------------
+
 
 class TestDesignOptions:
     def test_defaults(self):
@@ -198,6 +201,7 @@ class TestDesignOptions:
 # Enhancement 12 — Declarative constraint expressions
 # ---------------------------------------------------------------------------
 
+
 class TestCompileConstraintExpr:
     """Unit tests for the _compile_constraint_expr helper."""
 
@@ -244,7 +248,7 @@ class TestCompileConstraintExpr:
     # --- Evaluation: math functions ---
     def test_sqrt_function(self):
         fn = _compile_constraint_expr("sqrt(A) <= 3")
-        assert fn(self._row(A=4.0)) is True   # sqrt(4)=2 <= 3
+        assert fn(self._row(A=4.0)) is True  # sqrt(4)=2 <= 3
         assert fn(self._row(A=16.0)) is False  # sqrt(16)=4 > 3
 
     def test_abs_function(self):
@@ -291,6 +295,7 @@ class TestCompileConstraintExpr:
     def test_dataclasses_replace_preserves_expr(self):
         """dataclasses.replace should keep constraint_expr and recompile correctly."""
         import dataclasses
+
         opts = DesignOptions(constraint_expr="A <= 10", criterion="I")
         new_opts = dataclasses.replace(opts, criterion="D")
         assert new_opts.constraint_expr == "A <= 10"
@@ -302,11 +307,13 @@ class TestCompileConstraintExpr:
 # Regression: _validate_config_keys raises cleanly on malformed contrast block
 # ---------------------------------------------------------------------------
 
+
 class TestValidateConfigKeysContrastType:
     """_validate_config_keys must raise KeyError with an actionable message
     when 'contrast' is present but is not a dict (issue #3)."""
 
     from lattice_doe.cli import _validate_config_keys as _vcfg
+
     _vcfg = staticmethod(_vcfg)  # prevent Python from treating it as an unbound method
 
     _BASE = {
@@ -346,6 +353,7 @@ class TestValidateConfigKeysContrastType:
 # ---------------------------------------------------------------------------
 # SplitPlotOptions  (SP-1)
 # ---------------------------------------------------------------------------
+
 
 class TestSplitPlotOptions:
     """Unit tests for the SplitPlotOptions dataclass."""
@@ -503,6 +511,7 @@ class TestSplitPlotOptions:
 # DesignOptions.split_plot field  (SP-1)
 # ---------------------------------------------------------------------------
 
+
 class TestDesignOptionsSplitPlot:
     """Tests for the split_plot field wired into DesignOptions."""
 
@@ -546,12 +555,14 @@ class TestDesignOptionsSplitPlot:
 
     def test_split_plot_importable_from_top_level(self):
         import lattice_doe
+
         assert hasattr(lattice_doe, "SplitPlotOptions")
 
 
 # ---------------------------------------------------------------------------
 # ResponseSpec
 # ---------------------------------------------------------------------------
+
 
 def _contrast_cfg(**kw):
     defaults = dict(L=[[0, 1]], delta=[0.5])
@@ -612,12 +623,14 @@ class TestResponseSpec:
 
     def test_all_exports_response_spec(self):
         import lattice_doe.config as cfg_module
+
         assert "ResponseSpec" in cfg_module.__all__
 
 
 # ---------------------------------------------------------------------------
 # MultiResponseOptions
 # ---------------------------------------------------------------------------
+
 
 class TestMultiResponseOptions:
     def _two_contrast(self, **kw):
@@ -691,6 +704,7 @@ class TestMultiResponseOptions:
 
     def test_all_exports_multi_response_options(self):
         import lattice_doe.config as cfg_module
+
         assert "MultiResponseOptions" in cfg_module.__all__
 
 
@@ -825,6 +839,7 @@ class TestMR10MultiResponseOptionsEdgeCases:
 # GL-1: PowerGLMContrastConfig and glm_fisher_weight
 # ---------------------------------------------------------------------------
 
+
 def _glm_binomial_cfg(**kwargs):
     """Minimal valid binomial GLM config."""
     defaults = dict(L=[[0, 1]], delta=[0.5], baseline=0.20, family="binomial")
@@ -846,7 +861,7 @@ class TestPowerGLMContrastConfig:
     def test_valid_binomial_construction(self):
         cfg = _glm_binomial_cfg()
         assert cfg.family == "binomial"
-        assert cfg.link == "logit"          # canonical link resolved
+        assert cfg.link == "logit"  # canonical link resolved
         assert cfg.baseline == pytest.approx(0.20)
         assert cfg.L.shape == (1, 2)
         assert cfg.delta.shape == (1,)
@@ -862,13 +877,15 @@ class TestPowerGLMContrastConfig:
         assert cfg.family == "binomial"
 
     def test_link_none_resolves_to_canonical_logit(self):
-        cfg = PowerGLMContrastConfig(L=[[0, 1]], delta=[0.5], baseline=0.3,
-                                      family="binomial", link=None)
+        cfg = PowerGLMContrastConfig(
+            L=[[0, 1]], delta=[0.5], baseline=0.3, family="binomial", link=None
+        )
         assert cfg.link == "logit"
 
     def test_link_none_resolves_to_canonical_log_for_poisson(self):
-        cfg = PowerGLMContrastConfig(L=[[0, 1]], delta=[0.3], baseline=1.0,
-                                      family="poisson", link=None)
+        cfg = PowerGLMContrastConfig(
+            L=[[0, 1]], delta=[0.3], baseline=1.0, family="poisson", link=None
+        )
         assert cfg.link == "log"
 
     def test_explicit_logit_link_accepted(self):
@@ -895,8 +912,7 @@ class TestPowerGLMContrastConfig:
         assert _glm_binomial_cfg().tol_power == pytest.approx(1e-3)
 
     def test_multirow_L_accepted(self):
-        cfg = PowerGLMContrastConfig(
-            L=[[0, 1, 0], [0, 0, 1]], delta=[0.5, 0.4], baseline=0.3)
+        cfg = PowerGLMContrastConfig(L=[[0, 1, 0], [0, 0, 1]], delta=[0.5, 0.4], baseline=0.3)
         assert cfg.L.shape == (2, 3)
         assert cfg.delta.shape == (2,)
 
@@ -905,18 +921,19 @@ class TestPowerGLMContrastConfig:
     # ------------------------------------------------------------------ #
     def test_unknown_family_raises(self):
         with pytest.raises(ValueError, match="family"):
-            PowerGLMContrastConfig(L=[[0, 1]], delta=[0.5], baseline=0.3,
-                                   family="gaussian")
+            PowerGLMContrastConfig(L=[[0, 1]], delta=[0.5], baseline=0.3, family="gaussian")
 
     def test_log_link_rejected_for_binomial(self):
         with pytest.raises(ValueError, match="link"):
-            PowerGLMContrastConfig(L=[[0, 1]], delta=[0.5], baseline=0.3,
-                                   family="binomial", link="log")
+            PowerGLMContrastConfig(
+                L=[[0, 1]], delta=[0.5], baseline=0.3, family="binomial", link="log"
+            )
 
     def test_logit_link_rejected_for_poisson(self):
         with pytest.raises(ValueError, match="link"):
-            PowerGLMContrastConfig(L=[[0, 1]], delta=[0.3], baseline=1.0,
-                                   family="poisson", link="logit")
+            PowerGLMContrastConfig(
+                L=[[0, 1]], delta=[0.3], baseline=1.0, family="poisson", link="logit"
+            )
 
     # ------------------------------------------------------------------ #
     # Baseline validation
@@ -1021,6 +1038,7 @@ class TestPowerGLMContrastConfig:
 
     def test_public_export_accessible(self):
         import lattice_doe as pkg
+
         assert hasattr(pkg, "PowerGLMContrastConfig")
         assert pkg.PowerGLMContrastConfig is PowerGLMContrastConfig
 
@@ -1042,7 +1060,7 @@ class TestGLMFisherWeight:
 
     def test_binomial_weight_maximised_at_half(self):
         w_half = glm_fisher_weight(_glm_binomial_cfg(baseline=0.5))
-        w_low  = glm_fisher_weight(_glm_binomial_cfg(baseline=0.2))
+        w_low = glm_fisher_weight(_glm_binomial_cfg(baseline=0.2))
         w_high = glm_fisher_weight(_glm_binomial_cfg(baseline=0.8))
         assert w_half > w_low
         assert w_half > w_high
@@ -1065,5 +1083,48 @@ class TestGLMFisherWeight:
 
     def test_public_export_accessible(self):
         import lattice_doe as pkg
+
         assert hasattr(pkg, "glm_fisher_weight")
         assert pkg.glm_fisher_weight is glm_fisher_weight
+
+
+class TestNonFiniteContrastRejected:
+    """RV-9 (P1) regression: NaN passes np.allclose(delta, 0), and the NaN
+    noncentrality it produces is later clipped to 0.0 — silently reporting
+    alpha-level power for a zero effect. Reproduced pre-fix: power=0.05,
+    lam=0.0 from delta=[NaN]. Non-finite L/delta must be rejected at
+    construction for both OLS and GLM configs."""
+
+    def test_ols_nan_delta_rejected(self):
+        with pytest.raises(ValueError, match="delta contains non-finite"):
+            PowerContrastConfig(
+                alpha=0.05, power=0.8, L=[[0, 1, 0]], delta=[float("nan")], sigma=1.0
+            )
+
+    def test_ols_inf_L_rejected(self):
+        with pytest.raises(ValueError, match="L contains non-finite"):
+            PowerContrastConfig(
+                alpha=0.05, power=0.8, L=[[0, float("inf"), 0]], delta=[1.0], sigma=1.0
+            )
+
+    def test_glm_nan_delta_rejected(self):
+        with pytest.raises(ValueError, match="delta contains non-finite"):
+            PowerGLMContrastConfig(
+                alpha=0.05,
+                power=0.8,
+                L=[[0, 1]],
+                delta=[float("nan")],
+                family="binomial",
+                baseline=0.2,
+            )
+
+    def test_glm_inf_L_rejected(self):
+        with pytest.raises(ValueError, match="L contains non-finite"):
+            PowerGLMContrastConfig(
+                alpha=0.05,
+                power=0.8,
+                L=[[0, float("inf")]],
+                delta=[0.5],
+                family="binomial",
+                baseline=0.2,
+            )

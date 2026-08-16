@@ -482,3 +482,62 @@ class TestGenerateReportPowerCurveSection:
         )
         html = out.read_text(encoding="utf-8")
         assert "data:image/png;base64," in html
+
+
+class TestGLMReportContent:
+    """RV-11 regression: GLM reports carried only the class name as
+    power_mode, then the template rendered the R2 branch with blank fields —
+    family, link, baseline, contrast shape, and delta were all omitted from
+    the shareable report."""
+
+    def test_glm_parameters_render(self, tmp_path):
+        from lattice_doe import PowerGLMContrastConfig
+
+        cfg = PowerGLMContrastConfig(
+            alpha=0.05,
+            power=0.8,
+            L=[[0.0, 1.0, 0.0]],
+            delta=[0.5],
+            family="binomial",
+            baseline=0.2,
+        )
+        out = tmp_path / "glm.html"
+        generate_report(
+            result=_minimal_result(),
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=cfg,
+            output_path=out,
+            include_power_curve=False,
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "Wald" in html
+        assert "binomial" in html
+        assert "logit" in html  # link=None resolves to the canonical link
+        assert "0.2" in html
+        assert "matrix" in html  # contrast shape
+        assert "[0.5]" in html  # delta
+
+
+class TestDiscriminatedFactorSpecsInReport:
+    """RV-13 regression: discriminated dict specs were classified 'unknown'
+    and their bounds/levels vanished from the report."""
+
+    def test_bounds_and_levels_render(self, tmp_path):
+        factors = {
+            "x": {"type": "continuous", "low": -2.5, "high": 7.5},
+            "g": {"type": "categorical", "levels": ["red", "green"]},
+        }
+        out = tmp_path / "disc.html"
+        generate_report(
+            result=_minimal_result(),
+            formula="~ 1 + x + g",
+            factors=factors,
+            power_cfg=_contrast_cfg(),
+            output_path=out,
+            include_power_curve=False,
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "unknown" not in html
+        assert "-2.5" in html and "7.5" in html
+        assert "red" in html and "green" in html

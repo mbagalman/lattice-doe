@@ -294,6 +294,14 @@ class PowerContrastConfig:
         if self.max_n <= 0:
             raise ValueError(f"max_n must be > 0, but got {self.max_n}")
 
+        # Non-finite values must be rejected BEFORE the zero checks: NaN
+        # passes np.allclose(delta, 0) and the resulting NaN noncentrality
+        # is later clipped to 0.0, silently reporting alpha-level power
+        # for a zero effect (RV-9).
+        if not np.all(np.isfinite(self.L)):
+            raise ValueError("L contains non-finite values (NaN or inf).")
+        if not np.all(np.isfinite(self.delta)):
+            raise ValueError("delta contains non-finite values (NaN or inf).")
         if np.any(np.all(self.L == 0, axis=1)):
             raise ValueError("L matrix contains at least one all-zero row.")
         # Only an entirely-zero delta is invalid (that is the null, not an
@@ -897,6 +905,14 @@ class PowerGLMContrastConfig:
             raise ValueError(f"max_n must be > 0, got {self.max_n}")
 
         # --- Contrast content validation ---
+        # Non-finite values must be rejected BEFORE the zero checks: NaN
+        # passes np.allclose(delta, 0) and the resulting NaN noncentrality
+        # is later clipped to 0.0, silently reporting alpha-level power
+        # for a zero effect (RV-9).
+        if not np.all(np.isfinite(self.L)):
+            raise ValueError("L contains non-finite values (NaN or inf).")
+        if not np.all(np.isfinite(self.delta)):
+            raise ValueError("delta contains non-finite values (NaN or inf).")
         if np.any(np.all(self.L == 0, axis=1)):
             raise ValueError("L matrix contains at least one all-zero row.")
         # Only an entirely-zero delta is invalid (SR-24b): individual zero

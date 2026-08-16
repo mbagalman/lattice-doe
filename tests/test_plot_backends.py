@@ -4,6 +4,7 @@
 All tests that require plotly are skipped when plotly is not installed.
 Tests that mock the _HAS_PLOTLY flag run regardless of whether plotly is present.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -57,15 +58,18 @@ def _r2_cfg() -> PowerR2Config:
 
 def _tiny_design_df() -> pd.DataFrame:
     """5-row design for x1, x2 — more than p=3 parameters so X is full-rank."""
-    return pd.DataFrame({
-        "x1": [-1.0, -1.0,  0.0,  1.0,  1.0],
-        "x2": [-1.0,  1.0,  0.0, -1.0,  1.0],
-    })
+    return pd.DataFrame(
+        {
+            "x1": [-1.0, -1.0, 0.0, 1.0, 1.0],
+            "x2": [-1.0, 1.0, 0.0, -1.0, 1.0],
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # TestPlotlyBackendImport — runs regardless of whether plotly is installed
 # ---------------------------------------------------------------------------
+
 
 class TestPlotlyBackendImport:
     """Verify that each helper raises ImportError when plotly is absent."""
@@ -73,7 +77,9 @@ class TestPlotlyBackendImport:
     def _call_all_helpers_with_no_plotly(self):
         import lattice_doe.plot_backends as pb
 
-        dummy_df = pd.DataFrame({"n": [5], "power": [0.5], "i_criterion": [1.0], "d_efficiency": [0.5]})
+        dummy_df = pd.DataFrame(
+            {"n": [5], "power": [0.5], "i_criterion": [1.0], "d_efficiency": [0.5]}
+        )
         dummy_grid = np.array([[0.5, 0.6], [0.7, 0.8]])
         cfg = _contrast_cfg()
 
@@ -83,8 +89,9 @@ class TestPlotlyBackendImport:
             with pytest.raises(ImportError, match="plotly"):
                 pb.plotly_curve_by_effect(dummy_df, cfg, min_detectable=None, n=10)
             with pytest.raises(ImportError, match="plotly"):
-                pb.plotly_surface_2d(dummy_grid, np.array([5, 10]), np.array([0.1, 0.3]),
-                                     cfg, "n", "effect")
+                pb.plotly_surface_2d(
+                    dummy_grid, np.array([5, 10]), np.array([0.1, 0.3]), cfg, "n", "effect"
+                )
             with pytest.raises(ImportError, match="plotly"):
                 pb.plotly_sensitivity(dummy_df, cfg, nominal_pwr=0.75, n=10)
 
@@ -93,6 +100,7 @@ class TestPlotlyBackendImport:
 
     def test_install_hint_mentions_viz(self):
         import lattice_doe.plot_backends as pb
+
         assert "viz" in pb._INSTALL_HINT or "plotly" in pb._INSTALL_HINT
 
 
@@ -100,19 +108,23 @@ class TestPlotlyBackendImport:
 # TestPowerSurface2dExport — runs regardless of plotly
 # ---------------------------------------------------------------------------
 
+
 class TestPowerSurface2dExport:
     def test_power_surface_2d_importable(self):
         from lattice_doe import power_surface_2d
+
         assert callable(power_surface_2d)
 
     def test_power_surface_2d_in_all(self):
         import lattice_doe as iop
+
         assert "power_surface_2d" in iop.__all__
 
 
 # ---------------------------------------------------------------------------
 # Plotly-dependent tests — skipped when plotly is not installed
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _PLOTLY_AVAILABLE, reason="plotly not installed")
 class TestPlotlyCurveByN:
@@ -377,3 +389,70 @@ class TestPlotlySensitivity:
             plot_backend="plotly",
         )
         assert result["figure"] is None
+
+
+class TestGLMPlotlyLabels:
+    """RV-10 regression: every non-OLS-contrast config fell into the R2 arm
+    — the by-n builder crashed on .r2_target for GLM configs, and by-effect
+    labeled GLM linear-predictor effects as 'R2 Effect Size'."""
+
+    @staticmethod
+    def _glm():
+        from lattice_doe import PowerGLMContrastConfig
+
+        return PowerGLMContrastConfig(
+            alpha=0.05,
+            power=0.8,
+            L=[[0.0, 1.0, 0.0]],
+            delta=[3.0],
+            family="binomial",
+            baseline=0.3,
+        )
+
+    @staticmethod
+    def _opts():
+        from lattice_doe import DesignOptions
+
+        return DesignOptions(
+            candidate_points=100,
+            auto_candidate=False,
+            starts=1,
+            max_iter=50,
+            random_state=0,
+        )
+
+    def test_by_n_glm_titles_wald_not_crash(self):
+        from lattice_doe import power_curves as pc
+
+        res = pc.power_curve_by_n(
+            "~ 1 + A + B",
+            {"A": ["low", "high"], "B": (0.0, 10.0)},
+            self._glm(),
+            n_points=3,
+            design_opts=self._opts(),
+            plot=True,
+            plot_backend="plotly",
+        )
+        title = res["figure"].layout.title.text
+        assert "Wald" in title and "binomial" in title
+        assert "r2_target" not in title
+
+    def test_by_effect_glm_axis_is_linear_predictor(self):
+        from lattice_doe import power_curves as pc
+
+        res = pc.power_curve_by_effect(
+            "~ 1 + A + B",
+            {"A": ["low", "high"], "B": (0.0, 10.0)},
+            n=12,
+            power_cfg=self._glm(),
+            effect_points=3,
+            design_opts=self._opts(),
+            plot=True,
+            plot_backend="plotly",
+        )
+        fig = res["figure"]
+        title = fig.layout.title.text
+        xaxis = fig.layout.xaxis.title.text
+        assert "Wald" in title
+        assert "linear-predictor" in xaxis
+        assert "R" + chr(0xB2) + " Effect" not in xaxis

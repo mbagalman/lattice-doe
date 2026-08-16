@@ -158,6 +158,10 @@ class JobManager:
         finally:
             with self._lock:
                 job.finished_at = time.time()
+                # Enforce the retention cap on completion too: submit-time
+                # eviction alone lets max_concurrent finished jobs linger
+                # past max_retained until the next submit (RV-12).
+                self._evict_locked()
             self._sema.release()
 
     def get(self, job_id: str) -> Optional[Dict[str, Any]]:

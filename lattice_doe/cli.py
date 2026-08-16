@@ -1335,11 +1335,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             logger.info(f"Wrote: {excel_path}")
 
         # Optional robustness report (single-response only)
-        if args.robustness_report:
-            if _is_multiresponse:
-                logger.warning(
-                    "--robustness-report is not supported for multi-response designs; skipped."
-                )
+        # Skip means skip (RV-14): the multi-response branch used to log
+        # "skipped" and then fall through into robustness_report() with
+        # power_cfg=None, producing a second, misleading failure warning.
+        if args.robustness_report and _is_multiresponse:
+            logger.warning(
+                "--robustness-report is not supported for multi-response designs; skipped."
+            )
+        elif args.robustness_report:
             try:
                 from lattice_doe.analysis import robustness_report  # noqa: PLC0415
 

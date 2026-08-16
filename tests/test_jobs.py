@@ -1,5 +1,6 @@
 # tests/test_jobs.py
 """Unit tests for the async job manager (UX-2)."""
+
 from __future__ import annotations
 
 import threading
@@ -105,3 +106,33 @@ class TestJobManager:
         present = [jid for jid in ids if mgr.get(jid) is not None]
         assert len(present) <= 3
         assert ids[-1] in present  # newest retained
+
+
+class TestRetentionAfterCompletion:
+    """RV-12 regression: eviction ran only at submit time, so with
+    max_concurrent > max_retained, all concurrently-running jobs stayed
+    stored after finishing (3 retained with a cap of 1) until the next
+    submit. Terminal transitions now evict too."""
+
+    def test_cap_enforced_when_jobs_finish(self):
+        import threading
+        import time
+
+        m = JobManager(max_concurrent=3, max_retained=1, retry_after=1)
+        release = threading.Event()
+
+        def runner(reporter):
+            release.wait(10)
+            return {"ok": True}
+
+        ids = [m.submit("design", runner) for _ in range(3)]
+        release.set()
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            snaps = [m.get(j) for j in ids]
+            if all(s is None or s["state"] == "done" for s in snaps):
+                break
+            time.sleep(0.05)
+        time.sleep(0.3)  # let the final finally-block eviction land
+        stored = sum(1 for j in ids if m.get(j) is not None)
+        assert stored <= 1, f"{stored} finished jobs retained with max_retained=1"

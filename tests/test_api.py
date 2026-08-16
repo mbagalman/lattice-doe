@@ -4534,3 +4534,59 @@ class TestPowerSurface2DValidation:
         # Power rises with effect (rows) and with alpha (columns).
         assert (np.diff(grid, axis=0) >= -1e-12).all()
         assert (np.diff(grid, axis=1) >= -1e-12).all()
+
+
+class TestGLMMatplotlibPlotLabels:
+    """RV-10 regression (matplotlib side): GLM by-n plot=True crashed on
+    .r2_target; by-effect mislabeled the GLM sweep as an R2 effect."""
+
+    @staticmethod
+    def _glm():
+        return PowerGLMContrastConfig(
+            alpha=0.05,
+            power=0.8,
+            L=[[0.0, 1.0, 0.0]],
+            delta=[3.0],
+            family="binomial",
+            baseline=0.3,
+        )
+
+    def test_by_n_glm_plot_true_titles_wald(self):
+        pytest.importorskip("matplotlib")
+        from lattice_doe import power_curves as pc
+
+        res = pc.power_curve_by_n(
+            FORMULA,
+            FACTORS,
+            self._glm(),
+            n_points=3,
+            design_opts=FAST_OPTS,
+            plot=True,
+        )
+        try:
+            assert res["figure"] is not None
+            texts = [res["figure"]._suptitle.get_text()] if res["figure"]._suptitle else []
+            assert any("Wald" in t for t in texts), texts
+        finally:
+            pc.plt.close(res["figure"])
+
+    def test_by_effect_glm_axis_is_linear_predictor(self):
+        pytest.importorskip("matplotlib")
+        from lattice_doe import power_curves as pc
+
+        res = pc.power_curve_by_effect(
+            FORMULA,
+            FACTORS,
+            n=12,
+            power_cfg=self._glm(),
+            effect_points=3,
+            design_opts=FAST_OPTS,
+            plot=True,
+        )
+        try:
+            xlabels = [a.get_xlabel() for a in res["figure"].axes if a.get_xlabel()]
+            titles = [a.get_title() for a in res["figure"].axes if a.get_title()]
+            assert any("linear-predictor" in x for x in xlabels), xlabels
+            assert any("Wald" in t for t in titles), titles
+        finally:
+            pc.plt.close(res["figure"])

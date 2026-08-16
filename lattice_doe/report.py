@@ -85,7 +85,17 @@ def _build_config_ctx(formula: str, factors: dict, power_cfg: Any) -> dict:
 
     Handles both PowerContrastConfig and PowerR2Config.
     """
-    from .config import PowerContrastConfig, PowerR2Config
+    from .config import PowerContrastConfig, PowerGLMContrastConfig, PowerR2Config
+
+    # Resolve discriminated dict specs ({"type": "continuous", ...}) to the
+    # legacy list/tuple forms first — without this they fell through to the
+    # opaque-string branch and bounds/levels vanished from the report (RV-13).
+    try:
+        from .utils import normalize_factors
+
+        factors = normalize_factors(factors, formula)
+    except Exception:
+        pass  # keep the raw dict; the loop below degrades gracefully
 
     # Normalise factors to a list of dicts for the template
     factor_list = []
@@ -123,6 +133,17 @@ def _build_config_ctx(formula: str, factors: dict, power_cfg: Any) -> dict:
         ctx["power_mode"] = "Global R\u00b2"
         ctx["r2_target"] = power_cfg.r2_target
         ctx["lambda_mode"] = power_cfg.lambda_mode
+    elif isinstance(power_cfg, PowerGLMContrastConfig):
+        # RV-11: GLM reports omitted every parameter needed to reproduce
+        # the analysis (the template rendered the R\u00b2 branch with blanks).
+        ctx["power_mode"] = "GLM contrast (Wald \u03c7\u00b2)"
+        ctx["glm_family"] = power_cfg.family
+        ctx["glm_link"] = power_cfg.link or "canonical"
+        ctx["glm_baseline"] = power_cfg.baseline
+        L = np.atleast_2d(power_cfg.L)
+        ctx["L_shape"] = f"{L.shape[0]} \u00d7 {L.shape[1]}"
+        delta = np.atleast_1d(power_cfg.delta)
+        ctx["delta"] = "[" + ", ".join(f"{d:.4g}" for d in delta) + "]"
     else:
         ctx["power_mode"] = type(power_cfg).__name__
 

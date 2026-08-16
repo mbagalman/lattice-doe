@@ -284,6 +284,10 @@ def power_curve_by_n(
             if isinstance(power_cfg, PowerContrastConfig):
                 effect_desc = f"Effect Norm={np.linalg.norm(power_cfg.delta):.2f}, $\\sigma$={power_cfg.sigma}"
                 title = f"Power vs. Sample Size (n) for Contrast Test\n({effect_desc}, $\\alpha$={power_cfg.alpha})"
+            elif isinstance(power_cfg, PowerGLMContrastConfig):
+                # RV-10: the else arm assumed R² and crashed on .r2_target.
+                effect_desc = f"{power_cfg.family}, baseline={power_cfg.baseline}"
+                title = f"Power vs. Sample Size (n) for GLM Wald χ² Test\n({effect_desc}, $\\alpha$={power_cfg.alpha})"
             else:
                 effect_desc = f"Target R²={power_cfg.r2_target}"
                 title = f"Power vs. Sample Size (n) for Global F-Test\n({effect_desc}, $\\alpha$={power_cfg.alpha})"
@@ -509,6 +513,14 @@ def power_curve_by_effect(
             if isinstance(power_cfg, PowerContrastConfig):
                 ax.set_xlabel("Effect Size Multiplier (on base norm)")
                 title = f"Power vs. Effect Size at n={n}\n(Contrast Test, $\\sigma$={power_cfg.sigma}, $\\alpha$={power_cfg.alpha})"
+                ax.set_title(title)
+            elif isinstance(power_cfg, PowerGLMContrastConfig):
+                # RV-10: GLM effects sweep the linear-predictor scale, not R².
+                ax.set_xlabel("Effect Size Multiplier (linear-predictor scale)")
+                title = (
+                    f"Power vs. Effect Size at n={n}\n(GLM Wald χ² Test, "
+                    f"{power_cfg.family}, baseline={power_cfg.baseline}, $\\alpha$={power_cfg.alpha})"
+                )
                 ax.set_title(title)
             else:
                 ax.set_xlabel("R² Effect Size")

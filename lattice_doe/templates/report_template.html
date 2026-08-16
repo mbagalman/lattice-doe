@@ -275,6 +275,29 @@
     <span class="config-val">{{ config.delta }}</span>
     {% endif %}
 
+    {% elif config.glm_family %}
+    <span class="config-key">Family</span>
+    <span class="config-val">{{ config.glm_family }}</span>
+
+    <span class="config-key">Link</span>
+    <span class="config-val">{{ config.glm_link }}</span>
+
+    <span class="config-key">Baseline</span>
+    <span class="config-val">{{ config.glm_baseline }}</span>
+
+    {% if config.L_shape %}
+    <span class="config-key">Contrast L</span>
+    <span class="config-val">{{ config.L_shape }} matrix</span>
+    {% endif %}
+
+    {% if config.delta %}
+    <span class="config-key">Delta (&delta;, linear predictor)</span>
+    <span class="config-val">{{ config.delta }}</span>
+    {% endif %}
+
+    <span class="config-key">max_n</span>
+    <span class="config-val">{{ config.max_n }}</span>
+
     {% else %}
     <span class="config-key">R&sup2; target</span>
     <span class="config-val">{{ config.r2_target }}</span>

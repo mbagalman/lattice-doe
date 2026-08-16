@@ -538,3 +538,43 @@ class TestMainExcelTemplateRoundTrip:
         wb = tmp_path / "starter.xlsx"
         assert main(["--excel-template", str(wb), "--template-mode", "r2"]) == 0
         assert wb.exists()
+
+
+class TestMultiResponseRobustnessSkip:
+    """RV-14 regression: the multi-response branch logged 'skipped' and then
+    fell through into robustness_report() with power_cfg=None, producing a
+    second, misleading 'Robustness report failed' warning."""
+
+    def test_mr_robustness_skips_without_failure_warning(self, tmp_path, caplog):
+        import logging
+
+        cfg = tmp_path / "mr.yml"
+        cfg.write_text(
+            "formula: '~ 1 + x'\n"
+            "factors:\n  x: [0.0, 1.0]\n"
+            "responses:\n"
+            "  - name: y1\n    sigma: 1.0\n"
+            "    contrast: {L: [[0.0, 1.0]], delta: [0.5]}\n"
+            "  - name: y2\n    sigma: 1.0\n"
+            "    contrast: {L: [[0.0, 1.0]], delta: [0.8]}\n"
+            "alpha: 0.05\npower: 0.8\nmax_n: 12\n"
+            "design: {candidate_points: 40, starts: 1, random_state: 0}\n",
+            encoding="utf-8",
+        )
+        out = tmp_path / "run"
+        with caplog.at_level(logging.WARNING):
+            rc = main(
+                [
+                    "--config",
+                    str(cfg),
+                    "--out",
+                    str(out),
+                    "--multi-response",
+                    "--robustness-report",
+                    "--allow-partial",
+                ]
+            )
+        assert rc == 0
+        msgs = [r.message for r in caplog.records]
+        assert any("not supported for multi-response" in m for m in msgs)
+        assert not any("Robustness report failed" in m for m in msgs)

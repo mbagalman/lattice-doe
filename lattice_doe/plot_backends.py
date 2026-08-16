@@ -39,7 +39,7 @@ def plotly_curve_by_n(df, power_cfg, target_n):
     if not _HAS_PLOTLY:
         raise ImportError(_INSTALL_HINT)
 
-    from .config import PowerContrastConfig
+    from .config import PowerContrastConfig, PowerGLMContrastConfig
 
     fig = make_subplots(
         rows=2,
@@ -123,6 +123,13 @@ def plotly_curve_by_n(df, power_cfg, target_n):
         title = (
             f"Power vs Sample Size — Contrast Test " f"(σ={power_cfg.sigma}, α={power_cfg.alpha})"
         )
+    elif isinstance(power_cfg, PowerGLMContrastConfig):
+        # GLM configs have neither sigma nor r2_target (RV-10: this branch
+        # used to fall into the R² arm and crash on .r2_target).
+        title = (
+            f"Power vs Sample Size — GLM Wald χ² Test "
+            f"({power_cfg.family}, baseline={power_cfg.baseline}, α={power_cfg.alpha})"
+        )
     else:
         title = (
             f"Power vs Sample Size — Global F-Test "
@@ -173,7 +180,7 @@ def plotly_curve_by_effect(df, power_cfg, min_detectable, n):
     if not _HAS_PLOTLY:
         raise ImportError(_INSTALL_HINT)
 
-    from .config import PowerContrastConfig
+    from .config import PowerContrastConfig, PowerGLMContrastConfig
 
     fig = go.Figure()
 
@@ -232,6 +239,13 @@ def plotly_curve_by_effect(df, power_cfg, min_detectable, n):
     else:
         x_label = "R² Effect Size"
         title = f"Power vs Effect Size at n={n} — Global F-Test " f"(α={power_cfg.alpha})"
+    if isinstance(power_cfg, PowerGLMContrastConfig):
+        # RV-10: GLM effects sweep the linear-predictor scale, not R².
+        x_label = "Effect Size Multiplier (linear-predictor scale)"
+        title = (
+            f"Power vs Effect Size at n={n} — GLM Wald χ² Test "
+            f"({power_cfg.family}, baseline={power_cfg.baseline}, α={power_cfg.alpha})"
+        )
 
     fig.update_layout(
         template="plotly_white",
