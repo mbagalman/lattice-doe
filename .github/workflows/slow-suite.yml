@@ -27,11 +27,19 @@ jobs:
           cache: pip
 
       - name: Install package + extras + test deps
-        # [server] so the slow api_server integration tests actually run
-        # instead of skipping (the fast CI job deliberately omits it).
+        # This is the authoritative coverage run (RV-5), so the optional
+        # feature groups install too — otherwise their suites skip at import
+        # and the coverage they enforce is silently absent: [server] for the
+        # slow api_server integration tests, [report] (jinja2/pillow/kaleido)
+        # for test_report.py, [viz] (matplotlib/plotly) for the diagnostics
+        # plot and plot-backend suites, [extras] (xlsxwriter/openpyxl) for
+        # the workbook suites, [sheets]/[widgets] for their (mocked) suites.
+        # weasyprint stays out deliberately: it needs system libraries the
+        # runner lacks, and test_report's PDF test asserts the ImportError
+        # guard — which requires weasyprint to be absent.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[cli,server]"
+          pip install -e ".[cli,server,report,viz,extras,sheets,widgets]"
           pip install pytest pytest-cov pytest-anyio
 
       - name: Run FULL test suite (fast + slow)

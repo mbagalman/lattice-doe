@@ -84,4 +84,15 @@ class MdeResponse(BaseModel):
     mde: float
     achieved_power: float
     n: int
-    mode: Literal["contrast", "r2"]
+    mode: Literal["contrast", "r2", "glm"]
+    # GLM mode only (RV-4: the core supports GLM MDE, and rejecting its
+    # result at response validation turned a valid request into a 422):
+    min_delta_lp: Optional[float] = Field(
+        None, description="GLM only: minimum detectable effect on the linear-predictor scale."
+    )
+    family: Optional[Literal["binomial", "poisson"]] = Field(
+        None, description="GLM only: response family echoed from the request."
+    )
+    baseline: Optional[float] = Field(
+        None, description="GLM only: baseline response echoed from the request."
+    )

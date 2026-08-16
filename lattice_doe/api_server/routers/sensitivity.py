@@ -80,12 +80,18 @@ def _sync_mde(request: MdeRequest) -> dict:
         design_opts=design_opts,
         model_matrix=model_matrix,
     )
-    return {
+    payload = {
         "mde": float(result["mde"]),
         "achieved_power": float(result["achieved_power"]),
         "n": int(result["n"]),
         "mode": result["mode"],
     }
+    # GLM results carry extra fields (RV-4); forward them when present.
+    if result["mode"] == "glm":
+        payload["min_delta_lp"] = float(result["min_delta_lp"])
+        payload["family"] = result["family"]
+        payload["baseline"] = float(result["baseline"])
+    return payload
 
 
 @router.post(

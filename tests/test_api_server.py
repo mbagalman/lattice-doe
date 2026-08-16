@@ -16,6 +16,7 @@ Layer 3 — HTTP integration (real compute, small FAST_OPTS)
     One round-trip per endpoint with a two-factor R² problem.
     Marked @pytest.mark.slow; skipped if FastAPI / httpx not installed.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -141,10 +142,12 @@ class TestRecordsToDf:
 class TestPydanticPowerCfgToDataclass:
     def _r2_model(self):
         from lattice_doe.api_server.models.common import PowerR2ConfigModel
+
         return PowerR2ConfigModel(type="r2", r2_target=0.15, alpha=0.05, power=0.8)
 
     def _contrast_model(self):
         from lattice_doe.api_server.models.common import PowerContrastConfigModel
+
         return PowerContrastConfigModel(
             type="contrast",
             L=[[0, 1, 0]],
@@ -184,6 +187,7 @@ class TestPydanticDesignOptsToDataclass:
 
     def test_fields_propagated(self):
         from lattice_doe.api_server.models.common import DesignOptionsModel
+
         model = DesignOptionsModel(criterion="D", starts=10, random_state=42)
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.criterion == "D"
@@ -193,24 +197,28 @@ class TestPydanticDesignOptsToDataclass:
     def test_workers_always_none(self):
         """workers is forced to None inside ASGI."""
         from lattice_doe.api_server.models.common import DesignOptionsModel
+
         model = DesignOptionsModel()
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.workers is None
 
     def test_constraint_expr_forwarded(self):
         from lattice_doe.api_server.models.common import DesignOptionsModel
+
         model = DesignOptionsModel(constraint_expr="A + B <= 1")
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.constraint_expr == "A + B <= 1"
 
     def test_n_blocks_forwarded(self):
         from lattice_doe.api_server.models.common import DesignOptionsModel
+
         model = DesignOptionsModel(n_blocks=3)
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.n_blocks == 3
 
     def test_alloc_max_per_cell_forwarded(self):
         from lattice_doe.api_server.models.common import DesignOptionsModel
+
         model = DesignOptionsModel(alloc_max_per_cell=5)
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.alloc_max_per_cell == 5
@@ -218,6 +226,7 @@ class TestPydanticDesignOptsToDataclass:
     def test_alloc_max_per_cell_none_not_passed(self):
         """alloc_max_per_cell=None should not appear in DesignOptions kwargs."""
         from lattice_doe.api_server.models.common import DesignOptionsModel
+
         model = DesignOptionsModel(alloc_max_per_cell=None)
         opts = pydantic_design_opts_to_dataclass(model)
         # Should use DesignOptions default (None)
@@ -230,6 +239,7 @@ class TestPydanticDesignOptsToDataclass:
     def test_split_plot_none_by_default(self):
         """CR-28: split_plot defaults to None — no split-plot mode unless set."""
         from lattice_doe.api_server.models.common import DesignOptionsModel
+
         model = DesignOptionsModel()
         opts = pydantic_design_opts_to_dataclass(model)
         assert opts.split_plot is None
@@ -238,6 +248,7 @@ class TestPydanticDesignOptsToDataclass:
         """CR-28: all SplitPlotOptionsModel fields are mapped to SplitPlotOptions."""
         from lattice_doe.api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
         from lattice_doe.config import SplitPlotOptions
+
         sp_model = SplitPlotOptionsModel(
             htc_factors=["Temp", "Press"],
             n_whole_plots=6,
@@ -259,6 +270,7 @@ class TestPydanticDesignOptsToDataclass:
     def test_split_plot_subplots_per_wp_none(self):
         """CR-28: omitting subplots_per_wp passes None to SplitPlotOptions (auto)."""
         from lattice_doe.api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
+
         sp_model = SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=3)
         model = DesignOptionsModel(split_plot=sp_model)
         opts = pydantic_design_opts_to_dataclass(model)
@@ -268,6 +280,7 @@ class TestPydanticDesignOptsToDataclass:
     def test_split_plot_defaults_eta_and_df_method(self):
         """CR-28: SplitPlotOptionsModel defaults (eta=1.0, df_method='auto') are preserved."""
         from lattice_doe.api_server.models.common import DesignOptionsModel, SplitPlotOptionsModel
+
         sp_model = SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=4)
         model = DesignOptionsModel(split_plot=sp_model)
         opts = pydantic_design_opts_to_dataclass(model)
@@ -278,6 +291,7 @@ class TestPydanticDesignOptsToDataclass:
         """CR-28: n_whole_plots < 2 is rejected by Pydantic validation."""
         from lattice_doe.api_server.models.common import SplitPlotOptionsModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError):
             SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=1)
 
@@ -285,6 +299,7 @@ class TestPydanticDesignOptsToDataclass:
         """CR-28: empty htc_factors list is rejected by Pydantic validation."""
         from lattice_doe.api_server.models.common import SplitPlotOptionsModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError):
             SplitPlotOptionsModel(htc_factors=[], n_whole_plots=3)
 
@@ -292,6 +307,7 @@ class TestPydanticDesignOptsToDataclass:
         """CR-28: eta < 0 is rejected by Pydantic validation."""
         from lattice_doe.api_server.models.common import SplitPlotOptionsModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError):
             SplitPlotOptionsModel(htc_factors=["A"], n_whole_plots=3, eta=-0.1)
 
@@ -302,10 +318,17 @@ class TestSerializeDesignResult:
             "design_df": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
             "buckets_df": pd.DataFrame({"A": [0.1], "count": [1]}),
             "report": {
-                "n": 10, "p": 3, "df_num": 2, "df_denom": 7,
-                "alpha": 0.05, "target_power": 0.8, "achieved_power": 0.85,
-                "noncentrality_lambda": 8.0, "criterion": "I",
-                "elapsed_sec": 1.23, "warnings": [],
+                "n": 10,
+                "p": 3,
+                "df_num": 2,
+                "df_denom": 7,
+                "alpha": 0.05,
+                "target_power": 0.8,
+                "achieved_power": 0.85,
+                "noncentrality_lambda": 8.0,
+                "criterion": "I",
+                "elapsed_sec": 1.23,
+                "warnings": [],
                 "diagnostics": {"i_criterion": 0.4, "d_efficiency": 0.9},
                 "_X": np.eye(3),  # internal key — must be stripped
             },
@@ -332,17 +355,20 @@ class TestSerializeDesignResult:
 # Layer 2 — HTTP unit tests (mock or trivial, ASGI test client)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def app():
     if not _HAS_SERVER:
         pytest.skip("fastapi/httpx not installed")
     from lattice_doe.api_server.main import create_app
+
     return create_app()
 
 
 @pytest.fixture
 async def client(app):
     from httpx import AsyncClient, ASGITransport
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
@@ -388,18 +414,50 @@ class TestErrorHandling:
         assert r.status_code == 404
 
     async def test_422_missing_formula(self, client):
-        r = await client.post("/design", json={
-            "factors": {"A": [-1, 1]},
-            "power_cfg": {"type": "r2", "r2_target": 0.15},
-        })
+        r = await client.post(
+            "/design",
+            json={
+                "factors": {"A": [-1, 1]},
+                "power_cfg": {"type": "r2", "r2_target": 0.15},
+            },
+        )
         assert r.status_code == 422
 
     async def test_422_missing_factors(self, client):
-        r = await client.post("/design", json={
-            "formula": "~ 1 + A",
-            "power_cfg": {"type": "r2", "r2_target": 0.15},
-        })
+        r = await client.post(
+            "/design",
+            json={
+                "formula": "~ 1 + A",
+                "power_cfg": {"type": "r2", "r2_target": 0.15},
+            },
+        )
         assert r.status_code == 422
+
+    async def test_mde_glm_returns_200_with_glm_fields(self, client):
+        # RV-4 regression: a valid GLM /mde request computed successfully
+        # and then died on RESPONSE validation (MdeResponse rejected
+        # mode="glm") — a misleading 422 for a supported operation.
+        r = await client.post(
+            "/mde",
+            json={
+                "formula": "~ 1 + x",
+                "factors": {"x": {"type": "continuous", "low": -1.0, "high": 1.0}},
+                "power_cfg": {
+                    "type": "glm_contrast",
+                    "L": [[0, 1]],
+                    "delta": [0.5],
+                    "family": "binomial",
+                    "baseline": 0.2,
+                },
+                "design_df": [{"x": v} for v in (-1.0, -0.5, 0.0, 0.5, 1.0, -1.0, 1.0, 0.0)],
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["mode"] == "glm"
+        assert body["family"] == "binomial"
+        assert body["baseline"] == pytest.approx(0.2)
+        assert body["min_delta_lp"] == pytest.approx(body["mde"] / 2.0, rel=1e-9)
 
     async def test_422_glm_config_on_sensitivity(self, client):
         # TD-12 regression: a GLM power_cfg posted to /sensitivity used to
@@ -424,19 +482,25 @@ class TestErrorHandling:
         assert "GLM configs have no sigma" in r.text
 
     async def test_422_bad_power_cfg_discriminator(self, client):
-        r = await client.post("/design", json={
-            "formula": "~ 1 + A",
-            "factors": {"A": [-1, 1]},
-            "power_cfg": {"type": "unknown"},
-        })
+        r = await client.post(
+            "/design",
+            json={
+                "formula": "~ 1 + A",
+                "factors": {"A": [-1, 1]},
+                "power_cfg": {"type": "unknown"},
+            },
+        )
         assert r.status_code == 422
 
     async def test_422_r2_target_out_of_range(self, client):
-        r = await client.post("/design", json={
-            "formula": "~ 1 + A",
-            "factors": {"A": [-1, 1]},
-            "power_cfg": {"type": "r2", "r2_target": 1.5},  # > 1
-        })
+        r = await client.post(
+            "/design",
+            json={
+                "formula": "~ 1 + A",
+                "factors": {"A": [-1, 1]},
+                "power_cfg": {"type": "r2", "r2_target": 1.5},  # > 1
+            },
+        )
         assert r.status_code == 422
 
     async def test_discriminator_selects_r2_model(self, client):
@@ -461,19 +525,28 @@ class TestDesignEndpointMocked:
             "design_df": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
             "buckets_df": pd.DataFrame({"A": [0.1], "count": [1]}),
             "report": {
-                "n": 5, "p": 3, "df_num": 2, "df_denom": 2,
-                "alpha": 0.05, "target_power": 0.8, "achieved_power": 0.85,
-                "noncentrality_lambda": 8.0, "criterion": "I",
-                "elapsed_sec": 0.5, "warnings": [],
-                "diagnostics": {"i_criterion": 0.4, "d_efficiency": 0.9,
-                                "condition_number": 2.0},
+                "n": 5,
+                "p": 3,
+                "df_num": 2,
+                "df_denom": 2,
+                "alpha": 0.05,
+                "target_power": 0.8,
+                "achieved_power": 0.85,
+                "noncentrality_lambda": 8.0,
+                "criterion": "I",
+                "elapsed_sec": 0.5,
+                "warnings": [],
+                "diagnostics": {"i_criterion": 0.4, "d_efficiency": 0.9, "condition_number": 2.0},
             },
         }
-        r = await client.post("/design", json={
-            "formula": "~ 1 + A + B",
-            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-            "power_cfg": {"type": "r2", "r2_target": 0.15},
-        })
+        r = await client.post(
+            "/design",
+            json={
+                "formula": "~ 1 + A + B",
+                "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+                "power_cfg": {"type": "r2", "r2_target": 0.15},
+            },
+        )
         assert r.status_code == 200
         body = r.json()
         assert "design_df" in body
@@ -483,11 +556,14 @@ class TestDesignEndpointMocked:
     @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_design_ValueError_returns_422(self, mock_run, client):
         mock_run.side_effect = ValueError("bad formula")
-        r = await client.post("/design", json={
-            "formula": "~ 1 + A",
-            "factors": {"A": [-1.0, 1.0]},
-            "power_cfg": {"type": "r2", "r2_target": 0.15},
-        })
+        r = await client.post(
+            "/design",
+            json={
+                "formula": "~ 1 + A",
+                "factors": {"A": [-1.0, 1.0]},
+                "power_cfg": {"type": "r2", "r2_target": 0.15},
+            },
+        )
         assert r.status_code == 422
         assert "bad formula" in r.json()["detail"]
 
@@ -497,22 +573,32 @@ class TestDesignEndpointMocked:
             "design_df": pd.DataFrame({"A": [0.1], "B": [-0.1]}),
             "buckets_df": pd.DataFrame({"A": [0.1], "count": [1]}),
             "report": {
-                "n": 8, "p": 3, "df_num": 1, "df_denom": 5,
-                "alpha": 0.05, "target_power": 0.8, "achieved_power": 0.82,
-                "noncentrality_lambda": 6.0, "criterion": "I",
-                "elapsed_sec": 0.5, "warnings": [],
+                "n": 8,
+                "p": 3,
+                "df_num": 1,
+                "df_denom": 5,
+                "alpha": 0.05,
+                "target_power": 0.8,
+                "achieved_power": 0.82,
+                "noncentrality_lambda": 6.0,
+                "criterion": "I",
+                "elapsed_sec": 0.5,
+                "warnings": [],
             },
         }
-        r = await client.post("/design", json={
-            "formula": "~ 1 + A + B",
-            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-            "power_cfg": {
-                "type": "contrast",
-                "L": [[0, 1, 0]],
-                "delta": [0.5],
-                "sigma": 1.0,
+        r = await client.post(
+            "/design",
+            json={
+                "formula": "~ 1 + A + B",
+                "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+                "power_cfg": {
+                    "type": "contrast",
+                    "L": [[0, 1, 0]],
+                    "delta": [0.5],
+                    "sigma": 1.0,
+                },
             },
-        })
+        )
         assert r.status_code == 200
 
 
@@ -606,13 +692,16 @@ class TestAugmentIntegration:
         design_df = r_design.json()["design_df"]
 
         # Then augment it
-        r_aug = await client.post("/augment", json={
-            "design_df": design_df,
-            "m": 2,
-            "formula": "~ 1 + A + B",
-            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-            "design_opts": _FAST_OPTS,
-        })
+        r_aug = await client.post(
+            "/augment",
+            json={
+                "design_df": design_df,
+                "m": 2,
+                "formula": "~ 1 + A + B",
+                "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+                "design_opts": _FAST_OPTS,
+            },
+        )
         assert r_aug.status_code == 200
         body = r_aug.json()
         assert body["n_added"] == 2
@@ -653,6 +742,7 @@ class TestMultiResponseModels:
 
     def test_response_spec_model_basic(self):
         from lattice_doe.api_server.models.common import ResponseSpecModel, PowerR2ConfigModel
+
         r = ResponseSpecModel(
             name="Y1",
             power_cfg=PowerR2ConfigModel(type="r2", r2_target=0.15),
@@ -664,6 +754,7 @@ class TestMultiResponseModels:
     def test_response_spec_model_weight_gt0_required(self):
         from lattice_doe.api_server.models.common import ResponseSpecModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError):
             ResponseSpecModel(
                 name="Y1",
@@ -674,6 +765,7 @@ class TestMultiResponseModels:
     def test_response_spec_model_empty_name_rejected(self):
         from lattice_doe.api_server.models.common import ResponseSpecModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError):
             ResponseSpecModel(
                 name="",
@@ -683,6 +775,7 @@ class TestMultiResponseModels:
     def test_multi_response_options_model_min_two_responses(self):
         from lattice_doe.api_server.models.common import MultiResponseOptionsModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError):
             MultiResponseOptionsModel(
                 responses=[
@@ -693,6 +786,7 @@ class TestMultiResponseModels:
     def test_multi_response_options_model_invalid_combination_rule(self):
         from lattice_doe.api_server.models.common import MultiResponseOptionsModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError):
             MultiResponseOptionsModel(
                 responses=_MR_TWO_RESPONSES,
@@ -701,6 +795,7 @@ class TestMultiResponseModels:
 
     def test_multi_response_options_sigma_joint_accepted(self):
         from lattice_doe.api_server.models.common import MultiResponseOptionsModel
+
         model = MultiResponseOptionsModel(
             responses=_MR_TWO_RESPONSES,
             sigma_joint=[[1.0, 0.3], [0.3, 1.0]],
@@ -711,6 +806,7 @@ class TestMultiResponseModels:
         from lattice_doe.api_server.models.common import MultiResponseOptionsModel
         from lattice_doe.api_server.serialization import pydantic_multi_cfg_to_dataclass
         from lattice_doe.config import MultiResponseOptions
+
         model = MultiResponseOptionsModel(responses=_MR_TWO_RESPONSES)
         result = pydantic_multi_cfg_to_dataclass(model)
         assert isinstance(result, MultiResponseOptions)
@@ -719,6 +815,7 @@ class TestMultiResponseModels:
     def test_pydantic_multi_cfg_response_names_propagated(self):
         from lattice_doe.api_server.models.common import MultiResponseOptionsModel
         from lattice_doe.api_server.serialization import pydantic_multi_cfg_to_dataclass
+
         model = MultiResponseOptionsModel(responses=_MR_TWO_RESPONSES)
         result = pydantic_multi_cfg_to_dataclass(model)
         assert result.responses[0].name == "Y1"
@@ -727,6 +824,7 @@ class TestMultiResponseModels:
     def test_pydantic_multi_cfg_sigma_joint_is_ndarray(self):
         from lattice_doe.api_server.models.common import MultiResponseOptionsModel
         from lattice_doe.api_server.serialization import pydantic_multi_cfg_to_dataclass
+
         model = MultiResponseOptionsModel(
             responses=_MR_TWO_RESPONSES,
             sigma_joint=[[1.0, 0.5], [0.5, 1.0]],
@@ -737,6 +835,7 @@ class TestMultiResponseModels:
 
     def test_serialize_multiresponse_result_keys(self):
         from lattice_doe.api_server.serialization import serialize_multiresponse_result
+
         fake_result = {
             "design_df": pd.DataFrame({"A": [0.1, -0.1], "B": [1.0, -1.0]}),
             "buckets_df": pd.DataFrame({"A": [0.1], "count": [2]}),
@@ -760,6 +859,7 @@ class TestMultiResponseModels:
 
     def test_serialize_multiresponse_result_numpy_sanitized(self):
         from lattice_doe.api_server.serialization import serialize_multiresponse_result
+
         fake_result = {
             "design_df": pd.DataFrame({"A": [0.1]}),
             "buckets_df": pd.DataFrame({"A": [0.1]}),
@@ -853,33 +953,42 @@ class TestMultiResponseEndpoint:
         assert r.json()["report"]["combination_rule"] == "min"
 
     async def test_422_missing_multi_cfg(self, client):
-        r = await client.post("/multiresponse_design", json={
-            "formula": "~ 1 + A + B",
-            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-        })
+        r = await client.post(
+            "/multiresponse_design",
+            json={
+                "formula": "~ 1 + A + B",
+                "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+            },
+        )
         assert r.status_code == 422
 
     async def test_422_only_one_response(self, client):
-        r = await client.post("/multiresponse_design", json={
-            "formula": "~ 1 + A + B",
-            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-            "multi_cfg": {
-                "responses": [
-                    {"name": "Y1", "power_cfg": {"type": "r2", "r2_target": 0.15}},
-                ],
+        r = await client.post(
+            "/multiresponse_design",
+            json={
+                "formula": "~ 1 + A + B",
+                "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+                "multi_cfg": {
+                    "responses": [
+                        {"name": "Y1", "power_cfg": {"type": "r2", "r2_target": 0.15}},
+                    ],
+                },
             },
-        })
+        )
         assert r.status_code == 422
 
     async def test_422_invalid_power_combination(self, client):
-        r = await client.post("/multiresponse_design", json={
-            "formula": "~ 1 + A + B",
-            "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-            "multi_cfg": {
-                "responses": _MR_TWO_RESPONSES,
-                "power_combination": "nonsense",
+        r = await client.post(
+            "/multiresponse_design",
+            json={
+                "formula": "~ 1 + A + B",
+                "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
+                "multi_cfg": {
+                    "responses": _MR_TWO_RESPONSES,
+                    "power_combination": "nonsense",
+                },
             },
-        })
+        )
         assert r.status_code == 422
 
     @patch("lattice_doe.api_server.routers.design.find_multiresponse_design")
@@ -1028,23 +1137,35 @@ _GLM_POISSON_CFG: Dict[str, Any] = {
 }
 
 _GLM_MOCK_REPORT: Dict[str, Any] = {
-    "n": 12, "p": 2, "df_num": 1, "df_denom": 10,
-    "alpha": 0.05, "target_power": 0.8, "achieved_power": 0.83,
-    "noncentrality_lambda": 7.5, "criterion": "I",
-    "elapsed_sec": 0.4, "warnings": [],
+    "n": 12,
+    "p": 2,
+    "df_num": 1,
+    "df_denom": 10,
+    "alpha": 0.05,
+    "target_power": 0.8,
+    "achieved_power": 0.83,
+    "noncentrality_lambda": 7.5,
+    "criterion": "I",
+    "elapsed_sec": 0.4,
+    "warnings": [],
     "test_type": "wald_chi2",
-    "family": "binomial", "link": "logit", "baseline": 0.30,
-    "glm_weight": 0.21, "df2": None,
+    "family": "binomial",
+    "link": "logit",
+    "baseline": 0.30,
+    "glm_weight": 0.21,
+    "df2": None,
 }
 
 
 # --- Layer 1: pure unit tests (no HTTP) ---
+
 
 class TestGLMPydanticModels:
     """GL-7 Layer 1: PowerGLMContrastModel construction and validation."""
 
     def test_glm_model_construction_binomial(self):
         from lattice_doe.api_server.models.common import PowerGLMContrastModel
+
         m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3, family="binomial")
         assert m.type == "glm_contrast"
         assert m.family == "binomial"
@@ -1052,6 +1173,7 @@ class TestGLMPydanticModels:
 
     def test_glm_model_construction_poisson(self):
         from lattice_doe.api_server.models.common import PowerGLMContrastModel
+
         m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.5], baseline=2.0, family="poisson")
         assert m.family == "poisson"
         assert m.baseline == pytest.approx(2.0)
@@ -1059,30 +1181,35 @@ class TestGLMPydanticModels:
     def test_glm_baseline_out_of_range_binomial(self):
         from lattice_doe.api_server.models.common import PowerGLMContrastModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError, match="baseline"):
             PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=1.5, family="binomial")
 
     def test_glm_baseline_zero_poisson_rejected(self):
         from lattice_doe.api_server.models.common import PowerGLMContrastModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError, match="baseline"):
             PowerGLMContrastModel(L=[[0, 1]], delta=[0.5], baseline=0.0, family="poisson")
 
     def test_glm_wrong_family_rejected(self):
         from lattice_doe.api_server.models.common import PowerGLMContrastModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError):
             PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3, family="gaussian")
 
     def test_glm_missing_baseline_rejected(self):
         from lattice_doe.api_server.models.common import PowerGLMContrastModel
         import pydantic
+
         with pytest.raises(pydantic.ValidationError):
             PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], family="binomial")
 
     def test_pydantic_power_cfg_to_dataclass_glm_branch(self):
         from lattice_doe.api_server.models.common import PowerGLMContrastModel
         from lattice_doe.config import PowerGLMContrastConfig
+
         m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3, family="binomial")
         cfg = pydantic_power_cfg_to_dataclass(m)
         assert isinstance(cfg, PowerGLMContrastConfig)
@@ -1092,8 +1219,10 @@ class TestGLMPydanticModels:
 
     def test_pydantic_power_cfg_to_dataclass_glm_link_forwarded(self):
         from lattice_doe.api_server.models.common import PowerGLMContrastModel
-        m = PowerGLMContrastModel(L=[[0, 1]], delta=[0.4], baseline=0.3,
-                                   family="binomial", link="logit")
+
+        m = PowerGLMContrastModel(
+            L=[[0, 1]], delta=[0.4], baseline=0.3, family="binomial", link="logit"
+        )
         cfg = pydantic_power_cfg_to_dataclass(m)
         assert cfg.link == "logit"
 
@@ -1102,15 +1231,22 @@ class TestGLMPydanticModels:
         from lattice_doe.api_server.models.common import PowerGLMContrastModel
         from pydantic import TypeAdapter
         from lattice_doe.api_server.models.common import PowerCfgModel
+
         ta = TypeAdapter(PowerCfgModel)
-        m = ta.validate_python({
-            "type": "glm_contrast",
-            "L": [[0, 1]], "delta": [0.3], "baseline": 0.25, "family": "binomial",
-        })
+        m = ta.validate_python(
+            {
+                "type": "glm_contrast",
+                "L": [[0, 1]],
+                "delta": [0.3],
+                "baseline": 0.25,
+                "family": "binomial",
+            }
+        )
         assert isinstance(m, PowerGLMContrastModel)
 
 
 # --- Layer 2: HTTP unit tests (mocked, ASGI test client) ---
+
 
 @pytest.mark.anyio
 @pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
@@ -1168,37 +1304,53 @@ class TestGLMDesignEndpointMocked:
 
     @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_glm_poisson_returns_200(self, mock_run, client):
-        mock_run.return_value = self._mock_return({
-            "family": "poisson", "link": "log", "baseline": 2.0, "glm_weight": 2.0,
-        })
+        mock_run.return_value = self._mock_return(
+            {
+                "family": "poisson",
+                "link": "log",
+                "baseline": 2.0,
+                "glm_weight": 2.0,
+            }
+        )
         r = await client.post("/design", json=self._glm_body(_GLM_POISSON_CFG))
         assert r.status_code == 200
 
     @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_glm_poisson_report_has_baseline(self, mock_run, client):
-        mock_run.return_value = self._mock_return({
-            "family": "poisson", "link": "log", "baseline": 2.0, "glm_weight": 2.0,
-        })
+        mock_run.return_value = self._mock_return(
+            {
+                "family": "poisson",
+                "link": "log",
+                "baseline": 2.0,
+                "glm_weight": 2.0,
+            }
+        )
         r = await client.post("/design", json=self._glm_body(_GLM_POISSON_CFG))
         assert r.json()["report"]["baseline"] == pytest.approx(2.0)
 
     async def test_glm_baseline_out_of_range_returns_422(self, client):
-        body = self._glm_body({
-            "type": "glm_contrast",
-            "L": [[0, 1]], "delta": [0.4],
-            "family": "binomial",
-            "baseline": 1.5,  # invalid: > 1
-        })
+        body = self._glm_body(
+            {
+                "type": "glm_contrast",
+                "L": [[0, 1]],
+                "delta": [0.4],
+                "family": "binomial",
+                "baseline": 1.5,  # invalid: > 1
+            }
+        )
         r = await client.post("/design", json=body)
         assert r.status_code == 422
 
     async def test_glm_missing_baseline_returns_422(self, client):
-        body = self._glm_body({
-            "type": "glm_contrast",
-            "L": [[0, 1]], "delta": [0.4],
-            "family": "binomial",
-            # baseline omitted — required field
-        })
+        body = self._glm_body(
+            {
+                "type": "glm_contrast",
+                "L": [[0, 1]],
+                "delta": [0.4],
+                "family": "binomial",
+                # baseline omitted — required field
+            }
+        )
         r = await client.post("/design", json=body)
         assert r.status_code == 422
 
@@ -1208,18 +1360,28 @@ class TestGLMDesignEndpointMocked:
             "design_df": pd.DataFrame({"A": [0.1, -0.1]}),
             "buckets_df": pd.DataFrame({"A": [0.1], "count": [1]}),
             "report": {
-                "n": 10, "p": 2, "df_num": 1, "df_denom": 8,
-                "alpha": 0.05, "target_power": 0.8, "achieved_power": 0.82,
-                "noncentrality_lambda": 6.5, "criterion": "I",
-                "elapsed_sec": 0.3, "warnings": [],
+                "n": 10,
+                "p": 2,
+                "df_num": 1,
+                "df_denom": 8,
+                "alpha": 0.05,
+                "target_power": 0.8,
+                "achieved_power": 0.82,
+                "noncentrality_lambda": 6.5,
+                "criterion": "I",
+                "elapsed_sec": 0.3,
+                "warnings": [],
             },
         }
-        r = await client.post("/design", json={
-            "formula": "~ 1 + A",
-            "factors": {"A": [-1.0, 1.0]},
-            "power_cfg": {"type": "contrast", "L": [[0, 1]], "delta": [0.5], "sigma": 1.0},
-            "design_opts": _GLM_FAST_OPTS,
-        })
+        r = await client.post(
+            "/design",
+            json={
+                "formula": "~ 1 + A",
+                "factors": {"A": [-1.0, 1.0]},
+                "power_cfg": {"type": "contrast", "L": [[0, 1]], "delta": [0.5], "sigma": 1.0},
+                "design_opts": _GLM_FAST_OPTS,
+            },
+        )
         assert r.status_code == 200
 
 
@@ -1273,12 +1435,15 @@ class TestGLMDesignIntegration:
 
     async def test_ols_r2_endpoint_unchanged(self, client):
         """OLS R² path still works after GL-7 changes."""
-        r = await client.post("/design", json={
-            "formula": "~ 1 + A",
-            "factors": {"A": [-1.0, 1.0]},
-            "power_cfg": {"type": "r2", "r2_target": 0.15, "max_n": 30},
-            "design_opts": _GLM_FAST_OPTS,
-        })
+        r = await client.post(
+            "/design",
+            json={
+                "formula": "~ 1 + A",
+                "factors": {"A": [-1.0, 1.0]},
+                "power_cfg": {"type": "r2", "r2_target": 0.15, "max_n": 30},
+                "design_opts": _GLM_FAST_OPTS,
+            },
+        )
         assert r.status_code == 200
         assert 0 < r.json()["report"]["achieved_power"] <= 1.0
 
@@ -1294,15 +1459,21 @@ class TestUX4StrictRequestModels:
     _BODY = {
         "formula": "~ 1 + A + B",
         "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-        "power_cfg": {"type": "contrast", "L": [[0.0, 1.0, 0.0]],
-                      "delta": [1.5], "sigma": 1.0, "alpha": 0.05,
-                      "power": 0.8, "max_n": 40},
-        "design_opts": {"random_state": 0, "starts": 1,
-                        "candidate_points": 100},
+        "power_cfg": {
+            "type": "contrast",
+            "L": [[0.0, 1.0, 0.0]],
+            "delta": [1.5],
+            "sigma": 1.0,
+            "alpha": 0.05,
+            "power": 0.8,
+            "max_n": 40,
+        },
+        "design_opts": {"random_state": 0, "starts": 1, "candidate_points": 100},
     }
 
     async def test_misspelled_option_422(self, client):
         import copy
+
         body = copy.deepcopy(self._BODY)
         body["design_opts"]["strats"] = 3
         r = await client.post("/design", json=body)
@@ -1311,6 +1482,7 @@ class TestUX4StrictRequestModels:
 
     async def test_unknown_top_level_422(self, client):
         import copy
+
         body = copy.deepcopy(self._BODY)
         body["bogus"] = True
         r = await client.post("/design", json=body)
@@ -1318,6 +1490,7 @@ class TestUX4StrictRequestModels:
 
     async def test_workers_gt1_422_with_guidance(self, client):
         import copy
+
         body = copy.deepcopy(self._BODY)
         body["design_opts"]["workers"] = 4
         r = await client.post("/design", json=body)
@@ -1326,6 +1499,7 @@ class TestUX4StrictRequestModels:
 
     async def test_workers_serial_accepted(self, client):
         import copy
+
         body = copy.deepcopy(self._BODY)
         body["design_opts"]["workers"] = 1
         r = await client.post("/design", json=body)
@@ -1336,6 +1510,7 @@ class TestUX4StrictRequestModels:
         """Only null or 1 are valid; 0 and negatives must 422 rather than being
         silently coerced to None (P2)."""
         import copy
+
         body = copy.deepcopy(self._BODY)
         body["design_opts"]["workers"] = bad
         r = await client.post("/design", json=body)
@@ -1351,19 +1526,23 @@ class TestUX7RestStatusFields:
         body = {
             "formula": "~ 1 + A + B",
             "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-            "power_cfg": {"type": "contrast", "L": [[0.0, 1.0, 0.0]],
-                          "delta": [0.3], "sigma": 1.0, "alpha": 0.05,
-                          "power": 0.8, "max_n": 30},
-            "design_opts": {"random_state": 0, "starts": 1,
-                            "candidate_points": 100},
+            "power_cfg": {
+                "type": "contrast",
+                "L": [[0.0, 1.0, 0.0]],
+                "delta": [0.3],
+                "sigma": 1.0,
+                "alpha": 0.05,
+                "power": 0.8,
+                "max_n": 30,
+            },
+            "design_opts": {"random_state": 0, "starts": 1, "candidate_points": 100},
         }
         r = await client.post("/design", json=body)
         assert r.status_code == 200
         rep = r.json()["report"]
         assert rep["status"] == "partial"
         assert rep["target_met"] is False
-        assert rep["termination_reason"] in ("max_n", "max_iter",
-                                             "candidate_cap")
+        assert rep["termination_reason"] in ("max_n", "max_iter", "candidate_cap")
 
 
 @pytest.mark.anyio
@@ -1374,17 +1553,23 @@ class TestUX2JobsRouter:
     _BODY = {
         "formula": "~ 1 + A + B",
         "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-        "power_cfg": {"type": "contrast", "L": [[0.0, 1.0, 0.0]],
-                      "delta": [1.2], "sigma": 1.0, "alpha": 0.05,
-                      "power": 0.8, "max_n": 60},
-        "design_opts": {"random_state": 0, "starts": 1,
-                        "candidate_points": 120},
+        "power_cfg": {
+            "type": "contrast",
+            "L": [[0.0, 1.0, 0.0]],
+            "delta": [1.2],
+            "sigma": 1.0,
+            "alpha": 0.05,
+            "power": 0.8,
+            "max_n": 60,
+        },
+        "design_opts": {"random_state": 0, "starts": 1, "candidate_points": 120},
     }
 
     async def _poll(self, client, jid, timeout=15.0):
         import time as _time
 
         import anyio
+
         deadline = _time.monotonic() + timeout
         terminal = {"done", "failed", "cancelled"}
         while _time.monotonic() < deadline:
@@ -1410,17 +1595,34 @@ class TestUX2JobsRouter:
             "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
             "multi_cfg": {
                 "responses": [
-                    {"name": "Y1", "power_cfg": {"type": "contrast",
-                     "L": [[0.0, 1.0, 0.0]], "delta": [1.2], "sigma": 1.0,
-                     "alpha": 0.05, "power": 0.8, "max_n": 60}},
-                    {"name": "Y2", "power_cfg": {"type": "contrast",
-                     "L": [[0.0, 1.0, 0.0]], "delta": [1.0], "sigma": 1.0,
-                     "alpha": 0.05, "power": 0.8, "max_n": 60}},
+                    {
+                        "name": "Y1",
+                        "power_cfg": {
+                            "type": "contrast",
+                            "L": [[0.0, 1.0, 0.0]],
+                            "delta": [1.2],
+                            "sigma": 1.0,
+                            "alpha": 0.05,
+                            "power": 0.8,
+                            "max_n": 60,
+                        },
+                    },
+                    {
+                        "name": "Y2",
+                        "power_cfg": {
+                            "type": "contrast",
+                            "L": [[0.0, 1.0, 0.0]],
+                            "delta": [1.0],
+                            "sigma": 1.0,
+                            "alpha": 0.05,
+                            "power": 0.8,
+                            "max_n": 60,
+                        },
+                    },
                 ],
                 "power_combination": "min",
             },
-            "design_opts": {"random_state": 0, "starts": 1,
-                            "candidate_points": 120},
+            "design_opts": {"random_state": 0, "starts": 1, "candidate_points": 120},
         }
         r = await client.post("/jobs/multiresponse_design", json=body)
         assert r.status_code == 202
@@ -1437,6 +1639,7 @@ class TestUX2JobsRouter:
 
         class _Full:
             max_concurrent = 2
+
             def submit(self, kind, runner):
                 raise JobsAtCapacity(retry_after=9)
 
@@ -1453,14 +1656,15 @@ class TestUX2JobsRouter:
         # A hard target with more work so the job stays running long enough
         # to be cancelled.
         body = dict(self._BODY)
-        body["power_cfg"] = dict(self._BODY["power_cfg"], delta=[0.12],
-                                 max_n=400)
-        body["design_opts"] = dict(self._BODY["design_opts"],
-                                   candidate_points=500, starts=3, max_iter=40)
+        body["power_cfg"] = dict(self._BODY["power_cfg"], delta=[0.12], max_n=400)
+        body["design_opts"] = dict(
+            self._BODY["design_opts"], candidate_points=500, starts=3, max_iter=40
+        )
         r = await client.post("/jobs/design", json=body)
         jid = r.json()["job_id"]
         # Wait until it is actually running.
         import anyio
+
         for _ in range(50):
             s = (await client.get(f"/jobs/{jid}")).json()
             if s["state"] == "running":
@@ -1483,11 +1687,16 @@ def test_ux2_sse_stream_reaches_terminal():
     body = {
         "formula": "~ 1 + A + B",
         "factors": {"A": [-1.0, 1.0], "B": [-1.0, 1.0]},
-        "power_cfg": {"type": "contrast", "L": [[0.0, 1.0, 0.0]],
-                      "delta": [1.2], "sigma": 1.0, "alpha": 0.05,
-                      "power": 0.8, "max_n": 60},
-        "design_opts": {"random_state": 0, "starts": 1,
-                        "candidate_points": 120},
+        "power_cfg": {
+            "type": "contrast",
+            "L": [[0.0, 1.0, 0.0]],
+            "delta": [1.2],
+            "sigma": 1.0,
+            "alpha": 0.05,
+            "power": 0.8,
+            "max_n": 60,
+        },
+        "design_opts": {"random_state": 0, "starts": 1, "candidate_points": 120},
     }
     jid = client.post("/jobs/design", json=body).json()["job_id"]
     frames = []
@@ -1495,7 +1704,7 @@ def test_ux2_sse_stream_reaches_terminal():
         assert "text/event-stream" in r.headers.get("content-type", "")
         for line in r.iter_lines():
             if line and line.startswith("data:"):
-                frames.append(_json.loads(line[len("data: "):]))
+                frames.append(_json.loads(line[len("data: ") :]))
             if len(frames) > 100:
                 break
     assert frames

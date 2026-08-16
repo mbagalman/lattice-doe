@@ -10,6 +10,7 @@ Covers:
 - build_blocked_design
 - find_optimal_design with blocked designs (contrast and R² modes)
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -26,10 +27,10 @@ from lattice_doe import (
     find_optimal_design,
 )
 
-
 # ---------------------------------------------------------------------------
 # balanced_block_sizes
 # ---------------------------------------------------------------------------
+
 
 class TestBalancedBlockSizes:
     def test_even_split(self):
@@ -84,6 +85,7 @@ class TestBalancedBlockSizes:
 # blocked_formula
 # ---------------------------------------------------------------------------
 
+
 class TestBlockedFormula:
     def test_default_block_name(self):
         result = blocked_formula("1 + A + B")
@@ -103,6 +105,7 @@ class TestBlockedFormula:
 # ---------------------------------------------------------------------------
 # DesignOptions blocked validation
 # ---------------------------------------------------------------------------
+
 
 class TestDesignOptionsBlockedValidation:
     def test_valid_n_blocks(self):
@@ -153,6 +156,7 @@ class TestDesignOptionsBlockedValidation:
 # ---------------------------------------------------------------------------
 # build_blocked_design
 # ---------------------------------------------------------------------------
+
 
 class TestBuildBlockedDesign:
     @pytest.fixture
@@ -318,6 +322,7 @@ class TestBuildBlockedDesign:
 # find_optimal_design with blocked designs
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def two_factor_setup():
     """Shared factors and formula for integration tests."""
@@ -335,11 +340,19 @@ class TestIOptimalPoweredDesignBlocked:
         L = np.array([[0.0, 1.0, 0.0]])
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=80, max_iter=30,
+            L=L,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=80,
+            max_iter=30,
         )
         design_opts = DesignOptions(
-            n_blocks=3, random_state=7, starts=2, candidate_points=200,
+            n_blocks=3,
+            random_state=7,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
             formula=formula,
@@ -354,11 +367,19 @@ class TestIOptimalPoweredDesignBlocked:
         L = np.array([[0.0, 1.0, 0.0]])
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=80, max_iter=30,
+            L=L,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=80,
+            max_iter=30,
         )
         design_opts = DesignOptions(
-            n_blocks=3, random_state=7, starts=2, candidate_points=200,
+            n_blocks=3,
+            random_state=7,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
             formula=formula,
@@ -374,11 +395,19 @@ class TestIOptimalPoweredDesignBlocked:
         L = np.array([[0.0, 1.0, 0.0]])
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=80, max_iter=30,
+            L=L,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=80,
+            max_iter=30,
         )
         design_opts = DesignOptions(
-            n_blocks=3, random_state=7, starts=2, candidate_points=200,
+            n_blocks=3,
+            random_state=7,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
             formula=formula,
@@ -395,11 +424,19 @@ class TestIOptimalPoweredDesignBlocked:
         L = np.array([[0.0, 1.0, 0.0]])
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=80, max_iter=30,
+            L=L,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=80,
+            max_iter=30,
         )
         design_opts = DesignOptions(
-            n_blocks=3, random_state=7, starts=2, candidate_points=200,
+            n_blocks=3,
+            random_state=7,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
             formula=formula,
@@ -415,11 +452,17 @@ class TestIOptimalPoweredDesignBlocked:
     def test_r2_mode_returns_block_column(self, two_factor_setup):
         factors, formula = two_factor_setup
         power_cfg = PowerR2Config(
-            r2_target=0.3, alpha=0.05, power=0.7,
-            max_n=80, max_iter=30,
+            r2_target=0.3,
+            alpha=0.05,
+            power=0.7,
+            max_n=80,
+            max_iter=30,
         )
         design_opts = DesignOptions(
-            n_blocks=3, random_state=11, starts=2, candidate_points=200,
+            n_blocks=3,
+            random_state=11,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
             formula=formula,
@@ -432,11 +475,17 @@ class TestIOptimalPoweredDesignBlocked:
     def test_r2_mode_n_blocks_distinct_values(self, two_factor_setup):
         factors, formula = two_factor_setup
         power_cfg = PowerR2Config(
-            r2_target=0.3, alpha=0.05, power=0.7,
-            max_n=80, max_iter=30,
+            r2_target=0.3,
+            alpha=0.05,
+            power=0.7,
+            max_n=80,
+            max_iter=30,
         )
         design_opts = DesignOptions(
-            n_blocks=3, random_state=11, starts=2, candidate_points=200,
+            n_blocks=3,
+            random_state=11,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
             formula=formula,
@@ -450,11 +499,17 @@ class TestIOptimalPoweredDesignBlocked:
     def test_r2_mode_block_structure_in_report(self, two_factor_setup):
         factors, formula = two_factor_setup
         power_cfg = PowerR2Config(
-            r2_target=0.3, alpha=0.05, power=0.7,
-            max_n=80, max_iter=30,
+            r2_target=0.3,
+            alpha=0.05,
+            power=0.7,
+            max_n=80,
+            max_iter=30,
         )
         design_opts = DesignOptions(
-            n_blocks=3, random_state=11, starts=2, candidate_points=200,
+            n_blocks=3,
+            random_state=11,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
             formula=formula,
@@ -472,8 +527,13 @@ class TestIOptimalPoweredDesignBlocked:
         L = np.array([[0.0, 1.0, 0.0]])
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=50, max_iter=20,
+            L=L,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=50,
+            max_iter=20,
         )
         design_opts = DesignOptions(random_state=42, starts=2, candidate_points=200)
         result = find_optimal_design(
@@ -492,11 +552,19 @@ class TestIOptimalPoweredDesignBlocked:
         L_wrong = np.array([[0.0, 1.0, 0.0, 0.0, 0.0]])
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L_wrong, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=80, max_iter=30,
+            L=L_wrong,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=80,
+            max_iter=30,
         )
         design_opts = DesignOptions(
-            n_blocks=3, random_state=7, starts=2, candidate_points=200,
+            n_blocks=3,
+            random_state=7,
+            starts=2,
+            candidate_points=200,
         )
         with pytest.raises(ValueError, match="p_treat"):
             find_optimal_design(
@@ -511,12 +579,20 @@ class TestIOptimalPoweredDesignBlocked:
         L = np.array([[0.0, 1.0, 0.0]])
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=80, max_iter=30,
+            L=L,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=80,
+            max_iter=30,
         )
         design_opts = DesignOptions(
-            n_blocks=3, block_factor_name="Day",
-            random_state=7, starts=2, candidate_points=200,
+            n_blocks=3,
+            block_factor_name="Day",
+            random_state=7,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
             formula=formula,
@@ -533,11 +609,19 @@ class TestIOptimalPoweredDesignBlocked:
         L = np.array([[0.0, 1.0, 0.0]])
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=80, max_iter=30,
+            L=L,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=80,
+            max_iter=30,
         )
         design_opts = DesignOptions(
-            n_blocks=3, random_state=7, starts=2, candidate_points=200,
+            n_blocks=3,
+            random_state=7,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
             formula=formula,
@@ -552,6 +636,7 @@ class TestIOptimalPoweredDesignBlocked:
 # ---------------------------------------------------------------------------
 # CR-17: block_factor_name collision validation
 # ---------------------------------------------------------------------------
+
 
 class TestCR17BlockFactorNameCollision:
     """CR-17: block_factor_name that matches a treatment factor must be rejected."""
@@ -568,12 +653,20 @@ class TestCR17BlockFactorNameCollision:
         L = np.array([[0.0, 1.0, 0.0]])
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=50, max_iter=10,
+            L=L,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=50,
+            max_iter=10,
         )
         design_opts = DesignOptions(
-            n_blocks=3, block_factor_name="A",
-            random_state=1, starts=1, candidate_points=100,
+            n_blocks=3,
+            block_factor_name="A",
+            random_state=1,
+            starts=1,
+            candidate_points=100,
         )
         with pytest.raises(ValueError, match="block_factor_name.*collides"):
             find_optimal_design(
@@ -589,12 +682,20 @@ class TestCR17BlockFactorNameCollision:
         L = np.array([[0.0, 1.0, 0.0]])
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=50, max_iter=10,
+            L=L,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=50,
+            max_iter=10,
         )
         design_opts = DesignOptions(
-            n_blocks=3, block_factor_name="B",
-            random_state=1, starts=1, candidate_points=100,
+            n_blocks=3,
+            block_factor_name="B",
+            random_state=1,
+            starts=1,
+            candidate_points=100,
         )
         with pytest.raises(ValueError, match="block_factor_name.*collides"):
             find_optimal_design(
@@ -608,14 +709,23 @@ class TestCR17BlockFactorNameCollision:
         """Default 'Block' name is fine when no factor is named 'Block'."""
         factors, formula = two_factor_setup
         power_cfg = PowerR2Config(
-            r2_target=0.3, alpha=0.05, power=0.7, max_n=50, max_iter=10,
+            r2_target=0.3,
+            alpha=0.05,
+            power=0.7,
+            max_n=50,
+            max_iter=10,
         )
         design_opts = DesignOptions(
-            n_blocks=2, random_state=1, starts=1, candidate_points=100,
+            n_blocks=2,
+            random_state=1,
+            starts=1,
+            candidate_points=100,
         )
         # Should not raise
         result = find_optimal_design(
-            formula=formula, factors=factors, power_cfg=power_cfg,
+            formula=formula,
+            factors=factors,
+            power_cfg=power_cfg,
             design_opts=design_opts,
         )
         assert "Block" in result["design_df"].columns
@@ -624,10 +734,12 @@ class TestCR17BlockFactorNameCollision:
         """build_blocked_design raises if block_factor_name already in cand.columns."""
         rng = np.random.default_rng(0)
         # 'Block' is already a column in the candidate
-        cand = pd.DataFrame({
-            "A": rng.uniform(-1, 1, 100),
-            "Block": ["X"] * 100,  # collision
-        })
+        cand = pd.DataFrame(
+            {
+                "A": rng.uniform(-1, 1, 100),
+                "Block": ["X"] * 100,  # collision
+            }
+        )
         with pytest.raises(ValueError, match="block_factor_name.*already a column"):
             build_blocked_design(
                 cand=cand,
@@ -656,10 +768,12 @@ class TestCR17BlockFactorNameCollision:
     def test_build_blocked_design_raises_for_arbitrary_collision(self):
         """Any existing column name — not just 'Block' — triggers the guard."""
         rng = np.random.default_rng(0)
-        cand = pd.DataFrame({
-            "A": rng.uniform(-1, 1, 100),
-            "Day": rng.uniform(-1, 1, 100),
-        })
+        cand = pd.DataFrame(
+            {
+                "A": rng.uniform(-1, 1, 100),
+                "Day": rng.uniform(-1, 1, 100),
+            }
+        )
         with pytest.raises(ValueError, match="block_factor_name.*already a column"):
             build_blocked_design(
                 cand=cand,
@@ -690,6 +804,7 @@ class TestCR17BlockFactorNameCollision:
 # CR-18: blocked designs with categorical treatment factors
 # ---------------------------------------------------------------------------
 
+
 class TestCR18BlockedWithCategoricalTreatment:
     """CR-18: p_full must account for all categorical treatment levels.
 
@@ -702,18 +817,26 @@ class TestCR18BlockedWithCategoricalTreatment:
         """Blocked design with a 3-level categorical treatment factor must work."""
         factors = {
             "Material": ["Steel", "Aluminum", "Titanium"],
-            "Temp":     (-10.0, 50.0),
+            "Temp": (-10.0, 50.0),
         }
         formula = "1 + Material + Temp"
         # p_treat = intercept + 2 Material dummies + Temp = 4
         L = np.array([[0.0, 1.0, 0.0, 0.0]])  # test Material[Aluminum]
         delta = np.array([0.5])
         power_cfg = PowerContrastConfig(
-            L=L, delta=delta, alpha=0.05, power=0.7, sigma=1.0,
-            max_n=60, max_iter=15,
+            L=L,
+            delta=delta,
+            alpha=0.05,
+            power=0.7,
+            sigma=1.0,
+            max_n=60,
+            max_iter=15,
         )
         design_opts = DesignOptions(
-            n_blocks=3, random_state=42, starts=1, candidate_points=150,
+            n_blocks=3,
+            random_state=42,
+            starts=1,
+            candidate_points=150,
         )
         result = find_optimal_design(
             formula=formula,
@@ -729,14 +852,21 @@ class TestCR18BlockedWithCategoricalTreatment:
         """p_block_cols = n_blocks - 1 even when treatment has multiple cat levels."""
         factors = {
             "Cat": ["A", "B", "C"],
-            "x":   (0.0, 1.0),
+            "x": (0.0, 1.0),
         }
         formula = "1 + Cat + x"
         power_cfg = PowerR2Config(
-            r2_target=0.25, alpha=0.05, power=0.7, max_n=60, max_iter=15,
+            r2_target=0.25,
+            alpha=0.05,
+            power=0.7,
+            max_n=60,
+            max_iter=15,
         )
         design_opts = DesignOptions(
-            n_blocks=4, random_state=7, starts=1, candidate_points=120,
+            n_blocks=4,
+            random_state=7,
+            starts=1,
+            candidate_points=120,
         )
         result = find_optimal_design(
             formula=formula,
@@ -760,10 +890,17 @@ class TestCR18BlockedWithCategoricalTreatment:
         }
         formula = "1 + A + B"
         power_cfg = PowerR2Config(
-            r2_target=0.25, alpha=0.05, power=0.7, max_n=6, max_iter=15,
+            r2_target=0.25,
+            alpha=0.05,
+            power=0.7,
+            max_n=6,
+            max_iter=15,
         )
         design_opts = DesignOptions(
-            n_blocks=2, random_state=5, starts=1, candidate_points=100,
+            n_blocks=2,
+            random_state=5,
+            starts=1,
+            candidate_points=100,
         )
         result = find_optimal_design(
             formula=formula,
@@ -780,6 +917,7 @@ class TestCR18BlockedWithCategoricalTreatment:
 # SR-4 / SR-16 / SR-18 — blocked contrast alignment and Phase-2 scan floor
 # ---------------------------------------------------------------------------
 
+
 class TestSR4BlockedContrastAlignment:
     """SR-4 regression: blocked contrast power must target the treatment
     effect, not the block dummy that Patsy orders before numeric columns."""
@@ -795,15 +933,25 @@ class TestSR4BlockedContrastAlignment:
 
         factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
         power_cfg = PowerContrastConfig(
-            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([1.5]),
-            alpha=0.05, power=0.8, sigma=1.0, max_n=60, max_iter=60,
+            L=np.array([[0.0, 1.0, 0.0]]),
+            delta=np.array([1.5]),
+            alpha=0.05,
+            power=0.8,
+            sigma=1.0,
+            max_n=60,
+            max_iter=60,
         )
         design_opts = DesignOptions(
-            n_blocks=2, random_state=0, starts=2, candidate_points=200,
+            n_blocks=2,
+            random_state=0,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
-            formula="~ 1 + A + B", factors=factors,
-            power_cfg=power_cfg, design_opts=design_opts,
+            formula="~ 1 + A + B",
+            factors=factors,
+            power_cfg=power_cfg,
+            design_opts=design_opts,
         )
         # Rebuild the augmented model matrix from the returned design and
         # recompute power for the treatment contrast, aligned by column name.
@@ -813,15 +961,21 @@ class TestSR4BlockedContrastAlignment:
         # ordering that made positional right-padding wrong.
         assert names.index("A") > 1, "expected block dummy before numeric cols"
         p_A = contrast_power(
-            self._aligned_L(names, "A"), power_cfg.delta, X_full,
-            power_cfg.sigma, power_cfg.alpha,
+            self._aligned_L(names, "A"),
+            power_cfg.delta,
+            X_full,
+            power_cfg.sigma,
+            power_cfg.alpha,
         ).power
         assert result["report"]["achieved_power"] == pytest.approx(p_A, abs=1e-9)
         # And it must NOT equal the block-dummy contrast the old code tested.
         blk = [nm for nm in names if "Block" in nm][0]
         p_blk = contrast_power(
-            self._aligned_L(names, blk), power_cfg.delta, X_full,
-            power_cfg.sigma, power_cfg.alpha,
+            self._aligned_L(names, blk),
+            power_cfg.delta,
+            X_full,
+            power_cfg.sigma,
+            power_cfg.alpha,
         ).power
         assert abs(result["report"]["achieved_power"] - p_blk) > 1e-6
 
@@ -835,15 +989,25 @@ class TestSR4BlockedContrastAlignment:
 
         factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
         power_cfg = PowerGLMContrastConfig(
-            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.9]),
-            baseline=0.3, family="binomial", alpha=0.05, power=0.8, max_n=200,
+            L=np.array([[0.0, 1.0, 0.0]]),
+            delta=np.array([0.9]),
+            baseline=0.3,
+            family="binomial",
+            alpha=0.05,
+            power=0.8,
+            max_n=200,
         )
         design_opts = DesignOptions(
-            n_blocks=2, random_state=0, starts=2, candidate_points=200,
+            n_blocks=2,
+            random_state=0,
+            starts=2,
+            candidate_points=200,
         )
         result = find_optimal_design(
-            formula="~ 1 + A + B", factors=factors,
-            power_cfg=power_cfg, design_opts=design_opts,
+            formula="~ 1 + A + B",
+            factors=factors,
+            power_cfg=power_cfg,
+            design_opts=design_opts,
         )
         aug = blocked_formula("~ 1 + A + B", design_opts.block_factor_name)
         X_full, names = build_model_matrix(aug, result["design_df"])
@@ -857,15 +1021,25 @@ class TestSR4BlockedContrastAlignment:
         df_denom = 0."""
         factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
         power_cfg = PowerContrastConfig(
-            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([2.5]),
-            alpha=0.05, power=0.8, sigma=1.0, max_n=60, max_iter=60,
+            L=np.array([[0.0, 1.0, 0.0]]),
+            delta=np.array([2.5]),
+            alpha=0.05,
+            power=0.8,
+            sigma=1.0,
+            max_n=60,
+            max_iter=60,
         )
         design_opts = DesignOptions(
-            n_blocks=2, random_state=0, starts=1, candidate_points=150,
+            n_blocks=2,
+            random_state=0,
+            starts=1,
+            candidate_points=150,
         )
         result = find_optimal_design(
-            formula="~ 1 + A + B", factors=factors,
-            power_cfg=power_cfg, design_opts=design_opts,
+            formula="~ 1 + A + B",
+            factors=factors,
+            power_cfg=power_cfg,
+            design_opts=design_opts,
         )
         # p_full = 4 (intercept, block dummy, A, B); n must exceed it.
         assert result["report"]["n"] >= 5
@@ -874,6 +1048,7 @@ class TestSR4BlockedContrastAlignment:
 # ---------------------------------------------------------------------------
 # SR-17 — blocked global-R² power must test treatment slopes only
 # ---------------------------------------------------------------------------
+
 
 class TestSR17BlockedR2DfNum:
     """SR-17 regression: blocked R² mode used df1 = rank(X_full) − 1, counting
@@ -884,14 +1059,15 @@ class TestSR17BlockedR2DfNum:
 
     def _run(self, n_blocks):
         factors = {"A": (-1.0, 1.0), "B": (-1.0, 1.0)}
-        power_cfg = PowerR2Config(r2_target=0.35, alpha=0.05, power=0.8,
-                                  max_n=80)
+        power_cfg = PowerR2Config(r2_target=0.35, alpha=0.05, power=0.8, max_n=80)
         opts = dict(random_state=0, starts=2, candidate_points=200)
         if n_blocks:
             opts["n_blocks"] = n_blocks
         return find_optimal_design(
-            formula="~ 1 + A + B", factors=factors,
-            power_cfg=power_cfg, design_opts=DesignOptions(**opts),
+            formula="~ 1 + A + B",
+            factors=factors,
+            power_cfg=power_cfg,
+            design_opts=DesignOptions(**opts),
         )
 
     def test_df_num_excludes_block_dummies(self):
@@ -903,6 +1079,7 @@ class TestSR17BlockedR2DfNum:
         df2 = n − rank(X_full) (block dummies charged to error)."""
         from scipy.stats import f as f_dist, ncf as ncf_dist
         from lattice_doe import build_model_matrix
+
         result = self._run(n_blocks=3)
         rep = result["report"]
         aug = blocked_formula("~ 1 + A + B", "Block")
@@ -924,6 +1101,7 @@ class TestSR17BlockedR2DfNum:
 # numeric-coded categoricals
 # ---------------------------------------------------------------------------
 
+
 class TestIA2BlockedPreallocation:
     """P2 regression (IA-2): build_blocked_design forwarded every allocation
     option except cat_cols and had no way to derive it, so numeric-coded
@@ -935,28 +1113,42 @@ class TestIA2BlockedPreallocation:
     @staticmethod
     def _skewed_cand():
         g = np.array([0] * 20 + [1] * 20 + [2] * 4)
-        x = np.concatenate([
-            np.linspace(-1, 1, 20), np.linspace(-1, 1, 20),
-            np.linspace(-0.2, 0.2, 4),
-        ])
+        x = np.concatenate(
+            [
+                np.linspace(-1, 1, 20),
+                np.linspace(-1, 1, 20),
+                np.linspace(-0.2, 0.2, 4),
+            ]
+        )
         return pd.DataFrame({"g": g, "x": x})
 
     def test_numeric_coded_categorical_honors_min_per_cell(self):
         cand = self._skewed_cand()
         design_df, _ = build_blocked_design(
-            cand=cand, formula="1 + C(g) + x", n=18, n_blocks=2,
-            block_sizes=[9, 9], block_factor_name="Block",
+            cand=cand,
+            formula="1 + C(g) + x",
+            n=18,
+            n_blocks=2,
+            block_sizes=[9, 9],
+            block_factor_name="Block",
             aug_formula="1 + C(g) + x + C(Block)",
-            criterion="I", n_start=3, algo="fedorov", max_iter=200,
-            random_state=0, workers=None, parallel_seed_stride=10_000,
-            jitter=1e-8, preallocate_categorical=True, alloc_min_per_cell=2,
-            alloc_max_per_cell=None, alloc_wynn_max_iter=500,
-            alloc_wynn_tol=1e-6, cat_cells_cap=10_000,
+            criterion="I",
+            n_start=3,
+            algo="fedorov",
+            max_iter=200,
+            random_state=0,
+            workers=None,
+            parallel_seed_stride=10_000,
+            jitter=1e-8,
+            preallocate_categorical=True,
+            alloc_min_per_cell=2,
+            alloc_max_per_cell=None,
+            alloc_wynn_max_iter=500,
+            alloc_wynn_tol=1e-6,
+            cat_cells_cap=10_000,
             factors={"g": [0, 1, 2], "x": (-1.0, 1.0)},
         )
-        per_block = (
-            design_df.groupby("Block")["g"].value_counts().unstack(fill_value=0)
-        )
+        per_block = design_df.groupby("Block")["g"].value_counts().unstack(fill_value=0)
         # Pre-fix both blocks were {0: 4, 1: 4, 2: 1} — bound violated.
         for block in per_block.index:
             counts = {int(k): int(v) for k, v in per_block.loc[block].items()}
@@ -967,19 +1159,22 @@ class TestIA2BlockedPreallocation:
         # through _blocked_kwargs. Bounds hold in every block.
         factors = {"g": [0, 1, 2], "x": (-1.0, 1.0)}
         cfg = PowerContrastConfig(
-            alpha=0.05, power=0.8,
-            L=[[0, 1, 0, 0], [0, 0, 1, 0]], delta=[1.2, 1.2], sigma=1.0,
+            alpha=0.05,
+            power=0.8,
+            L=[[0, 1, 0, 0], [0, 0, 1, 0]],
+            delta=[1.2, 1.2],
+            sigma=1.0,
         )
         opts = DesignOptions(
-            random_state=0, starts=2, n_blocks=2,
-            preallocate_categorical=True, alloc_min_per_cell=2,
+            random_state=0,
+            starts=2,
+            n_blocks=2,
+            preallocate_categorical=True,
+            alloc_min_per_cell=2,
             candidate_points=60,
         )
         res = find_optimal_design("1 + C(g) + x", factors, cfg, opts)
-        per_block = (
-            res["design_df"].groupby("Block")["g"]
-            .value_counts().unstack(fill_value=0)
-        )
+        per_block = res["design_df"].groupby("Block")["g"].value_counts().unstack(fill_value=0)
         assert per_block.shape[1] == 3
         assert bool((per_block >= 2).all().all())
 
@@ -1029,15 +1224,37 @@ class TestBlockedReplicationCeiling:
         assert per_block.shape == (2, 3)
         assert int(per_block.sum(axis=1).max()) - int(per_block.sum(axis=1).min()) <= 1
 
-    def test_explicit_block_sizes_stay_capped(self):
-        # Fixed block sizes pin the total n, so the ceiling must remain.
+    def _explicit(self, sizes, **cfg_kw):
         opts = DesignOptions(
             random_state=0,
             starts=2,
             n_blocks=2,
-            block_sizes=[3, 3],
+            block_sizes=list(sizes),
             preallocate_categorical=True,
             alloc_min_per_cell=1,
         )
-        res = find_optimal_design("1 + C(g)", self.FACTORS, self._cfg(), opts)
-        assert res["report"]["n"] == 6
+        return find_optimal_design("1 + C(g)", self.FACTORS, self._cfg(**cfg_kw), opts)
+
+    @pytest.mark.parametrize("sizes", [[3, 3], [4, 4], [5, 5], [10, 15]])
+    def test_explicit_block_sizes_evaluate_their_sum(self, sizes):
+        # RV-3 regression: fixed layouts admit exactly one n. Pre-fix the
+        # bisection probed candidate-ceiling sizes and crashed on the sum
+        # check for every layout whose sum differed from the old cap of 6
+        # (the original [3,3] test passed only by that coincidence).
+        res = self._explicit(sizes)
+        assert res["report"]["n"] == sum(sizes)
+        assert res["design_df"].groupby("Block").size().tolist() == sorted(sizes)
+
+    def test_explicit_sizes_meeting_target_skip_the_verify_scan(self):
+        # RV-3 second site: when the fixed n ACHIEVES the target, Phase 2
+        # used to scan downward for a smaller achiever — probing sizes the
+        # layout cannot realize (pre-fix: [25,25] crashed at n=49).
+        res = self._explicit([25, 25])
+        rep = res["report"]
+        assert rep["n"] == 50
+        assert rep["achieved_power"] >= 0.8
+        assert rep["verify_window"] == 0
+
+    def test_explicit_sizes_below_model_minimum_rejected(self):
+        with pytest.raises(ValueError, match="too small to estimate"):
+            self._explicit([1, 1])

@@ -974,15 +974,29 @@ def find_optimal_design(
     _n_cand = len(cand)
     # Blocked designs replicate too since the per-block searches thread the
     # factor spec (TD-9): with auto-balanced blocks the reachable n is not
-    # bounded by the candidate pool. Explicit block_sizes stay capped — their
-    # sum pins the total n, so lifting the ceiling would let the search probe
-    # sizes the block layout cannot realize.
+    # bounded by the candidate pool.
     _prealloc_replicates = (
         design_opts.preallocate_categorical
         and bool(_spec_cat_cols)
         and (not is_blocked or design_opts.block_sizes is None)
     )
-    if _prealloc_replicates:
+    # Explicit block_sizes pin the total run count to their sum: the only n
+    # build_blocked_design can realize. A bisection over other sizes would
+    # probe layouts the blocks cannot produce and crash on the sum check
+    # (RV-3 — pre-fix, block_sizes=[4,4] probed n=6 and raised). Degenerate
+    # the search to exactly that n and report its achieved power.
+    _fixed_block_layout = is_blocked and design_opts.block_sizes is not None
+    if is_blocked and design_opts.block_sizes is not None:  # restated so mypy narrows
+        _fixed_total = int(sum(design_opts.block_sizes))
+        if _fixed_total < lo:
+            raise ValueError(
+                f"sum(block_sizes)={_fixed_total} is too small to estimate the "
+                f"blocked model (needs at least {lo} runs: p_full + 1, and one "
+                "run per block). Increase the block sizes."
+            )
+        lo = _fixed_total
+        _capped_max_n = _fixed_total
+    elif _prealloc_replicates:
         # Pre-allocation treats per-cell allocation counts as replication
         # counts (SR-6), so the reachable n is not bounded by the candidate
         # pool — exact optimal designs replicate categorical cells.
@@ -1285,7 +1299,14 @@ def find_optimal_design(
     # --- Phase 2: Linear verification scan ---
     # If bisection found an achiever at n*, scan n*-1, n*-2, … down to
     # max(p+1, n*-verify_window) to find any smaller n that also achieves target.
-    if best is not None and best["report"]["achieved_power"] + tol >= target:
+    # Fixed block layouts admit exactly one n (= sum(block_sizes)), so there is
+    # no smaller n to verify — scanning would probe sizes the layout cannot
+    # realize and crash on the sum check (RV-3).
+    if (
+        best is not None
+        and best["report"]["achieved_power"] + tol >= target
+        and not _fixed_block_layout
+    ):
         n_star = int(best["report"]["n"])
         if _reporter is not None:
             _reporter.emit(
