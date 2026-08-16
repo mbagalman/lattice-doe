@@ -31,11 +31,11 @@ jobs:
           pip install -e ".[cli]"
           pip install pytest pytest-cov pytest-anyio
 
-      - name: Run fast test suite (coverage figure is fast-suite-only)
-        # The slow tests (127, incl. the api_server integration tests) run in
-        # the scheduled slow-suite workflow; the coverage printed here
-        # understates modules whose tests are slow-marked. The full-suite
-        # coverage number comes from slow-suite.yml.
+      - name: Run fast test suite
+        # No coverage here (and none in pytest addopts since TD-13): the
+        # fast-suite figure understates slow-tested modules and was easy to
+        # mistake for the real number. The authoritative coverage comes from
+        # the slow-suite workflow, which passes --cov explicitly.
         run: pytest -m "not slow"
 
   gates:
