@@ -55,11 +55,16 @@ def _sync_compare(request: CompareCriteriaRequest) -> Dict[str, Any]:
             )
         )
 
+    # Per-criterion design results are nested under result["results"]
+    # (IA-6: the router used to look for criterion keys at the TOP level of
+    # the compare_criteria return, where they never exist — every response
+    # carried an empty results dict, silently).
     criteria_used = request.criteria or ["I", "D", "A"]
+    per_criterion = result.get("results", {})
     results: Dict[str, DesignResponse] = {}
     for c in criteria_used:
-        if c in result:
-            serialized = serialize_design_result(result[c])
+        if c in per_criterion:
+            serialized = serialize_design_result(per_criterion[c])
             results[c] = DesignResponse(**serialized)
 
     return {"summary": summary_rows, "results": results}

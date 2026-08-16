@@ -5,6 +5,7 @@ These tests build actual I-optimal designs, so they are slower than unit tests.
 We keep the problem small (few factors, small candidate set, few starts) to
 keep run-time reasonable.
 """
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -29,6 +30,7 @@ from lattice_doe import (
     power_curve_by_n_multiresponse,
     multiresponse_sensitivity,
     power_curve_by_baseline,
+    power_surface_2d,
 )
 from lattice_doe.contrasts import contrast_from_scenarios
 
@@ -50,8 +52,9 @@ FAST_OPTS = DesignOptions(
 
 def _contrast_cfg(power: float = 0.80, max_n: int = 80) -> PowerContrastConfig:
     L, delta = contrast_from_scenarios(
-        FORMULA, FACTORS,
-        {"A": "low",  "B": 0.0},
+        FORMULA,
+        FACTORS,
+        {"A": "low", "B": 0.0},
         {"A": "high", "B": 10.0},
         sesoi=1.0,
     )
@@ -66,49 +69,36 @@ def _r2_cfg(power: float = 0.80, max_n: int = 80) -> PowerR2Config:
 # find_optimal_design — contrast mode
 # ---------------------------------------------------------------------------
 
+
 class TestIOptimalPoweredDesignContrast:
     def test_returns_expected_keys(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         assert set(result.keys()) >= {"design_df", "buckets_df", "report"}
 
     def test_design_df_is_dataframe(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         assert isinstance(result["design_df"], pd.DataFrame)
 
     def test_design_df_has_factor_columns(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         assert set(FACTORS.keys()).issubset(result["design_df"].columns)
 
     def test_design_size_matches_report_n(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         assert len(result["design_df"]) == result["report"]["n"]
 
     def test_buckets_df_counts_sum_to_n(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         n = result["report"]["n"]
         assert result["buckets_df"]["count"].sum() == n
 
     def test_achieved_power_in_unit_interval(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         pwr = result["report"]["achieved_power"]
         assert 0.0 <= pwr <= 1.0
 
     def test_report_contains_expected_keys(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         rpt = result["report"]
         for key in ("n", "p", "df_num", "df_denom", "alpha", "target_power", "achieved_power"):
             assert key in rpt, f"Missing report key: {key}"
@@ -116,7 +106,8 @@ class TestIOptimalPoweredDesignContrast:
     def test_raises_on_max_n_smaller_than_p(self):
         """max_n <= p should fail validation before any computation."""
         L, delta = contrast_from_scenarios(
-            FORMULA, FACTORS,
+            FORMULA,
+            FACTORS,
             {"A": "low", "B": 0.0},
             {"A": "high", "B": 10.0},
             sesoi=1.0,
@@ -127,9 +118,7 @@ class TestIOptimalPoweredDesignContrast:
 
     def test_no_internal_keys_in_result(self):
         """Private cache keys (_selected_idx, _X_cand) must be stripped."""
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         assert "_selected_idx" not in result
         assert "_X_cand" not in result
 
@@ -138,24 +127,19 @@ class TestIOptimalPoweredDesignContrast:
 # find_optimal_design — R² mode
 # ---------------------------------------------------------------------------
 
+
 class TestIOptimalPoweredDesignR2:
     def test_returns_expected_keys(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS)
         assert set(result.keys()) >= {"design_df", "buckets_df", "report"}
 
     def test_achieved_power_in_unit_interval(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS)
         pwr = result["report"]["achieved_power"]
         assert 0.0 <= pwr <= 1.0
 
     def test_design_size_matches_report_n(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS)
         assert len(result["design_df"]) == result["report"]["n"]
 
 
@@ -163,25 +147,22 @@ class TestIOptimalPoweredDesignR2:
 # power_curve_by_n
 # ---------------------------------------------------------------------------
 
+
 class TestPowerCurveByN:
     def test_returns_dataframe(self):
-        df = power_curve_by_n(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        df = power_curve_by_n(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         assert isinstance(df, pd.DataFrame)
 
     def test_has_n_and_power_columns(self):
-        df = power_curve_by_n(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        df = power_curve_by_n(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         assert "n" in df.columns
         assert "power" in df.columns
 
     def test_power_generally_increases_with_n(self):
         """Power should be weakly increasing across the sampled n range."""
-        df = power_curve_by_n(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        ).sort_values("n")
+        df = power_curve_by_n(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS).sort_values(
+            "n"
+        )
         # Allow occasional ties (same n design, numerical noise) but no large dips
         powers = df["power"].to_numpy()
         # Verify the last value is >= the first
@@ -208,16 +189,26 @@ class TestPowerCurveByN:
         # semantics). Pre-fix this raised "exceeds the candidate set size".
         factors = {"g": [0, 1, 2]}
         cfg = PowerContrastConfig(
-            alpha=0.05, power=0.8,
-            L=[[0, 1, 0], [0, 0, 1]], delta=[1.0, 1.0], sigma=1.0,
+            alpha=0.05,
+            power=0.8,
+            L=[[0, 1, 0], [0, 0, 1]],
+            delta=[1.0, 1.0],
+            sigma=1.0,
         )
         opts = DesignOptions(
-            random_state=0, starts=2,
-            preallocate_categorical=True, alloc_min_per_cell=1,
+            random_state=0,
+            starts=2,
+            preallocate_categorical=True,
+            alloc_min_per_cell=1,
         )
         df = power_curve_by_n(
-            "1 + C(g)", factors, cfg, design_opts=opts,
-            n_range=(6, 12), n_points=3, plot=False,
+            "1 + C(g)",
+            factors,
+            cfg,
+            design_opts=opts,
+            n_range=(6, 12),
+            n_points=3,
+            plot=False,
         )
         assert df["n"].tolist() == [6, 8, 12]
 
@@ -226,20 +217,29 @@ class TestPowerCurveByN:
         # off: n beyond the pool is genuinely infeasible then.
         factors = {"g": [0, 1, 2]}
         cfg = PowerContrastConfig(
-            alpha=0.05, power=0.8,
-            L=[[0, 1, 0], [0, 0, 1]], delta=[1.0, 1.0], sigma=1.0,
+            alpha=0.05,
+            power=0.8,
+            L=[[0, 1, 0], [0, 0, 1]],
+            delta=[1.0, 1.0],
+            sigma=1.0,
         )
         opts = DesignOptions(random_state=0, starts=2)
         with pytest.raises(ValueError, match="exceeds the candidate set size"):
             power_curve_by_n(
-                "1 + C(g)", factors, cfg, design_opts=opts,
-                n_range=(6, 12), n_points=3, plot=False,
+                "1 + C(g)",
+                factors,
+                cfg,
+                design_opts=opts,
+                n_range=(6, 12),
+                n_points=3,
+                plot=False,
             )
 
 
 # ---------------------------------------------------------------------------
 # power_curve_by_effect
 # ---------------------------------------------------------------------------
+
 
 class TestPowerCurveByEffect:
     def test_returns_dataframe(self):
@@ -296,15 +296,24 @@ class TestPowerCurveByEffect:
         # set size n_cand=3".
         factors = {"g": [0, 1, 2]}
         cfg = PowerContrastConfig(
-            alpha=0.05, power=0.8,
-            L=[[0, 1, 0], [0, 0, 1]], delta=[1.0, 1.0], sigma=1.0,
+            alpha=0.05,
+            power=0.8,
+            L=[[0, 1, 0], [0, 0, 1]],
+            delta=[1.0, 1.0],
+            sigma=1.0,
         )
         opts = DesignOptions(
-            random_state=0, starts=2,
-            preallocate_categorical=True, alloc_min_per_cell=1,
+            random_state=0,
+            starts=2,
+            preallocate_categorical=True,
+            alloc_min_per_cell=1,
         )
         df = power_curve_by_effect(
-            "1 + C(g)", factors, n=9, power_cfg=cfg, design_opts=opts,
+            "1 + C(g)",
+            factors,
+            n=9,
+            power_cfg=cfg,
+            design_opts=opts,
         )
         assert len(df) > 0
         assert "power" in df.columns
@@ -329,46 +338,32 @@ class TestDOptimalCriterion:
     error and that output shapes / report values are well-formed."""
 
     def test_contrast_mode_returns_expected_keys(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D)
         assert set(result.keys()) >= {"design_df", "buckets_df", "report"}
 
     def test_contrast_mode_report_criterion_is_D(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D)
         assert result["report"]["criterion"] == "D"
 
     def test_contrast_mode_design_size_matches_report_n(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D)
         assert len(result["design_df"]) == result["report"]["n"]
 
     def test_contrast_mode_achieved_power_in_unit_interval(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_D)
         pwr = result["report"]["achieved_power"]
         assert 0.0 <= pwr <= 1.0
 
     def test_r2_mode_returns_expected_keys(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_D
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_D)
         assert set(result.keys()) >= {"design_df", "buckets_df", "report"}
 
     def test_r2_mode_report_criterion_is_D(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_D
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_D)
         assert result["report"]["criterion"] == "D"
 
     def test_r2_mode_design_size_matches_report_n(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_D
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_D)
         assert len(result["design_df"]) == result["report"]["n"]
 
 
@@ -389,27 +384,19 @@ class TestAOptimalCriterion:
     """Verify criterion='A' flows through the full API without error."""
 
     def test_contrast_mode_returns_expected_keys(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_A
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_A)
         assert set(result.keys()) >= {"design_df", "buckets_df", "report"}
 
     def test_contrast_mode_report_criterion_is_A(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_A
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_A)
         assert result["report"]["criterion"] == "A"
 
     def test_contrast_mode_design_size_matches_report_n(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_A
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS_A)
         assert len(result["design_df"]) == result["report"]["n"]
 
     def test_r2_mode_achieved_power_in_unit_interval(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_A
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS_A)
         pwr = result["report"]["achieved_power"]
         assert 0.0 <= pwr <= 1.0
 
@@ -417,6 +404,7 @@ class TestAOptimalCriterion:
 # ---------------------------------------------------------------------------
 # power_sensitivity — R² mode extension
 # ---------------------------------------------------------------------------
+
 
 class TestPowerSensitivityGLMRejected:
     """TD-12 regression: a GLM power_cfg used to crash power_sensitivity
@@ -427,8 +415,12 @@ class TestPowerSensitivityGLMRejected:
 
     def test_glm_config_raises_clear_valueerror(self):
         glm_cfg = PowerGLMContrastConfig(
-            alpha=0.05, power=0.8, L=[[0, 1]], delta=[0.5],
-            family="binomial", baseline=0.2,
+            alpha=0.05,
+            power=0.8,
+            L=[[0, 1]],
+            delta=[0.5],
+            family="binomial",
+            baseline=0.2,
         )
         with pytest.raises(ValueError, match="GLM configs have no sigma"):
             power_sensitivity(
@@ -444,9 +436,7 @@ class TestPowerSensitivityR2:
 
     @pytest.fixture
     def fixed_design(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS)
         return result["design_df"]
 
     def test_returns_expected_keys(self, fixed_design):
@@ -462,25 +452,33 @@ class TestPowerSensitivityR2:
 
     def test_data_has_correct_columns(self, fixed_design):
         sens = power_sensitivity(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_r2_cfg(), design_df=fixed_design,
-            r2_range=(0.05, 0.40), r2_points=5,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_r2_cfg(),
+            design_df=fixed_design,
+            r2_range=(0.05, 0.40),
+            r2_points=5,
         )
         assert "r2_target" in sens["data"].columns
         assert "power" in sens["data"].columns
 
     def test_data_length_matches_r2_points(self, fixed_design):
         sens = power_sensitivity(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_r2_cfg(), design_df=fixed_design,
-            r2_range=(0.05, 0.40), r2_points=8,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_r2_cfg(),
+            design_df=fixed_design,
+            r2_range=(0.05, 0.40),
+            r2_points=8,
         )
         assert len(sens["data"]) == 8
 
     def test_nominal_power_is_float(self, fixed_design):
         sens = power_sensitivity(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_r2_cfg(), design_df=fixed_design,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_r2_cfg(),
+            design_df=fixed_design,
             r2_points=5,
         )
         assert isinstance(sens["nominal_power"], float)
@@ -489,9 +487,12 @@ class TestPowerSensitivityR2:
     def test_power_increases_with_r2(self, fixed_design):
         """Power must be non-decreasing as r2_target increases."""
         sens = power_sensitivity(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_r2_cfg(), design_df=fixed_design,
-            r2_range=(0.05, 0.60), r2_points=10,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_r2_cfg(),
+            design_df=fixed_design,
+            r2_range=(0.05, 0.60),
+            r2_points=10,
         )
         pwrs = sens["data"]["power"].to_numpy()
         # Not strictly monotone per point, but last > first
@@ -500,24 +501,30 @@ class TestPowerSensitivityR2:
     def test_invalid_r2_range_raises(self, fixed_design):
         with pytest.raises(ValueError):
             power_sensitivity(
-                formula=FORMULA, factors=FACTORS,
-                power_cfg=_r2_cfg(), design_df=fixed_design,
+                formula=FORMULA,
+                factors=FACTORS,
+                power_cfg=_r2_cfg(),
+                design_df=fixed_design,
                 r2_range=(0.50, 0.10),  # lo >= hi
             )
 
     def test_contrast_mode_still_works(self, fixed_design):
         """Existing contrast-mode path must not be broken."""
         L, delta = contrast_from_scenarios(
-            FORMULA, FACTORS,
+            FORMULA,
+            FACTORS,
             {"A": "low", "B": 0.0},
             {"A": "high", "B": 10.0},
             sesoi=1.0,
         )
         cfg = PowerContrastConfig(L=L, delta=delta, power=0.80, max_n=80)
         sens = power_sensitivity(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=cfg, design_df=fixed_design,
-            sigma_range=(0.5, 2.0), sigma_points=5,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=cfg,
+            design_df=fixed_design,
+            sigma_range=(0.5, 2.0),
+            sigma_points=5,
         )
         assert "sigma" in sens["data"].columns
         assert "sigma_nominal" in sens
@@ -527,14 +534,13 @@ class TestPowerSensitivityR2:
 # min_detectable_effect
 # ---------------------------------------------------------------------------
 
+
 class TestMinDetectableEffect:
     """Tests for the min_detectable_effect function."""
 
     @pytest.fixture
     def fixed_design(self):
-        result = find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        result = find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
         return result["design_df"]
 
     def test_contrast_mode_returns_expected_keys(self, fixed_design):
@@ -549,7 +555,8 @@ class TestMinDetectableEffect:
     def test_contrast_mode_is_contrast(self, fixed_design):
         mde = min_detectable_effect(
             design_df=fixed_design,
-            formula=FORMULA, factors=FACTORS,
+            formula=FORMULA,
+            factors=FACTORS,
             power_cfg=_contrast_cfg(),
         )
         assert mde["mode"] == "contrast"
@@ -557,7 +564,8 @@ class TestMinDetectableEffect:
     def test_contrast_mde_is_positive(self, fixed_design):
         mde = min_detectable_effect(
             design_df=fixed_design,
-            formula=FORMULA, factors=FACTORS,
+            formula=FORMULA,
+            factors=FACTORS,
             power_cfg=_contrast_cfg(),
         )
         assert mde["mde"] > 0
@@ -567,7 +575,8 @@ class TestMinDetectableEffect:
         target = 0.80
         mde = min_detectable_effect(
             design_df=fixed_design,
-            formula=FORMULA, factors=FACTORS,
+            formula=FORMULA,
+            factors=FACTORS,
             power_cfg=_contrast_cfg(),
             target_power=target,
         )
@@ -576,7 +585,8 @@ class TestMinDetectableEffect:
     def test_r2_mode_returns_expected_keys(self, fixed_design):
         mde = min_detectable_effect(
             design_df=fixed_design,
-            formula=FORMULA, factors=FACTORS,
+            formula=FORMULA,
+            factors=FACTORS,
             power_cfg=_r2_cfg(),
         )
         assert set(mde.keys()) >= {"mde", "achieved_power", "n", "mode"}
@@ -585,7 +595,8 @@ class TestMinDetectableEffect:
     def test_r2_mde_in_valid_range(self, fixed_design):
         mde = min_detectable_effect(
             design_df=fixed_design,
-            formula=FORMULA, factors=FACTORS,
+            formula=FORMULA,
+            factors=FACTORS,
             power_cfg=_r2_cfg(),
         )
         assert 0.0 < mde["mde"] < 1.0
@@ -594,7 +605,8 @@ class TestMinDetectableEffect:
         with pytest.raises(ValueError, match="target_power"):
             min_detectable_effect(
                 design_df=fixed_design,
-                formula=FORMULA, factors=FACTORS,
+                formula=FORMULA,
+                factors=FACTORS,
                 power_cfg=_contrast_cfg(),
                 target_power=1.5,
             )
@@ -604,22 +616,19 @@ class TestMinDetectableEffect:
 # Enhancement 10 — Richer run metadata in report
 # ---------------------------------------------------------------------------
 
+
 class TestRunMetadata:
     """Verify that find_optimal_design enriches report with run metadata."""
 
     @pytest.fixture(scope="class")
     def result_contrast(self):
         """One small contrast-mode run shared across all tests in this class."""
-        return find_optimal_design(
-            FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS
-        )
+        return find_optimal_design(FORMULA, FACTORS, _contrast_cfg(), design_opts=FAST_OPTS)
 
     @pytest.fixture(scope="class")
     def result_r2(self):
         """One small R²-mode run shared across all tests in this class."""
-        return find_optimal_design(
-            FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS
-        )
+        return find_optimal_design(FORMULA, FACTORS, _r2_cfg(), design_opts=FAST_OPTS)
 
     # --- elapsed_sec ---
     def test_elapsed_sec_present(self, result_contrast):
@@ -680,6 +689,7 @@ class TestRunMetadata:
 # ---------------------------------------------------------------------------
 # Enhancement 11 — compare_criteria() helper
 # ---------------------------------------------------------------------------
+
 
 class TestCompareCriteria:
     """Verify that compare_criteria runs all criteria and returns well-formed output."""
@@ -757,8 +767,10 @@ class TestCompareCriteria:
     # --- Subset / custom criteria ---
     def test_custom_subset_two_criteria(self):
         result = compare_criteria(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_contrast_cfg(), design_opts=FAST_OPTS,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_contrast_cfg(),
+            design_opts=FAST_OPTS,
             criteria=["I", "D"],
         )
         assert len(result["summary"]) == 2
@@ -766,8 +778,10 @@ class TestCompareCriteria:
 
     def test_single_criterion_allowed(self):
         result = compare_criteria(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_contrast_cfg(), design_opts=FAST_OPTS,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_contrast_cfg(),
+            design_opts=FAST_OPTS,
             criteria=["A"],
         )
         assert len(result["summary"]) == 1
@@ -776,8 +790,10 @@ class TestCompareCriteria:
     # --- R² mode ---
     def test_r2_mode_runs_without_error(self):
         result = compare_criteria(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_r2_cfg(), design_opts=FAST_OPTS,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_r2_cfg(),
+            design_opts=FAST_OPTS,
         )
         assert len(result["summary"]) == 3
 
@@ -785,16 +801,20 @@ class TestCompareCriteria:
     def test_empty_criteria_raises(self):
         with pytest.raises(ValueError, match="at least one"):
             compare_criteria(
-                formula=FORMULA, factors=FACTORS,
-                power_cfg=_contrast_cfg(), design_opts=FAST_OPTS,
+                formula=FORMULA,
+                factors=FACTORS,
+                power_cfg=_contrast_cfg(),
+                design_opts=FAST_OPTS,
                 criteria=[],
             )
 
     def test_invalid_criterion_raises(self):
         with pytest.raises(ValueError):
             compare_criteria(
-                formula=FORMULA, factors=FACTORS,
-                power_cfg=_contrast_cfg(), design_opts=FAST_OPTS,
+                formula=FORMULA,
+                factors=FACTORS,
+                power_cfg=_contrast_cfg(),
+                design_opts=FAST_OPTS,
                 criteria=["I", "X"],
             )
 
@@ -804,8 +824,10 @@ class TestCompareCriteria:
             candidate_points=150, starts=2, max_iter=50, random_state=0, criterion="I"
         )
         compare_criteria(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_contrast_cfg(), design_opts=opts,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_contrast_cfg(),
+            design_opts=opts,
         )
         assert opts.criterion == "I"  # must not have been mutated
 
@@ -814,15 +836,19 @@ class TestCompareCriteria:
 # Regression: report JSON serialization with Path values (issue #2)
 # ---------------------------------------------------------------------------
 
+
 class TestReportJsonSerialization:
     """Regression tests: report dict must always be JSON-serializable."""
 
     def test_report_is_json_serializable_contrast(self):
         """report dict from contrast mode must not contain non-JSON types."""
         import json
+
         result = find_optimal_design(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_contrast_cfg(), design_opts=FAST_OPTS,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_contrast_cfg(),
+            design_opts=FAST_OPTS,
         )
         # Must not raise; Path objects would cause TypeError here
         json.dumps(result["report"])
@@ -830,25 +856,31 @@ class TestReportJsonSerialization:
     def test_report_is_json_serializable_r2(self):
         """report dict from R² mode must not contain non-JSON types."""
         import json
+
         result = find_optimal_design(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_r2_cfg(), design_opts=FAST_OPTS,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_r2_cfg(),
+            design_opts=FAST_OPTS,
         )
         json.dumps(result["report"])
 
     def test_diagnostic_exports_stored_as_strings(self, tmp_path):
         """When export_diagnostics_to is set, paths in report are strings, not Path objects."""
         import json
+
         result = find_optimal_design(
-            formula=FORMULA, factors=FACTORS,
-            power_cfg=_contrast_cfg(), design_opts=FAST_OPTS,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_contrast_cfg(),
+            design_opts=FAST_OPTS,
             export_diagnostics_to=str(tmp_path),
         )
         exports = result["report"].get("diagnostic_exports", {})
         for key, val in exports.items():
-            assert isinstance(val, str), (
-                f"diagnostic_exports[{key!r}] is {type(val).__name__}, expected str"
-            )
+            assert isinstance(
+                val, str
+            ), f"diagnostic_exports[{key!r}] is {type(val).__name__}, expected str"
         # Full report must still be JSON-serializable
         json.dumps(result["report"])
 
@@ -864,9 +896,11 @@ _ROB_OPTS = DesignOptions(candidate_points=100, starts=2, max_iter=40, random_st
 def _contrast_design():
     """Build a small contrast-mode design for robustness tests."""
     from lattice_doe.contrasts import contrast_from_scenarios
+
     L, delta = contrast_from_scenarios(
-        FORMULA, FACTORS,
-        {"A": "low",  "B": 0.0},
+        FORMULA,
+        FACTORS,
+        {"A": "low", "B": 0.0},
         {"A": "high", "B": 10.0},
         sesoi=1.0,
     )
@@ -892,8 +926,16 @@ class TestRobustnessReport:
     def test_contrast_returns_dict_with_expected_keys(self):
         design_df, cfg = _contrast_design()
         rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
-        for key in ("mode", "nominal_power", "effect_sweep", "sigma_sweep",
-                    "alpha_sweep", "summary", "thresholds", "figure"):
+        for key in (
+            "mode",
+            "nominal_power",
+            "effect_sweep",
+            "sigma_sweep",
+            "alpha_sweep",
+            "summary",
+            "thresholds",
+            "figure",
+        ):
             assert key in rob, f"Missing key: {key}"
 
     def test_contrast_mode_field_is_contrast(self):
@@ -910,7 +952,9 @@ class TestRobustnessReport:
         design_df, cfg = _contrast_design()
         rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
         assert list(rob["effect_sweep"].columns) == [
-            "effect_scale", "power", "noncentrality_lambda"
+            "effect_scale",
+            "power",
+            "noncentrality_lambda",
         ]
 
     def test_contrast_effect_sweep_length_matches_points(self):
@@ -945,35 +989,38 @@ class TestRobustnessReport:
 
     def test_r2_returns_dict_with_expected_keys(self):
         design_df, cfg = _r2_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                effect_range=(0.05, 0.5))
-        for key in ("mode", "nominal_power", "effect_sweep", "sigma_sweep",
-                    "alpha_sweep", "summary", "thresholds", "figure"):
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, effect_range=(0.05, 0.5))
+        for key in (
+            "mode",
+            "nominal_power",
+            "effect_sweep",
+            "sigma_sweep",
+            "alpha_sweep",
+            "summary",
+            "thresholds",
+            "figure",
+        ):
             assert key in rob
 
     def test_r2_mode_field_is_r2(self):
         design_df, cfg = _r2_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                effect_range=(0.05, 0.5))
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, effect_range=(0.05, 0.5))
         assert rob["mode"] == "r2"
 
     def test_r2_sigma_sweep_is_none(self):
         """sigma does not affect R² power — sigma_sweep must be None."""
         design_df, cfg = _r2_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                effect_range=(0.05, 0.5))
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, effect_range=(0.05, 0.5))
         assert rob["sigma_sweep"] is None
 
     def test_r2_effect_sweep_has_r2_target_column(self):
         design_df, cfg = _r2_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                effect_range=(0.05, 0.5))
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, effect_range=(0.05, 0.5))
         assert "r2_target" in rob["effect_sweep"].columns
 
     def test_r2_thresholds_max_sigma_is_none(self):
         design_df, cfg = _r2_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                effect_range=(0.05, 0.5))
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, effect_range=(0.05, 0.5))
         assert rob["thresholds"]["max_sigma_for_target"] is None
 
     # ------------------------------------------------------------------
@@ -983,8 +1030,13 @@ class TestRobustnessReport:
     def test_summary_has_expected_keys(self):
         design_df, cfg = _contrast_design()
         rob = robustness_report(design_df, FORMULA, FACTORS, cfg)
-        for k in ("worst_power", "median_power", "best_power",
-                  "power_target", "pct_scenarios_passing"):
+        for k in (
+            "worst_power",
+            "median_power",
+            "best_power",
+            "power_target",
+            "pct_scenarios_passing",
+        ):
             assert k in rob["summary"]
 
     def test_summary_worst_le_median_le_best(self):
@@ -1015,24 +1067,21 @@ class TestRobustnessReport:
 
     def test_max_sigma_threshold_is_within_sweep_range(self):
         design_df, cfg = _contrast_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                sigma_range=(0.5, 2.0))
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, sigma_range=(0.5, 2.0))
         t = rob["thresholds"]["max_sigma_for_target"]
         if t is not None:
             assert 0.5 <= t <= 2.0
 
     def test_min_effect_threshold_is_within_sweep_range(self):
         design_df, cfg = _contrast_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                effect_range=(0.5, 2.0))
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, effect_range=(0.5, 2.0))
         t = rob["thresholds"]["min_effect_for_target"]
         if t is not None:
             assert 0.5 <= t <= 2.0
 
     def test_min_alpha_threshold_is_within_sweep_range(self):
         design_df, cfg = _contrast_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                alpha_range=(0.01, 0.10))
+        rob = robustness_report(design_df, FORMULA, FACTORS, cfg, alpha_range=(0.01, 0.10))
         t = rob["thresholds"]["min_alpha_for_target"]
         if t is not None:
             assert 0.01 <= t <= 0.10
@@ -1044,8 +1093,9 @@ class TestRobustnessReport:
     def test_power_increases_with_effect_scale(self):
         """Higher delta scale → higher power."""
         design_df, cfg = _contrast_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                effect_range=(0.3, 2.0), effect_points=6)
+        rob = robustness_report(
+            design_df, FORMULA, FACTORS, cfg, effect_range=(0.3, 2.0), effect_points=6
+        )
         powers = rob["effect_sweep"]["power"].values
         # Not strictly required to be monotone at every step, but overall trend must hold
         assert powers[0] <= powers[-1]
@@ -1053,16 +1103,18 @@ class TestRobustnessReport:
     def test_power_decreases_with_sigma(self):
         """Higher sigma → lower power."""
         design_df, cfg = _contrast_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                sigma_range=(0.5, 3.0), sigma_points=6)
+        rob = robustness_report(
+            design_df, FORMULA, FACTORS, cfg, sigma_range=(0.5, 3.0), sigma_points=6
+        )
         powers = rob["sigma_sweep"]["power"].values
         assert powers[0] >= powers[-1]
 
     def test_power_decreases_with_stricter_alpha(self):
         """Smaller alpha → stricter threshold → lower power."""
         design_df, cfg = _contrast_design()
-        rob = robustness_report(design_df, FORMULA, FACTORS, cfg,
-                                alpha_range=(0.005, 0.10), alpha_points=6)
+        rob = robustness_report(
+            design_df, FORMULA, FACTORS, cfg, alpha_range=(0.005, 0.10), alpha_points=6
+        )
         powers = rob["alpha_sweep"]["power"].values
         assert powers[0] <= powers[-1]
 
@@ -1073,20 +1125,17 @@ class TestRobustnessReport:
     def test_invalid_sigma_range_raises(self):
         design_df, cfg = _contrast_design()
         with pytest.raises(ValueError, match="sigma_range"):
-            robustness_report(design_df, FORMULA, FACTORS, cfg,
-                              sigma_range=(2.0, 0.5))
+            robustness_report(design_df, FORMULA, FACTORS, cfg, sigma_range=(2.0, 0.5))
 
     def test_invalid_alpha_range_raises(self):
         design_df, cfg = _contrast_design()
         with pytest.raises(ValueError, match="alpha_range"):
-            robustness_report(design_df, FORMULA, FACTORS, cfg,
-                              alpha_range=(0.10, 0.01))
+            robustness_report(design_df, FORMULA, FACTORS, cfg, alpha_range=(0.10, 0.01))
 
     def test_invalid_effect_range_r2_above_one_raises(self):
         design_df, cfg = _r2_design()
         with pytest.raises(ValueError, match="effect_range"):
-            robustness_report(design_df, FORMULA, FACTORS, cfg,
-                              effect_range=(0.5, 1.5))
+            robustness_report(design_df, FORMULA, FACTORS, cfg, effect_range=(0.5, 1.5))
 
     def test_sigma_points_below_two_raises(self):
         design_df, cfg = _contrast_design()
@@ -1131,10 +1180,12 @@ _SP_FAST_OPTS = DesignOptions(
 
 def _sp_contrast_cfg(max_n: int = 20) -> PowerContrastConfig:
     from lattice_doe.contrasts import contrast_from_scenarios
+
     L, delta = contrast_from_scenarios(
-        _SP_FORMULA, _SP_FACTORS,
+        _SP_FORMULA,
+        _SP_FACTORS,
         {"A": -1.0, "B": -1.0},
-        {"A":  1.0, "B":  1.0},
+        {"A": 1.0, "B": 1.0},
         sesoi=1.0,
     )
     return PowerContrastConfig(L=L, delta=delta, power=0.80, max_n=max_n)
@@ -1158,7 +1209,9 @@ class TestSplitPlotIntegration:
             random_state=99,
             split_plot=sp_opts,
         )
-        result = find_optimal_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
+        result = find_optimal_design(
+            _SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts
+        )
         assert isinstance(result, dict)
         assert "design_df" in result and "report" in result
         assert len(result["design_df"]) >= 6  # at least 2 WPs × 3 SPs
@@ -1185,6 +1238,7 @@ class TestSplitPlotIntegration:
         sp_opts = SplitPlotOptions(htc_factors=["A"], n_whole_plots=3, eta=1.0)
         # DesignOptions warns but API enforces; build opts with both set
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             opts = DesignOptions(
@@ -1237,13 +1291,15 @@ class TestSplitPlotIntegration:
             random_state=22,
             split_plot=sp_opts,
         )
-        result = find_optimal_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
+        result = find_optimal_design(
+            _SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts
+        )
         df = result["design_df"]
         assert "__wp_id__" in df.columns, "design_df must contain __wp_id__ column"
         for wp_id, group in df.groupby("__wp_id__"):
-            assert group["A"].nunique() == 1, (
-                f"WP {wp_id} has non-constant HTC factor 'A': {group['A'].values}"
-            )
+            assert (
+                group["A"].nunique() == 1
+            ), f"WP {wp_id} has non-constant HTC factor 'A': {group['A'].values}"
 
     def test_report_contains_split_plot_dict(self):
         """Result report includes 'split_plot' sub-dict with expected keys."""
@@ -1255,10 +1311,20 @@ class TestSplitPlotIntegration:
             random_state=33,
             split_plot=sp_opts,
         )
-        result = find_optimal_design(_SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts)
+        result = find_optimal_design(
+            _SP_FORMULA, _SP_FACTORS, _sp_contrast_cfg(max_n=30), design_opts=opts
+        )
         assert "split_plot" in result["report"]
         sp_dict = result["report"]["split_plot"]
-        for key in ("n_whole_plots", "subplots_per_wp", "n_total", "eta", "htc_factors", "etc_factors", "df_method"):
+        for key in (
+            "n_whole_plots",
+            "subplots_per_wp",
+            "n_total",
+            "eta",
+            "htc_factors",
+            "etc_factors",
+            "df_method",
+        ):
             assert key in sp_dict, f"Missing key in split_plot report: {key}"
 
     def test_power_curve_by_wp_returns_dataframe(self):
@@ -1287,6 +1353,7 @@ class TestSplitPlotIntegration:
 # TestCR35MultiResponseSplitPlotGLMGuard
 # ---------------------------------------------------------------------------
 
+
 class TestCR35MultiResponseSplitPlotGLMGuard:
     """CR-35: MR split-plot path must reject GLM responses rather than silently
     producing invalid (OLS-framework) power numbers."""
@@ -1312,16 +1379,24 @@ class TestCR35MultiResponseSplitPlotGLMGuard:
 
     def _glm_rs(self, name):
         cfg = PowerGLMContrastConfig(
-            L=self._L, delta=self._DELTA,
-            baseline=0.3, family="binomial",
-            power=0.80, max_n=40, max_iter=15,
+            L=self._L,
+            delta=self._DELTA,
+            baseline=0.3,
+            family="binomial",
+            power=0.80,
+            max_n=40,
+            max_iter=15,
         )
         return ResponseSpec(name=name, power_cfg=cfg)
 
     def _ols_rs(self, name):
         cfg = PowerContrastConfig(
-            L=self._L, delta=self._DELTA, sigma=1.0,
-            power=0.80, max_n=40, max_iter=15,
+            L=self._L,
+            delta=self._DELTA,
+            sigma=1.0,
+            power=0.80,
+            max_n=40,
+            max_iter=15,
         )
         return ResponseSpec(name=name, power_cfg=cfg)
 
@@ -1331,9 +1406,7 @@ class TestCR35MultiResponseSplitPlotGLMGuard:
             responses=[self._glm_rs("Y1"), self._glm_rs("Y2")],
         )
         with pytest.raises(NotImplementedError, match="GLM power configs"):
-            find_multiresponse_design(
-                self._FORMULA, self._FACTORS, multi, self._sp_opts()
-            )
+            find_multiresponse_design(self._FORMULA, self._FACTORS, multi, self._sp_opts())
 
     def test_mixed_glm_ols_responses_raises(self):
         """One GLM + one OLS response + split-plot → NotImplementedError listing the GLM response."""
@@ -1341,18 +1414,14 @@ class TestCR35MultiResponseSplitPlotGLMGuard:
             responses=[self._ols_rs("Y1"), self._glm_rs("Y2")],
         )
         with pytest.raises(NotImplementedError, match="Y2"):
-            find_multiresponse_design(
-                self._FORMULA, self._FACTORS, multi, self._sp_opts()
-            )
+            find_multiresponse_design(self._FORMULA, self._FACTORS, multi, self._sp_opts())
 
     def test_ols_only_split_plot_not_affected(self):
         """Two OLS responses + split-plot → no error; regression guard."""
         multi = MultiResponseOptions(
             responses=[self._ols_rs("Y1"), self._ols_rs("Y2")],
         )
-        result = find_multiresponse_design(
-            self._FORMULA, self._FACTORS, multi, self._sp_opts()
-        )
+        result = find_multiresponse_design(self._FORMULA, self._FACTORS, multi, self._sp_opts())
         assert isinstance(result, dict)
         assert "n_whole_plots" in result["report"]
 
@@ -1376,8 +1445,7 @@ def _mr_opts(**kw):
 
 def _contrast_rs(name, sigma=1.0, power=0.8, max_n=60, **kw):
     cfg = PowerContrastConfig(
-        L=_MR_L, delta=_MR_DELTA, sigma=sigma, power=power,
-        max_n=max_n, max_iter=30, **kw
+        L=_MR_L, delta=_MR_DELTA, sigma=sigma, power=power, max_n=max_n, max_iter=30, **kw
     )
     return ResponseSpec(name=name, power_cfg=cfg)
 
@@ -1433,6 +1501,7 @@ class TestMultiResponseAPI:
 
     def test_achieved_power_equals_combine_powers(self):
         from lattice_doe import combine_powers
+
         result = _run_mr([_contrast_rs("Y1"), _contrast_rs("Y2")], rule="min")
         per_powers = [rd["power"] for rd in result["report"]["responses"]]
         expected = combine_powers(per_powers, None, "min")
@@ -1470,12 +1539,25 @@ class TestMultiResponseAPI:
 
     def test_differing_formula_uses_compound_path(self):
         # MR-5: differing formulas now route to the compound criterion path.
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=np.array([[0, 1]]), delta=np.array([1.5]),
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=30),
-                          formula="~ 1 + A")
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=np.array([[0, 1]]),
+                delta=np.array([1.5]),
+                sigma=1.0,
+                power=0.8,
+                max_n=60,
+                max_iter=30,
+            ),
+            formula="~ 1 + A",
+        )
         L2 = np.array([[0, 1, 0], [0, 0, 1]])
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=L2, delta=np.array([1.5, 1.5]),
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=30))
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=L2, delta=np.array([1.5, 1.5]), sigma=1.0, power=0.8, max_n=60, max_iter=30
+            ),
+        )
         multi = MultiResponseOptions([r1, r2])
         result = find_multiresponse_design(_MR_FORMULA, _MR_FACTORS, multi, _mr_opts())
         assert result["report"]["compound_criterion"] is True
@@ -1487,6 +1569,7 @@ class TestMultiResponseAPI:
 
     def test_exported_from_top_level(self):
         import lattice_doe
+
         assert hasattr(lattice_doe, "find_multiresponse_design")
 
 
@@ -1500,8 +1583,8 @@ _CP_FORMULA_LINEAR = "~ 1 + A"
 # Quadratic formula (A, B, A*B): p=4
 _CP_FORMULA_QUAD = "~ 1 + A + B + A:B"
 
-_CP_L_FULL = np.array([[0, 1, 0], [0, 0, 1]])   # contrast for ~ 1 + A + B
-_CP_L_LINEAR = np.array([[0, 1]])                 # contrast for ~ 1 + A
+_CP_L_FULL = np.array([[0, 1, 0], [0, 0, 1]])  # contrast for ~ 1 + A + B
+_CP_L_LINEAR = np.array([[0, 1]])  # contrast for ~ 1 + A
 _CP_L_QUAD = np.array([[0, 1, 0, 0], [0, 0, 1, 0]])  # for ~ 1 + A + B + A:B
 _CP_DELTA_2 = np.array([1.5, 1.5])
 _CP_DELTA_1 = np.array([1.5])
@@ -1516,6 +1599,7 @@ def _cp_opts(**kw):
 # ---------------------------------------------------------------------------
 # SR-1: product / weighted_mean bisection target correctness
 # ---------------------------------------------------------------------------
+
 
 class TestSR1CombinationRuleTarget:
     """SR-1 (statistics review finding #1): for 'product' and 'weighted_mean'
@@ -1536,7 +1620,7 @@ class TestSR1CombinationRuleTarget:
         r1 = _contrast_rs("Y1", power=0.80)
         r2 = _contrast_rs("Y2", power=0.80)
         n_product = _run_mr([r1, r2], rule="product")["report"]["n"]
-        n_min     = _run_mr([r1, r2], rule="min")["report"]["n"]
+        n_min = _run_mr([r1, r2], rule="min")["report"]["n"]
         assert n_product <= n_min
 
     def test_weighted_mean_achieved_power_meets_combined_target(self):
@@ -1576,113 +1660,214 @@ class TestCompoundCriterion:
 
     def test_identical_formulas_compound_flag_false(self):
         # When both responses use the global formula, compound_criterion must be False.
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2)
         assert result["report"]["compound_criterion"] is False
 
     def test_different_formulas_compound_flag_true(self):
         # One response uses a sub-formula; compound path should be activated.
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2)
         assert result["report"]["compound_criterion"] is True
 
     def test_compound_result_has_required_keys(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2)
         assert "design_df" in result, "Missing key: design_df"
         assert "buckets_df" in result, "Missing key: buckets_df"
-        for key in ("n", "achieved_power", "responses", "combination_rule",
-                    "compound_criterion", "elapsed_sec", "p",
-                    "iteration", "search_strategy", "warnings"):
+        for key in (
+            "n",
+            "achieved_power",
+            "responses",
+            "combination_rule",
+            "compound_criterion",
+            "elapsed_sec",
+            "p",
+            "iteration",
+            "search_strategy",
+            "warnings",
+        ):
             assert key in result["report"], f"Missing key: {key}"
 
     def test_compound_design_is_dataframe(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2)
         assert isinstance(result["design_df"], pd.DataFrame)
         assert set(_CP_FACTORS.keys()).issubset(result["design_df"].columns)
 
     def test_compound_responses_list_length(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2)
         assert len(result["report"]["responses"]) == 2
 
     def test_compound_responses_have_required_keys(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2)
         for rd in result["report"]["responses"]:
             assert set(rd.keys()) >= {"name", "power", "lam", "n"}
 
     def test_compound_achieved_power_positive(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2)
         assert 0.0 < result["report"]["achieved_power"] <= 1.0
 
     def test_compound_n_positive_integer(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2)
         assert isinstance(result["report"]["n"], int)
         assert result["report"]["n"] > 0
 
     def test_a_criterion_compound_raises(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=5
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=5
+            ),
+        )
         multi = MultiResponseOptions([r1, r2])
         opts = _cp_opts(criterion="A")
         with pytest.raises(NotImplementedError, match="A-compound"):
             find_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
 
     def test_unknown_factor_in_formula_raises(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=np.array([[0, 1, 0]]),
-                                                    delta=np.array([1.5]),
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5),
-                          formula="~ 1 + A + C")  # C not in factors
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=np.array([[0, 1, 0]]),
+                delta=np.array([1.5]),
+                sigma=1.0,
+                power=0.8,
+                max_n=60,
+                max_iter=5,
+            ),
+            formula="~ 1 + A + C",
+        )  # C not in factors
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=5
+            ),
+        )
         multi = MultiResponseOptions([r1, r2])
         with pytest.raises(ValueError, match="could not be evaluated"):
             find_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, _cp_opts())
 
     def test_d_criterion_compound_runs(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         multi = MultiResponseOptions([r1, r2])
         opts = _cp_opts(criterion="D")
         result = find_multiresponse_design(_CP_FORMULA, _CP_FACTORS, multi, opts)
@@ -1692,11 +1877,20 @@ class TestCompoundCriterion:
     def test_compound_design_estimable_both_formulas(self):
         # Both model matrices formed from the returned design rows must have full rank.
         from lattice_doe.model_matrix import build_model_matrix
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2)
         design = result["design_df"]
         X1, _ = build_model_matrix(_CP_FORMULA_LINEAR, design)
@@ -1706,20 +1900,36 @@ class TestCompoundCriterion:
 
     def test_formula_none_treated_as_global(self):
         # A ResponseSpec with formula=None uses the global formula — no compound path.
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=None)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=None,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2)
         assert result["report"]["compound_criterion"] is False
 
     def test_compound_combination_rule_stored(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_CP_L_LINEAR, delta=_CP_DELTA_1,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20),
-                          formula=_CP_FORMULA_LINEAR)
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_CP_L_FULL, delta=_CP_DELTA_2,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_CP_L_LINEAR, delta=_CP_DELTA_1, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+            formula=_CP_FORMULA_LINEAR,
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_CP_L_FULL, delta=_CP_DELTA_2, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         result = _cp_run(r1, r2, rule="weighted_mean")
         assert result["report"]["combination_rule"] == "weighted_mean"
 
@@ -1740,12 +1950,19 @@ def _ht2_mr_opts(**kw):
 
 
 def _ht2_run(sigma_joint, rule="min", **opts_kw):
-    r1 = ResponseSpec("Y1", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
-                                                sigma=1.0, power=0.8, max_n=60, max_iter=25))
-    r2 = ResponseSpec("Y2", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
-                                                sigma=1.0, power=0.8, max_n=60, max_iter=25))
-    multi = MultiResponseOptions([r1, r2], power_combination=rule,
-                                 sigma_joint=sigma_joint)
+    r1 = ResponseSpec(
+        "Y1",
+        PowerContrastConfig(
+            L=_HT2_L, delta=_HT2_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=25
+        ),
+    )
+    r2 = ResponseSpec(
+        "Y2",
+        PowerContrastConfig(
+            L=_HT2_L, delta=_HT2_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=25
+        ),
+    )
+    multi = MultiResponseOptions([r1, r2], power_combination=rule, sigma_joint=sigma_joint)
     opts = _ht2_mr_opts(**opts_kw)
     return find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, opts)
 
@@ -1775,29 +1992,53 @@ class TestHotellingT2API:
 
     def test_sigma_joint_none_no_joint_power(self):
         # Without sigma_joint, joint_power should not appear.
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=25))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=25))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_HT2_L, delta=_HT2_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=25
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_HT2_L, delta=_HT2_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=25
+            ),
+        )
         multi = MultiResponseOptions([r1, r2])
-        result = find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi,
-                                                _ht2_mr_opts())
+        result = find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
         assert "joint_power" not in result["report"]
 
     def test_sigma_joint_with_r2_response_raises(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_HT2_L, delta=_HT2_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=5
+            ),
+        )
         r2 = ResponseSpec("Y2", PowerR2Config(r2_target=0.5, power=0.8, max_n=60, max_iter=5))
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
         with pytest.raises(NotImplementedError, match="R²-mode"):
             find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
 
     def test_sigma_joint_with_compound_path_raises(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=np.array([[0, 1]]), delta=np.array([1.5]),
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5),
-                          formula="~ 1 + A")
-        r2 = ResponseSpec("Y2", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=np.array([[0, 1]]),
+                delta=np.array([1.5]),
+                sigma=1.0,
+                power=0.8,
+                max_n=60,
+                max_iter=5,
+            ),
+            formula="~ 1 + A",
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_HT2_L, delta=_HT2_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=5
+            ),
+        )
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
         with pytest.raises(NotImplementedError, match="compound"):
             find_multiresponse_design(_HT2_FORMULA, _HT2_FACTORS, multi, _ht2_mr_opts())
@@ -1805,12 +2046,20 @@ class TestHotellingT2API:
     def test_sigma_joint_with_glm_response_raises(self):
         """CR-36: sigma_joint must be rejected when any response is GLM."""
         glm_cfg = PowerGLMContrastConfig(
-            L=_HT2_L, delta=_HT2_DELTA,
-            baseline=0.3, family="binomial",
-            power=0.8, max_n=60, max_iter=5,
+            L=_HT2_L,
+            delta=_HT2_DELTA,
+            baseline=0.3,
+            family="binomial",
+            power=0.8,
+            max_n=60,
+            max_iter=5,
         )
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_HT2_L, delta=_HT2_DELTA,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_HT2_L, delta=_HT2_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=5
+            ),
+        )
         r2 = ResponseSpec("Y2", glm_cfg)
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
         with pytest.raises(NotImplementedError, match="GLM"):
@@ -1839,10 +2088,18 @@ def _ana_opts(**kw):
 
 
 def _ana_multi(rule="min"):
-    r1 = ResponseSpec("Y1", PowerContrastConfig(L=_ANA_L, delta=_ANA_DELTA,
-                                                sigma=1.0, power=0.8, max_n=60, max_iter=15))
-    r2 = ResponseSpec("Y2", PowerContrastConfig(L=_ANA_L, delta=_ANA_DELTA,
-                                                sigma=1.5, power=0.8, max_n=60, max_iter=15))
+    r1 = ResponseSpec(
+        "Y1",
+        PowerContrastConfig(
+            L=_ANA_L, delta=_ANA_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=15
+        ),
+    )
+    r2 = ResponseSpec(
+        "Y2",
+        PowerContrastConfig(
+            L=_ANA_L, delta=_ANA_DELTA, sigma=1.5, power=0.8, max_n=60, max_iter=15
+        ),
+    )
     return MultiResponseOptions([r1, r2], power_combination=rule)
 
 
@@ -1853,8 +2110,12 @@ class TestMultiResponseAnalysis:
 
     def test_returns_dataframe(self):
         df = power_curve_by_n_multiresponse(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            n_range=(10, 30), n_points=5, design_opts=_ana_opts(),
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            n_range=(10, 30),
+            n_points=5,
+            design_opts=_ana_opts(),
         )
         assert isinstance(df, pd.DataFrame)
 
@@ -1862,16 +2123,24 @@ class TestMultiResponseAnalysis:
         multi = _ana_multi()
         n_responses = len(multi.responses)
         df = power_curve_by_n_multiresponse(
-            _ANA_FORMULA, _ANA_FACTORS, multi,
-            n_range=(10, 30), n_points=5, design_opts=_ana_opts(),
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            multi,
+            n_range=(10, 30),
+            n_points=5,
+            design_opts=_ana_opts(),
         )
         # n, combined_power, Y1_power, Y2_power → 4 columns for 2 responses
         assert df.shape[1] == n_responses + 2
 
     def test_column_names(self):
         df = power_curve_by_n_multiresponse(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            n_range=(10, 30), n_points=5, design_opts=_ana_opts(),
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            n_range=(10, 30),
+            n_points=5,
+            design_opts=_ana_opts(),
         )
         assert "n" in df.columns
         assert "combined_power" in df.columns
@@ -1881,24 +2150,37 @@ class TestMultiResponseAnalysis:
     def test_exact_n_points_rows(self):
         n_points = 7
         df = power_curve_by_n_multiresponse(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            n_range=(10, 30), n_points=n_points, design_opts=_ana_opts(),
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            n_range=(10, 30),
+            n_points=n_points,
+            design_opts=_ana_opts(),
         )
         assert len(df) == n_points
 
     def test_n_range_respected(self):
         df = power_curve_by_n_multiresponse(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            n_range=(12, 25), n_points=5, design_opts=_ana_opts(),
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            n_range=(12, 25),
+            n_points=5,
+            design_opts=_ana_opts(),
         )
         assert df["n"].min() >= 12
         assert df["n"].max() <= 25
 
     def test_combined_power_equals_combine_powers(self):
         from lattice_doe.power import combine_powers
+
         df = power_curve_by_n_multiresponse(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            n_range=(15, 25), n_points=4, design_opts=_ana_opts(),
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            n_range=(15, 25),
+            n_points=4,
+            design_opts=_ana_opts(),
         )
         multi = _ana_multi()
         weights = [r.weight for r in multi.responses]
@@ -1912,37 +2194,56 @@ class TestMultiResponseAnalysis:
     def test_plot_matplotlib_no_error(self):
         pytest.importorskip("matplotlib")
         power_curve_by_n_multiresponse(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            n_range=(10, 20), n_points=3, design_opts=_ana_opts(),
-            plot=True, plot_backend="matplotlib",
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            n_range=(10, 20),
+            n_points=3,
+            design_opts=_ana_opts(),
+            plot=True,
+            plot_backend="matplotlib",
         )
 
     def test_plot_plotly_no_error(self):
         pytest.importorskip("plotly")
         power_curve_by_n_multiresponse(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            n_range=(10, 20), n_points=3, design_opts=_ana_opts(),
-            plot=True, plot_backend="plotly",
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            n_range=(10, 20),
+            n_points=3,
+            design_opts=_ana_opts(),
+            plot=True,
+            plot_backend="plotly",
         )
 
     def test_exported_from_top_level(self):
         import lattice_doe
+
         assert hasattr(lattice_doe, "power_curve_by_n_multiresponse")
 
     # --- multiresponse_sensitivity ---
 
     def test_sensitivity_returns_dataframe(self):
         df = multiresponse_sensitivity(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            fixed_n=20, sigma_range=(0.5, 2.0), sigma_points=5,
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            fixed_n=20,
+            sigma_range=(0.5, 2.0),
+            sigma_points=5,
             design_opts=_ana_opts(),
         )
         assert isinstance(df, pd.DataFrame)
 
     def test_sensitivity_column_names(self):
         df = multiresponse_sensitivity(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            fixed_n=20, sigma_range=(0.5, 2.0), sigma_points=5,
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            fixed_n=20,
+            sigma_range=(0.5, 2.0),
+            sigma_points=5,
             design_opts=_ana_opts(),
         )
         assert "sigma_scale" in df.columns
@@ -1953,44 +2254,61 @@ class TestMultiResponseAnalysis:
     def test_sensitivity_exact_row_count(self):
         sigma_points = 8
         df = multiresponse_sensitivity(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            fixed_n=20, sigma_range=(0.5, 2.5), sigma_points=sigma_points,
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            fixed_n=20,
+            sigma_range=(0.5, 2.5),
+            sigma_points=sigma_points,
             design_opts=_ana_opts(),
         )
         assert len(df) == sigma_points
 
     def test_sensitivity_monotonically_decreasing(self):
         df = multiresponse_sensitivity(
-            _ANA_FORMULA, _ANA_FACTORS, _ana_multi(),
-            fixed_n=25, sigma_range=(0.5, 3.0), sigma_points=10,
+            _ANA_FORMULA,
+            _ANA_FACTORS,
+            _ana_multi(),
+            fixed_n=25,
+            sigma_range=(0.5, 3.0),
+            sigma_points=10,
             design_opts=_ana_opts(),
         )
         pwr = df["combined_power"].tolist()
         # Each step should be non-increasing (larger sigma → lower power)
         for i in range(1, len(pwr)):
-            assert pwr[i] <= pwr[i - 1] + 1e-9, (
-                f"Power increased at step {i}: {pwr[i-1]:.4f} → {pwr[i]:.4f}"
-            )
+            assert (
+                pwr[i] <= pwr[i - 1] + 1e-9
+            ), f"Power increased at step {i}: {pwr[i-1]:.4f} → {pwr[i]:.4f}"
 
     def test_sensitivity_r2_response_raises_type_error(self):
-        r1 = ResponseSpec("Y1", PowerContrastConfig(L=_ANA_L, delta=_ANA_DELTA,
-                                                    sigma=1.0, power=0.8, max_n=60, max_iter=5))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_ANA_L, delta=_ANA_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=5
+            ),
+        )
         r2 = ResponseSpec("Y2", PowerR2Config(r2_target=0.4, power=0.8, max_n=60, max_iter=5))
         multi = MultiResponseOptions([r1, r2])
         with pytest.raises(TypeError, match="PowerR2Config"):
             multiresponse_sensitivity(
-                _ANA_FORMULA, _ANA_FACTORS, multi,
-                fixed_n=20, design_opts=_ana_opts(),
+                _ANA_FORMULA,
+                _ANA_FACTORS,
+                multi,
+                fixed_n=20,
+                design_opts=_ana_opts(),
             )
 
     def test_sensitivity_exported_from_top_level(self):
         import lattice_doe
+
         assert hasattr(lattice_doe, "multiresponse_sensitivity")
 
 
 # ---------------------------------------------------------------------------
 # MR-8 CLI integration tests
 # ---------------------------------------------------------------------------
+
 
 class TestMultiResponseCLI:
     """Tests for _make_multi_response_cfg, _validate_config_keys (MR-8)."""
@@ -2022,11 +2340,13 @@ class TestMultiResponseCLI:
 
     def test_validate_accepts_responses_block(self):
         from lattice_doe.cli import _validate_config_keys
+
         cfg = self._scenario_cfg()
         _validate_config_keys(cfg)  # must not raise
 
     def test_validate_still_rejects_missing_formula(self):
         from lattice_doe.cli import _validate_config_keys
+
         cfg = self._scenario_cfg()
         del cfg["formula"]
         with pytest.raises(KeyError, match="formula"):
@@ -2034,6 +2354,7 @@ class TestMultiResponseCLI:
 
     def test_validate_still_rejects_no_power_keys(self):
         from lattice_doe.cli import _validate_config_keys
+
         cfg = {"formula": "~ 1 + A", "factors": {"A": [0.0, 1.0]}}
         with pytest.raises(KeyError):
             _validate_config_keys(cfg)
@@ -2041,15 +2362,18 @@ class TestMultiResponseCLI:
     def test_make_multi_response_cfg_returns_correct_type(self):
         from lattice_doe.cli import _make_multi_response_cfg
         from lattice_doe.config import MultiResponseOptions
+
         cfg = self._scenario_cfg()
         formula = cfg["formula"]
         from lattice_doe.cli import _as_factors
+
         factors = _as_factors(cfg["factors"])
         multi = _make_multi_response_cfg(cfg, formula, factors, DesignOptions())
         assert isinstance(multi, MultiResponseOptions)
 
     def test_make_multi_response_cfg_response_count(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+
         cfg = self._scenario_cfg()
         factors = _as_factors(cfg["factors"])
         multi = _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
@@ -2057,6 +2381,7 @@ class TestMultiResponseCLI:
 
     def test_make_multi_response_cfg_names(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+
         cfg = self._scenario_cfg()
         factors = _as_factors(cfg["factors"])
         multi = _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
@@ -2065,6 +2390,7 @@ class TestMultiResponseCLI:
 
     def test_make_multi_response_cfg_power_combination(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+
         cfg = self._scenario_cfg()
         cfg["power_combination"] = "product"
         factors = _as_factors(cfg["factors"])
@@ -2074,6 +2400,7 @@ class TestMultiResponseCLI:
     def test_make_multi_response_cfg_explicit_L(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
         from lattice_doe.config import PowerContrastConfig
+
         cfg = self._scenario_cfg()
         # Replace first response with explicit L/delta
         cfg["responses"][0] = {
@@ -2087,6 +2414,7 @@ class TestMultiResponseCLI:
 
     def test_make_multi_response_cfg_missing_name_raises(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+
         cfg = self._scenario_cfg()
         cfg["responses"][0]["name"] = ""
         factors = _as_factors(cfg["factors"])
@@ -2095,6 +2423,7 @@ class TestMultiResponseCLI:
 
     def test_make_multi_response_cfg_missing_power_key_raises(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+
         cfg = self._scenario_cfg()
         # Remove both contrast and r2_target from second response
         del cfg["responses"][1]["r2_target"]
@@ -2104,6 +2433,7 @@ class TestMultiResponseCLI:
 
     def test_make_multi_response_cfg_too_few_responses_raises(self):
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+
         cfg = self._scenario_cfg()
         cfg["responses"] = cfg["responses"][:1]  # only 1
         factors = _as_factors(cfg["factors"])
@@ -2115,6 +2445,7 @@ class TestMultiResponseCLI:
     def test_glm_keys_with_contrast_builds_glm_config(self):
         """CR-37: contrast + family/baseline → PowerGLMContrastConfig, not PowerContrastConfig."""
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+
         cfg = self._scenario_cfg()
         cfg["responses"][0] = {
             "name": "Yield",
@@ -2136,6 +2467,7 @@ class TestMultiResponseCLI:
     def test_glm_keys_without_contrast_raises(self):
         """CR-37: GLM keys with no contrast block → KeyError (no silent fallback)."""
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+
         cfg = self._scenario_cfg()
         cfg["responses"][0] = {
             "name": "Yield",
@@ -2150,6 +2482,7 @@ class TestMultiResponseCLI:
     def test_glm_contrast_missing_baseline_raises(self):
         """CR-37: contrast + family but no baseline → KeyError."""
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+
         cfg = self._scenario_cfg()
         cfg["responses"][0] = {
             "name": "Yield",
@@ -2168,6 +2501,7 @@ class TestMultiResponseCLI:
     def test_plain_contrast_no_glm_keys_unchanged(self):
         """CR-37 regression: contrast without family/baseline still builds PowerContrastConfig."""
         from lattice_doe.cli import _make_multi_response_cfg, _as_factors
+
         cfg = self._scenario_cfg()
         factors = _as_factors(cfg["factors"])
         multi = _make_multi_response_cfg(cfg, cfg["formula"], factors, DesignOptions())
@@ -2177,6 +2511,7 @@ class TestMultiResponseCLI:
         """--dry-run with a responses: config should succeed."""
         import yaml
         from lattice_doe.cli import main
+
         cfg = self._scenario_cfg()
         cfg_path = tmp_path / "mr_config.yml"
         cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
@@ -2187,6 +2522,7 @@ class TestMultiResponseCLI:
         """--multi-response flag with responses: config should also work."""
         import yaml
         from lattice_doe.cli import main
+
         cfg = self._scenario_cfg()
         cfg_path = tmp_path / "mr_config.yml"
         cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
@@ -2197,6 +2533,7 @@ class TestMultiResponseCLI:
         """Full end-to-end: multi-response config writes CSV outputs."""
         import yaml
         from lattice_doe.cli import main
+
         cfg = self._scenario_cfg()
         # Low power target and small max_n keeps the bisection bounded
         cfg["power"] = 0.50
@@ -2204,8 +2541,11 @@ class TestMultiResponseCLI:
         cfg["responses"][1]["r2_target"] = 0.50  # easier to detect
         # Use very small design options via design: block
         cfg["design"] = {
-            "candidate_points": 300, "starts": 1, "max_iter": 30,
-            "random_state": 1, "auto_candidate": False,
+            "candidate_points": 300,
+            "starts": 1,
+            "max_iter": 30,
+            "random_state": 1,
+            "auto_candidate": False,
         }
         cfg_path = tmp_path / "mr_config.yml"
         cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
@@ -2237,8 +2577,12 @@ def _mr10_opts(**kw):
 
 def _mr10_crs(name, sigma=1.0, power=0.8, max_n=40, weight=1.0):
     cfg = PowerContrastConfig(
-        L=_MR10_L, delta=_MR10_DELTA,
-        sigma=sigma, power=power, max_n=max_n, max_iter=25,
+        L=_MR10_L,
+        delta=_MR10_DELTA,
+        sigma=sigma,
+        power=power,
+        max_n=max_n,
+        max_iter=25,
     )
     return ResponseSpec(name=name, power_cfg=cfg, weight=weight)
 
@@ -2246,7 +2590,6 @@ def _mr10_crs(name, sigma=1.0, power=0.8, max_n=40, weight=1.0):
 def _mr10_r2rs(name, r2=0.30, power=0.8, max_n=40, weight=1.0):
     cfg = PowerR2Config(r2_target=r2, power=power, max_n=max_n, max_iter=25)
     return ResponseSpec(name=name, power_cfg=cfg, weight=weight)
-
 
 
 @pytest.mark.slow
@@ -2261,13 +2604,19 @@ class TestMR10Integration:
         multi = MultiResponseOptions([r1, r2], power_combination="min")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         n1 = find_optimal_design(
-            _MR10_FORMULA, _MR10_FACTORS,
-            PowerContrastConfig(L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25),
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+            ),
             opts,
         )["report"]["n"]
         n2 = find_optimal_design(
-            _MR10_FORMULA, _MR10_FACTORS,
-            PowerContrastConfig(L=_MR10_L, delta=_MR10_DELTA, sigma=1.5, power=0.8, max_n=40, max_iter=25),
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.5, power=0.8, max_n=40, max_iter=25
+            ),
             opts,
         )["report"]["n"]
         assert mr["report"]["n"] >= max(n1, n2) - 1
@@ -2307,12 +2656,27 @@ class TestMR10Integration:
         """Three-response weighted_mean returns valid result."""
         opts = _mr10_opts()
         responses = [
-            ResponseSpec("Y1", PowerContrastConfig(
-                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=2.0),
-            ResponseSpec("Y2", PowerContrastConfig(
-                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=1.0),
-            ResponseSpec("Y3", PowerContrastConfig(
-                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=1.0),
+            ResponseSpec(
+                "Y1",
+                PowerContrastConfig(
+                    L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+                ),
+                weight=2.0,
+            ),
+            ResponseSpec(
+                "Y2",
+                PowerContrastConfig(
+                    L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+                ),
+                weight=1.0,
+            ),
+            ResponseSpec(
+                "Y3",
+                PowerContrastConfig(
+                    L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+                ),
+                weight=1.0,
+            ),
         ]
         multi = MultiResponseOptions(responses, power_combination="weighted_mean")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
@@ -2323,14 +2687,30 @@ class TestMR10Integration:
     def test_s3_weighted_mean_achieved_equals_formula(self):
         """achieved_power == weighted mean of per-response powers."""
         from lattice_doe.power import combine_powers
+
         opts = _mr10_opts()
         responses = [
-            ResponseSpec("Y1", PowerContrastConfig(
-                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=2.0),
-            ResponseSpec("Y2", PowerContrastConfig(
-                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=1.0),
-            ResponseSpec("Y3", PowerContrastConfig(
-                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25), weight=1.0),
+            ResponseSpec(
+                "Y1",
+                PowerContrastConfig(
+                    L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+                ),
+                weight=2.0,
+            ),
+            ResponseSpec(
+                "Y2",
+                PowerContrastConfig(
+                    L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+                ),
+                weight=1.0,
+            ),
+            ResponseSpec(
+                "Y3",
+                PowerContrastConfig(
+                    L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+                ),
+                weight=1.0,
+            ),
         ]
         multi = MultiResponseOptions(responses, power_combination="weighted_mean")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
@@ -2344,14 +2724,26 @@ class TestMR10Integration:
         opts = _mr10_opts()
         r1 = ResponseSpec(
             "Y1",
-            PowerContrastConfig(L=np.array([[0, 1]]), delta=np.array([1.5]),
-                                sigma=1.0, power=0.8, max_n=40, max_iter=25),
+            PowerContrastConfig(
+                L=np.array([[0, 1]]),
+                delta=np.array([1.5]),
+                sigma=1.0,
+                power=0.8,
+                max_n=40,
+                max_iter=25,
+            ),
             formula="~ 1 + A",
         )
         r2 = ResponseSpec(
             "Y2",
-            PowerContrastConfig(L=np.array([[0, 1, 0, 0]]), delta=np.array([1.5]),
-                                sigma=1.0, power=0.8, max_n=40, max_iter=25),
+            PowerContrastConfig(
+                L=np.array([[0, 1, 0, 0]]),
+                delta=np.array([1.5]),
+                sigma=1.0,
+                power=0.8,
+                max_n=40,
+                max_iter=25,
+            ),
             formula="~ 1 + A + B + A:B",
         )
         multi = MultiResponseOptions([r1, r2], power_combination="min")
@@ -2361,17 +2753,30 @@ class TestMR10Integration:
     def test_s4_compound_design_estimable_for_both_formulas(self):
         """Compound-criterion design is full-rank for both response model matrices."""
         from lattice_doe.model_matrix import build_model_matrix
+
         opts = _mr10_opts()
         r1 = ResponseSpec(
             "Y1",
-            PowerContrastConfig(L=np.array([[0, 1]]), delta=np.array([1.5]),
-                                sigma=1.0, power=0.8, max_n=40, max_iter=25),
+            PowerContrastConfig(
+                L=np.array([[0, 1]]),
+                delta=np.array([1.5]),
+                sigma=1.0,
+                power=0.8,
+                max_n=40,
+                max_iter=25,
+            ),
             formula="~ 1 + A",
         )
         r2 = ResponseSpec(
             "Y2",
-            PowerContrastConfig(L=np.array([[0, 1, 0, 0]]), delta=np.array([1.5]),
-                                sigma=1.0, power=0.8, max_n=40, max_iter=25),
+            PowerContrastConfig(
+                L=np.array([[0, 1, 0, 0]]),
+                delta=np.array([1.5]),
+                sigma=1.0,
+                power=0.8,
+                max_n=40,
+                max_iter=25,
+            ),
             formula="~ 1 + A + B + A:B",
         )
         multi = MultiResponseOptions([r1, r2], power_combination="min")
@@ -2386,10 +2791,18 @@ class TestMR10Integration:
         """Joint T2 power is in [0, 1] with identity sigma_joint."""
         opts = _mr10_opts()
         L = np.array([[0, 1, 0]])
-        r1 = ResponseSpec("Y1", PowerContrastConfig(
-            L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(
-            L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25
+            ),
+        )
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         assert 0.0 <= mr["report"]["joint_power"] <= 1.0
@@ -2398,10 +2811,18 @@ class TestMR10Integration:
         """Joint T2 power >= min(per-response powers) with identity sigma_joint."""
         opts = _mr10_opts()
         L = np.array([[0, 1, 0]])
-        r1 = ResponseSpec("Y1", PowerContrastConfig(
-            L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(
-            L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=L, delta=np.array([1.5]), sigma=1.0, power=0.8, max_n=40, max_iter=25
+            ),
+        )
         multi = MultiResponseOptions([r1, r2], sigma_joint=np.eye(2))
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         per = [rd["power"] for rd in mr["report"]["responses"]]
@@ -2410,12 +2831,22 @@ class TestMR10Integration:
     def test_s6_split_plot_multi_response_valid_result(self):
         """SplitPlotOptions + MultiResponseOptions produces valid result."""
         sp = SplitPlotOptions(htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0)
-        opts = DesignOptions(candidate_points=120, starts=2, max_iter=20, random_state=31, split_plot=sp)
+        opts = DesignOptions(
+            candidate_points=120, starts=2, max_iter=20, random_state=31, split_plot=sp
+        )
         L = np.array([[0, 1, 0]])
-        r1 = ResponseSpec("Y1", PowerContrastConfig(
-            L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(
-            L=L, delta=np.array([2.0]), sigma=1.5, power=0.8, max_n=30, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=L, delta=np.array([2.0]), sigma=1.5, power=0.8, max_n=30, max_iter=20
+            ),
+        )
         multi = MultiResponseOptions([r1, r2], power_combination="min")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         assert isinstance(mr["design_df"], pd.DataFrame)
@@ -2425,26 +2856,48 @@ class TestMR10Integration:
     def test_s6_split_plot_design_has_wp_column(self):
         """Split-plot multi-response design includes __wp_id__ column."""
         sp = SplitPlotOptions(htc_factors=["A"], n_whole_plots=3, subplots_per_wp=3, eta=1.0)
-        opts = DesignOptions(candidate_points=120, starts=2, max_iter=20, random_state=31, split_plot=sp)
+        opts = DesignOptions(
+            candidate_points=120, starts=2, max_iter=20, random_state=31, split_plot=sp
+        )
         L = np.array([[0, 1, 0]])
-        r1 = ResponseSpec("Y1", PowerContrastConfig(
-            L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(
-            L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=L, delta=np.array([2.0]), sigma=1.0, power=0.8, max_n=30, max_iter=20
+            ),
+        )
         multi = MultiResponseOptions([r1, r2], power_combination="min")
         mr = find_multiresponse_design(_MR10_FORMULA, _MR10_FACTORS, multi, opts)
         assert "__wp_id__" in mr["design_df"].columns
 
     def test_s7_combined_power_nondecreasing(self):
         """combined_power is non-decreasing as n increases."""
-        r1 = ResponseSpec("Y1", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=25))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=1.5, power=0.8, max_n=60, max_iter=25))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=25
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.5, power=0.8, max_n=60, max_iter=25
+            ),
+        )
         multi = MultiResponseOptions([r1, r2], power_combination="min")
         df = power_curve_by_n_multiresponse(
-            _MR10_FORMULA, _MR10_FACTORS, multi,
-            n_range=(8, 35), n_points=8, design_opts=_mr10_opts(),
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            multi,
+            n_range=(8, 35),
+            n_points=8,
+            design_opts=_mr10_opts(),
         )
         powers = df["combined_power"].tolist()
         violations = sum(1 for i in range(1, len(powers)) if powers[i] < powers[i - 1] - 0.05)
@@ -2452,14 +2905,26 @@ class TestMR10Integration:
 
     def test_s7_power_curve_no_nan(self):
         """power_curve_by_n_multiresponse returns no NaN values."""
-        r1 = ResponseSpec("Y1", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         multi = MultiResponseOptions([r1, r2], power_combination="min")
         df = power_curve_by_n_multiresponse(
-            _MR10_FORMULA, _MR10_FACTORS, multi,
-            n_range=(8, 25), n_points=5, design_opts=_mr10_opts(),
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            multi,
+            n_range=(8, 25),
+            n_points=5,
+            design_opts=_mr10_opts(),
         )
         assert not df.isnull().any().any(), "Got NaN in power curve"
 
@@ -2470,40 +2935,86 @@ class TestMR10PropertyBased:
     def test_identical_responses_min_n_matches_single(self):
         """Two identical responses under min => same n as single (+/-1)."""
         opts = _mr10_opts()
-        cfg = PowerContrastConfig(L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25)
+        cfg = PowerContrastConfig(
+            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+        )
         n_single = find_optimal_design(_MR10_FORMULA, _MR10_FACTORS, cfg, opts)["report"]["n"]
-        r1 = ResponseSpec("Y1", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+            ),
+        )
         mr = find_multiresponse_design(
-            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2], power_combination="min"), opts)
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            MultiResponseOptions([r1, r2], power_combination="min"),
+            opts,
+        )
         assert abs(mr["report"]["n"] - n_single) <= 1
 
     def test_adding_harder_third_response_min_nondecreasing(self):
         """Adding harder third response under min never decreases n."""
         opts = _mr10_opts()
-        r1 = ResponseSpec("Y1", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=1.2, power=0.8, max_n=40, max_iter=25))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=40, max_iter=25
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.2, power=0.8, max_n=40, max_iter=25
+            ),
+        )
         mr2 = find_multiresponse_design(
-            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2], power_combination="min"), opts)
-        r3 = ResponseSpec("Y3", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=2.0, power=0.8, max_n=40, max_iter=25))
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            MultiResponseOptions([r1, r2], power_combination="min"),
+            opts,
+        )
+        r3 = ResponseSpec(
+            "Y3",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=2.0, power=0.8, max_n=40, max_iter=25
+            ),
+        )
         mr3 = find_multiresponse_design(
-            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2, r3], power_combination="min"), opts)
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            MultiResponseOptions([r1, r2, r3], power_combination="min"),
+            opts,
+        )
         assert mr3["report"]["n"] >= mr2["report"]["n"] - 1
 
     def test_power_curve_no_nan_fast(self):
         """power_curve_by_n_multiresponse: no NaN (small range)."""
-        r1 = ResponseSpec("Y1", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20))
-        r2 = ResponseSpec("Y2", PowerContrastConfig(
-            L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20))
+        r1 = ResponseSpec(
+            "Y1",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
+        r2 = ResponseSpec(
+            "Y2",
+            PowerContrastConfig(
+                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=60, max_iter=20
+            ),
+        )
         df = power_curve_by_n_multiresponse(
-            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions([r1, r2]),
-            n_range=(10, 20), n_points=3, design_opts=_mr10_opts(),
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            MultiResponseOptions([r1, r2]),
+            n_range=(10, 20),
+            n_points=3,
+            design_opts=_mr10_opts(),
         )
         assert not df.isnull().any().any()
 
@@ -2512,8 +3023,11 @@ class TestMR10PropertyBased:
         r1 = _mr10_r2rs("Y1", r2=0.30, max_n=40)
         r2 = _mr10_r2rs("Y2", r2=0.30, max_n=40)
         mr = find_multiresponse_design(
-            _MR10_FORMULA, _MR10_FACTORS,
-            MultiResponseOptions([r1, r2], power_combination="product"), _mr10_opts())
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            MultiResponseOptions([r1, r2], power_combination="product"),
+            _mr10_opts(),
+        )
         per = [rd["power"] for rd in mr["report"]["responses"]]
         assert mr["report"]["achieved_power"] <= min(per) + 1e-9
 
@@ -2521,33 +3035,47 @@ class TestMR10PropertyBased:
         """Response names in result match names in MultiResponseOptions."""
         names = ["Alpha", "Beta"]
         responses = [
-            ResponseSpec(n, PowerContrastConfig(
-                L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=30, max_iter=20))
+            ResponseSpec(
+                n,
+                PowerContrastConfig(
+                    L=_MR10_L, delta=_MR10_DELTA, sigma=1.0, power=0.8, max_n=30, max_iter=20
+                ),
+            )
             for n in names
         ]
         mr = find_multiresponse_design(
-            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions(responses), _mr10_opts())
+            _MR10_FORMULA, _MR10_FACTORS, MultiResponseOptions(responses), _mr10_opts()
+        )
         assert [rd["name"] for rd in mr["report"]["responses"]] == names
 
     def test_shared_formula_compound_criterion_false(self):
         """Shared global formula => compound_criterion=False."""
         mr = find_multiresponse_design(
-            _MR10_FORMULA, _MR10_FACTORS,
-            MultiResponseOptions([_mr10_crs("Y1"), _mr10_crs("Y2")]), _mr10_opts())
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            MultiResponseOptions([_mr10_crs("Y1"), _mr10_crs("Y2")]),
+            _mr10_opts(),
+        )
         assert mr["report"]["compound_criterion"] is False
 
     def test_warnings_key_is_list(self):
         """warnings key is always a list."""
         mr = find_multiresponse_design(
-            _MR10_FORMULA, _MR10_FACTORS,
-            MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]), _mr10_opts())
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]),
+            _mr10_opts(),
+        )
         assert isinstance(mr["report"]["warnings"], list)
 
     def test_elapsed_sec_positive(self):
         """elapsed_sec is positive."""
         mr = find_multiresponse_design(
-            _MR10_FORMULA, _MR10_FACTORS,
-            MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]), _mr10_opts())
+            _MR10_FORMULA,
+            _MR10_FACTORS,
+            MultiResponseOptions([_mr10_crs("Y1", max_n=30), _mr10_crs("Y2", max_n=30)]),
+            _mr10_opts(),
+        )
         assert mr["report"]["elapsed_sec"] > 0
 
 
@@ -2611,57 +3139,41 @@ class TestGLMDesignAPI:
     # --- Happy path ---
 
     def test_binomial_runs_without_error(self):
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts())
         assert "design_df" in result
         assert "report" in result
 
     def test_binomial_report_has_family_key(self):
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts())
         assert result["report"]["family"] == "binomial"
 
     def test_binomial_report_has_test_type_wald_chi2(self):
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts())
         assert result["report"]["test_type"] == "wald_chi2"
 
     def test_binomial_design_df_has_factor_columns(self):
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts())
         df = result["design_df"]
         assert "A" in df.columns
         assert "B" in df.columns
 
     def test_binomial_achieved_power_between_0_and_1(self):
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts())
         p = result["report"]["achieved_power"]
         assert 0.0 <= p <= 1.0
 
     def test_poisson_runs_without_error(self):
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts())
         assert "report" in result
 
     def test_poisson_report_has_baseline_key(self):
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts())
         assert result["report"]["baseline"] == pytest.approx(2.0)
 
     # --- Report structure ---
 
     def test_glm_report_df2_is_none(self):
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts())
         assert result["report"]["df2"] is None
 
     def test_glm_report_glm_weight_close_to_p0_times_1_minus_p0(self):
@@ -2673,53 +3185,50 @@ class TestGLMDesignAPI:
         assert result["report"]["glm_weight"] == pytest.approx(expected_w, rel=1e-6)
 
     def test_glm_report_has_link_key(self):
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), _glm_opts())
         assert result["report"]["link"] == "logit"
 
     def test_poisson_report_link_is_log(self):
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _poisson_cfg(), _glm_opts())
         assert result["report"]["link"] == "log"
 
     # --- OLS backward compat: test_type == "f" ---
 
     def test_ols_contrast_report_has_test_type_f(self):
         cfg = PowerContrastConfig(
-            L=_GLM_L, delta=np.array([0.5]), sigma=1.0,
-            alpha=0.05, power=0.70, max_n=60, max_iter=12,
+            L=_GLM_L,
+            delta=np.array([0.5]),
+            sigma=1.0,
+            alpha=0.05,
+            power=0.70,
+            max_n=60,
+            max_iter=12,
         )
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts())
         assert result["report"]["test_type"] == "f"
 
     def test_ols_r2_report_has_test_type_f(self):
         cfg = PowerR2Config(
-            r2_target=0.5, sigma=1.0, alpha=0.05,
-            power=0.70, max_n=60, max_iter=12,
+            r2_target=0.5,
+            sigma=1.0,
+            alpha=0.05,
+            power=0.70,
+            max_n=60,
+            max_iter=12,
         )
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts())
         assert result["report"]["test_type"] == "f"
 
     # --- Design options ---
 
     def test_glm_with_d_criterion(self):
         opts = DesignOptions(criterion="D", starts=1, random_state=0, max_iter=8)
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), opts
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), opts)
         assert result["report"]["criterion"] == "D"
 
     def test_glm_with_a_criterion(self):
         opts = DesignOptions(criterion="A", starts=1, random_state=0, max_iter=8)
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), opts
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, _binomial_cfg(), opts)
         assert result["report"]["criterion"] == "A"
 
     def test_glm_with_categorical_factor(self):
@@ -2728,8 +3237,14 @@ class TestGLMDesignAPI:
         L = np.zeros((1, 4))
         L[0, 1] = 1.0  # A coefficient
         cfg = PowerGLMContrastConfig(
-            L=L, delta=np.array([0.5]), baseline=0.4, family="binomial",
-            alpha=0.05, power=0.70, max_n=80, max_iter=12,
+            L=L,
+            delta=np.array([0.5]),
+            baseline=0.4,
+            family="binomial",
+            alpha=0.05,
+            power=0.70,
+            max_n=80,
+            max_iter=12,
         )
         result = find_optimal_design("~ 1 + A + C", factors, cfg, _glm_opts())
         assert "design_df" in result
@@ -2740,7 +3255,8 @@ class TestGLMDesignAPI:
         cfg = _binomial_cfg()
         opts = DesignOptions(
             split_plot=SplitPlotOptions(htc_factors=["A"], n_whole_plots=3),
-            starts=1, random_state=0,
+            starts=1,
+            random_state=0,
         )
         with pytest.raises(ValueError, match="GLM"):
             find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, cfg, opts)
@@ -2748,7 +3264,9 @@ class TestGLMDesignAPI:
     def test_glm_config_wrong_family_raises(self):
         with pytest.raises((ValueError, TypeError)):
             PowerGLMContrastConfig(
-                L=_GLM_L, delta=np.array([0.5]), baseline=0.4,
+                L=_GLM_L,
+                delta=np.array([0.5]),
+                baseline=0.4,
                 family="gaussian",  # invalid
             )
 
@@ -2757,23 +3275,28 @@ class TestGLMDesignAPI:
     def test_ols_contrast_api_result_shape_unchanged(self):
         """OLS contrast API still returns design_df, buckets_df, report."""
         cfg = PowerContrastConfig(
-            L=_GLM_L, delta=np.array([0.5]), sigma=1.0,
-            alpha=0.05, power=0.70, max_n=60, max_iter=12,
+            L=_GLM_L,
+            delta=np.array([0.5]),
+            sigma=1.0,
+            alpha=0.05,
+            power=0.70,
+            max_n=60,
+            max_iter=12,
         )
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts())
         assert set(["design_df", "buckets_df", "report"]).issubset(result.keys())
 
     def test_ols_r2_api_result_shape_unchanged(self):
         """OLS R² API still returns design_df, buckets_df, report."""
         cfg = PowerR2Config(
-            r2_target=0.5, sigma=1.0, alpha=0.05,
-            power=0.70, max_n=60, max_iter=12,
+            r2_target=0.5,
+            sigma=1.0,
+            alpha=0.05,
+            power=0.70,
+            max_n=60,
+            max_iter=12,
         )
-        result = find_optimal_design(
-            _GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts()
-        )
+        result = find_optimal_design(_GLM_FORMULA, _GLM_FACTORS, cfg, _glm_opts())
         assert set(["design_df", "buckets_df", "report"]).issubset(result.keys())
 
 
@@ -2789,8 +3312,13 @@ _PC_OPTS = DesignOptions(starts=1, random_state=0, max_iter=5, candidate_points=
 
 def _pc_binomial_cfg(**kwargs) -> PowerGLMContrastConfig:
     defaults = dict(
-        L=_PC_L, delta=np.array([0.5]), baseline=0.4,
-        family="binomial", alpha=0.05, power=0.80, max_n=60,
+        L=_PC_L,
+        delta=np.array([0.5]),
+        baseline=0.4,
+        family="binomial",
+        alpha=0.05,
+        power=0.80,
+        max_n=60,
     )
     defaults.update(kwargs)
     return PowerGLMContrastConfig(**defaults)
@@ -2798,8 +3326,13 @@ def _pc_binomial_cfg(**kwargs) -> PowerGLMContrastConfig:
 
 def _pc_poisson_cfg(**kwargs) -> PowerGLMContrastConfig:
     defaults = dict(
-        L=_PC_L, delta=np.array([0.4]), baseline=2.0,
-        family="poisson", alpha=0.05, power=0.80, max_n=60,
+        L=_PC_L,
+        delta=np.array([0.4]),
+        baseline=2.0,
+        family="poisson",
+        alpha=0.05,
+        power=0.80,
+        max_n=60,
     )
     defaults.update(kwargs)
     return PowerGLMContrastConfig(**defaults)
@@ -2808,10 +3341,17 @@ def _pc_poisson_cfg(**kwargs) -> PowerGLMContrastConfig:
 def _make_design_df(cfg: PowerGLMContrastConfig, n: int = 25) -> "pd.DataFrame":
     """Build a small I-optimal design df for baseline-sweep tests."""
     result = find_optimal_design(
-        _PC_FORMULA, _PC_FACTORS,
+        _PC_FORMULA,
+        _PC_FACTORS,
         PowerGLMContrastConfig(
-            L=cfg.L, delta=cfg.delta, baseline=cfg.baseline,
-            family=cfg.family, alpha=cfg.alpha, power=cfg.power, max_n=n, max_iter=4,
+            L=cfg.L,
+            delta=cfg.delta,
+            baseline=cfg.baseline,
+            family=cfg.family,
+            alpha=cfg.alpha,
+            power=cfg.power,
+            max_n=n,
+            max_iter=4,
         ),
         _PC_OPTS,
     )
@@ -2826,16 +3366,24 @@ class TestGLMPowerCurves:
 
     def test_power_curve_by_n_glm_returns_dataframe(self):
         df = power_curve_by_n(
-            _PC_FORMULA, _PC_FACTORS, _pc_binomial_cfg(),
-            design_opts=_PC_OPTS, n_range=(5, 40), n_points=5,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            _pc_binomial_cfg(),
+            design_opts=_PC_OPTS,
+            n_range=(5, 40),
+            n_points=5,
         )
         assert isinstance(df, pd.DataFrame)
         assert len(df) > 0
 
     def test_power_curve_by_n_glm_power_increases_with_n(self):
         df = power_curve_by_n(
-            _PC_FORMULA, _PC_FACTORS, _pc_binomial_cfg(),
-            design_opts=_PC_OPTS, n_range=(5, 48), n_points=6,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            _pc_binomial_cfg(),
+            design_opts=_PC_OPTS,
+            n_range=(5, 48),
+            n_points=6,
         )
         # Power should be (roughly) non-decreasing overall
         powers = list(df["power"])
@@ -2843,16 +3391,24 @@ class TestGLMPowerCurves:
 
     def test_power_curve_by_n_glm_has_n_and_power_columns(self):
         df = power_curve_by_n(
-            _PC_FORMULA, _PC_FACTORS, _pc_binomial_cfg(),
-            design_opts=_PC_OPTS, n_range=(5, 30), n_points=4,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            _pc_binomial_cfg(),
+            design_opts=_PC_OPTS,
+            n_range=(5, 30),
+            n_points=4,
         )
         assert "n" in df.columns
         assert "power" in df.columns
 
     def test_power_curve_by_n_glm_power_in_unit_interval(self):
         df = power_curve_by_n(
-            _PC_FORMULA, _PC_FACTORS, _pc_binomial_cfg(),
-            design_opts=_PC_OPTS, n_range=(5, 30), n_points=4,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            _pc_binomial_cfg(),
+            design_opts=_PC_OPTS,
+            n_range=(5, 30),
+            n_points=4,
         )
         assert (df["power"].between(0.0, 1.0)).all()
 
@@ -2860,7 +3416,10 @@ class TestGLMPowerCurves:
 
     def test_power_curve_by_effect_glm_returns_dataframe(self):
         df = power_curve_by_effect(
-            _PC_FORMULA, _PC_FACTORS, 30, _pc_binomial_cfg(),
+            _PC_FORMULA,
+            _PC_FACTORS,
+            30,
+            _pc_binomial_cfg(),
             design_opts=_PC_OPTS,
         )
         assert isinstance(df, pd.DataFrame)
@@ -2868,7 +3427,10 @@ class TestGLMPowerCurves:
 
     def test_power_curve_by_effect_glm_power_increases_with_delta(self):
         df = power_curve_by_effect(
-            _PC_FORMULA, _PC_FACTORS, 30, _pc_binomial_cfg(),
+            _PC_FORMULA,
+            _PC_FACTORS,
+            30,
+            _pc_binomial_cfg(),
             design_opts=_PC_OPTS,
         )
         assert "effect_scale" in df.columns
@@ -2879,8 +3441,12 @@ class TestGLMPowerCurves:
     def test_by_baseline_returns_dataframe(self):
         design_df = _make_design_df(_pc_binomial_cfg())
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(0.1, 0.9), baseline_points=10,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(0.1, 0.9),
+            baseline_points=10,
         )
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 10
@@ -2888,8 +3454,12 @@ class TestGLMPowerCurves:
     def test_by_baseline_has_correct_columns(self):
         design_df = _make_design_df(_pc_binomial_cfg())
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(0.1, 0.9), baseline_points=5,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(0.1, 0.9),
+            baseline_points=5,
         )
         for col in ("baseline", "power", "lam", "family", "link"):
             assert col in df.columns
@@ -2898,8 +3468,12 @@ class TestGLMPowerCurves:
         """p0=0.5 maximises Fisher weight for binomial → peak power near 0.5."""
         design_df = _make_design_df(_pc_binomial_cfg())
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(0.05, 0.95), baseline_points=19,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(0.05, 0.95),
+            baseline_points=19,
         )
         peak_idx = df["power"].idxmax()
         peak_baseline = float(df.loc[peak_idx, "baseline"])
@@ -2909,8 +3483,12 @@ class TestGLMPowerCurves:
         """Power at p0=0.5 should exceed power at p0=0.1 for binomial."""
         design_df = _make_design_df(_pc_binomial_cfg())
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(0.1, 0.9), baseline_points=17,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(0.1, 0.9),
+            baseline_points=17,
         )
         mid_power = df.loc[(df["baseline"] - 0.5).abs().idxmin(), "power"]
         extreme_power = df.loc[df["baseline"].idxmin(), "power"]
@@ -2920,8 +3498,12 @@ class TestGLMPowerCurves:
         """Higher μ₀ → more Fisher info → higher power for Poisson."""
         design_df = _make_design_df(_pc_poisson_cfg())
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_poisson_cfg(),
-            baseline_range=(0.5, 5.0), baseline_points=10,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_poisson_cfg(),
+            baseline_range=(0.5, 5.0),
+            baseline_points=10,
         )
         assert df["power"].iloc[-1] >= df["power"].iloc[0]
 
@@ -2930,8 +3512,12 @@ class TestGLMPowerCurves:
         design_df = _make_design_df(_pc_binomial_cfg())
         n_rows = len(design_df)
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(0.2, 0.8), baseline_points=5,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(0.2, 0.8),
+            baseline_points=5,
         )
         assert len(design_df) == n_rows
         assert len(df) == 5
@@ -2940,8 +3526,12 @@ class TestGLMPowerCurves:
         design_df = _make_design_df(_pc_binomial_cfg())
         lo, hi = 0.15, 0.85
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(lo, hi), baseline_points=8,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(lo, hi),
+            baseline_points=8,
         )
         assert float(df["baseline"].min()) == pytest.approx(lo, abs=1e-6)
         assert float(df["baseline"].max()) == pytest.approx(hi, abs=1e-6)
@@ -2949,24 +3539,36 @@ class TestGLMPowerCurves:
     def test_by_baseline_family_column_matches_config(self):
         design_df = _make_design_df(_pc_binomial_cfg())
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(0.2, 0.8), baseline_points=5,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(0.2, 0.8),
+            baseline_points=5,
         )
         assert (df["family"] == "binomial").all()
 
     def test_by_baseline_link_column_matches_config(self):
         design_df = _make_design_df(_pc_binomial_cfg())
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(0.2, 0.8), baseline_points=5,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(0.2, 0.8),
+            baseline_points=5,
         )
         assert (df["link"] == "logit").all()
 
     def test_by_baseline_single_point(self):
         design_df = _make_design_df(_pc_binomial_cfg())
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(0.5, 0.5), baseline_points=1,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(0.5, 0.5),
+            baseline_points=1,
         )
         assert len(df) == 1
         assert 0.0 <= float(df["power"].iloc[0]) <= 1.0
@@ -2974,16 +3576,24 @@ class TestGLMPowerCurves:
     def test_by_baseline_power_all_in_unit_interval(self):
         design_df = _make_design_df(_pc_binomial_cfg())
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(0.05, 0.95), baseline_points=12,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(0.05, 0.95),
+            baseline_points=12,
         )
         assert (df["power"].between(0.0, 1.0)).all()
 
     def test_by_baseline_lam_nonneg(self):
         design_df = _make_design_df(_pc_binomial_cfg())
         df = power_curve_by_baseline(
-            _PC_FORMULA, _PC_FACTORS, design_df, _pc_binomial_cfg(),
-            baseline_range=(0.1, 0.9), baseline_points=8,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            design_df,
+            _pc_binomial_cfg(),
+            baseline_range=(0.1, 0.9),
+            baseline_points=8,
         )
         assert (df["lam"] >= 0.0).all()
 
@@ -2992,23 +3602,39 @@ class TestGLMPowerCurves:
     def test_ols_power_curve_by_n_unchanged(self):
         """OLS power_curve_by_n still returns a DataFrame with n and power."""
         cfg = PowerContrastConfig(
-            L=_PC_L, delta=np.array([0.5]), sigma=1.0,
-            alpha=0.05, power=0.80, max_n=60,
+            L=_PC_L,
+            delta=np.array([0.5]),
+            sigma=1.0,
+            alpha=0.05,
+            power=0.80,
+            max_n=60,
         )
         df = power_curve_by_n(
-            _PC_FORMULA, _PC_FACTORS, cfg,
-            design_opts=_PC_OPTS, n_range=(5, 30), n_points=4,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            cfg,
+            design_opts=_PC_OPTS,
+            n_range=(5, 30),
+            n_points=4,
         )
         assert "n" in df.columns and "power" in df.columns
 
     def test_ols_power_curve_by_effect_unchanged(self):
         """OLS power_curve_by_effect still returns DataFrame with effect_scale."""
         cfg = PowerContrastConfig(
-            L=_PC_L, delta=np.array([0.5]), sigma=1.0,
-            alpha=0.05, power=0.80, max_n=60,
+            L=_PC_L,
+            delta=np.array([0.5]),
+            sigma=1.0,
+            alpha=0.05,
+            power=0.80,
+            max_n=60,
         )
         df = power_curve_by_effect(
-            _PC_FORMULA, _PC_FACTORS, 20, cfg, design_opts=_PC_OPTS,
+            _PC_FORMULA,
+            _PC_FACTORS,
+            20,
+            cfg,
+            design_opts=_PC_OPTS,
         )
         assert "effect_scale" in df.columns
 
@@ -3025,8 +3651,14 @@ _GL5_OPTS = DesignOptions(starts=1, random_state=0, max_iter=5, candidate_points
 
 def _gl5_bin_cfg(**kwargs) -> PowerGLMContrastConfig:
     defaults = dict(
-        L=_GL5_L, delta=np.array([0.5]), baseline=0.4,
-        family="binomial", alpha=0.05, power=0.80, max_n=50, max_iter=8,
+        L=_GL5_L,
+        delta=np.array([0.5]),
+        baseline=0.4,
+        family="binomial",
+        alpha=0.05,
+        power=0.80,
+        max_n=50,
+        max_iter=8,
     )
     defaults.update(kwargs)
     return PowerGLMContrastConfig(**defaults)
@@ -3035,6 +3667,7 @@ def _gl5_bin_cfg(**kwargs) -> PowerGLMContrastConfig:
 def _gl5_design(cfg: PowerGLMContrastConfig) -> "pd.DataFrame":
     """Build a small design for MDE tests."""
     import warnings
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         res = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, cfg, _GL5_OPTS)
@@ -3082,27 +3715,41 @@ class TestGLMMDE:
         small_cfg = _gl5_bin_cfg(max_n=15, max_iter=4)
         large_cfg = _gl5_bin_cfg(max_n=40, max_iter=4)
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             small_res = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, small_cfg, _GL5_OPTS)
             large_res = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, large_cfg, _GL5_OPTS)
         mde_small = min_detectable_effect(
-            small_res["design_df"], _GL5_FORMULA, _GL5_FACTORS,
-            _gl5_bin_cfg(), target_power=0.70,
+            small_res["design_df"],
+            _GL5_FORMULA,
+            _GL5_FACTORS,
+            _gl5_bin_cfg(),
+            target_power=0.70,
         )
         mde_large = min_detectable_effect(
-            large_res["design_df"], _GL5_FORMULA, _GL5_FACTORS,
-            _gl5_bin_cfg(), target_power=0.70,
+            large_res["design_df"],
+            _GL5_FORMULA,
+            _GL5_FACTORS,
+            _gl5_bin_cfg(),
+            target_power=0.70,
         )
         # Larger design → need smaller (or equal) delta to hit power target
         assert mde_large["mde"] <= mde_small["mde"] + 0.5  # allow noise from random starts
 
     def test_mde_glm_poisson(self):
         cfg = PowerGLMContrastConfig(
-            L=_GL5_L, delta=np.array([0.4]), baseline=2.0,
-            family="poisson", alpha=0.05, power=0.80, max_n=50, max_iter=8,
+            L=_GL5_L,
+            delta=np.array([0.4]),
+            baseline=2.0,
+            family="poisson",
+            alpha=0.05,
+            power=0.80,
+            max_n=50,
+            max_iter=8,
         )
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             design_df = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, cfg, _GL5_OPTS)["design_df"]
@@ -3128,62 +3775,86 @@ class TestGLMMDE:
 
     def test_compare_criteria_glm_runs(self):
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             result = compare_criteria(
-                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
-                design_opts=_GL5_OPTS, criteria=["I", "D"],
+                _GL5_FORMULA,
+                _GL5_FACTORS,
+                _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS,
+                criteria=["I", "D"],
             )
         assert "summary" in result
 
     def test_compare_criteria_glm_returns_dataframe(self):
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             result = compare_criteria(
-                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
-                design_opts=_GL5_OPTS, criteria=["I", "D"],
+                _GL5_FORMULA,
+                _GL5_FACTORS,
+                _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS,
+                criteria=["I", "D"],
             )
         assert isinstance(result["summary"], pd.DataFrame)
 
     def test_compare_criteria_glm_has_two_rows(self):
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             result = compare_criteria(
-                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
-                design_opts=_GL5_OPTS, criteria=["I", "D"],
+                _GL5_FORMULA,
+                _GL5_FACTORS,
+                _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS,
+                criteria=["I", "D"],
             )
         assert len(result["summary"]) == 2
 
     def test_compare_criteria_glm_has_family_column(self):
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             result = compare_criteria(
-                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
-                design_opts=_GL5_OPTS, criteria=["I", "D"],
+                _GL5_FORMULA,
+                _GL5_FACTORS,
+                _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS,
+                criteria=["I", "D"],
             )
         assert "family" in result["summary"].columns
         assert (result["summary"]["family"] == "binomial").all()
 
     def test_compare_criteria_glm_has_baseline_column(self):
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             result = compare_criteria(
-                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
-                design_opts=_GL5_OPTS, criteria=["I", "D"],
+                _GL5_FORMULA,
+                _GL5_FACTORS,
+                _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS,
+                criteria=["I", "D"],
             )
         assert "baseline" in result["summary"].columns
 
     def test_compare_criteria_glm_has_power_column(self):
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             result = compare_criteria(
-                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
-                design_opts=_GL5_OPTS, criteria=["I", "D"],
+                _GL5_FORMULA,
+                _GL5_FACTORS,
+                _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS,
+                criteria=["I", "D"],
             )
         assert "achieved_power" in result["summary"].columns
         assert (result["summary"]["achieved_power"].between(0.0, 1.0)).all()
@@ -3191,11 +3862,15 @@ class TestGLMMDE:
     def test_compare_criteria_glm_no_sigma_column(self):
         """GLM summary should not have a sigma column."""
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             result = compare_criteria(
-                _GL5_FORMULA, _GL5_FACTORS, _gl5_bin_cfg(),
-                design_opts=_GL5_OPTS, criteria=["I", "D"],
+                _GL5_FORMULA,
+                _GL5_FACTORS,
+                _gl5_bin_cfg(),
+                design_opts=_GL5_OPTS,
+                criteria=["I", "D"],
             )
         assert "sigma" not in result["summary"].columns
 
@@ -3204,13 +3879,20 @@ class TestGLMMDE:
     def test_mde_ols_unchanged(self):
         """OLS min_detectable_effect still returns mode='contrast'."""
         ols_cfg = PowerContrastConfig(
-            L=_GL5_L, delta=np.array([0.5]), sigma=1.0,
-            alpha=0.05, power=0.80, max_n=50,
+            L=_GL5_L,
+            delta=np.array([0.5]),
+            sigma=1.0,
+            alpha=0.05,
+            power=0.80,
+            max_n=50,
         )
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            design_df = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, ols_cfg, _GL5_OPTS)["design_df"]
+            design_df = find_optimal_design(_GL5_FORMULA, _GL5_FACTORS, ols_cfg, _GL5_OPTS)[
+                "design_df"
+            ]
         result = min_detectable_effect(design_df, _GL5_FORMULA, _GL5_FACTORS, ols_cfg)
         assert result["mode"] == "contrast"
         assert "mde" in result
@@ -3218,15 +3900,24 @@ class TestGLMMDE:
     def test_compare_criteria_ols_unchanged(self):
         """OLS compare_criteria still runs and returns criterion column."""
         ols_cfg = PowerContrastConfig(
-            L=_GL5_L, delta=np.array([0.5]), sigma=1.0,
-            alpha=0.05, power=0.80, max_n=50, max_iter=8,
+            L=_GL5_L,
+            delta=np.array([0.5]),
+            sigma=1.0,
+            alpha=0.05,
+            power=0.80,
+            max_n=50,
+            max_iter=8,
         )
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             result = compare_criteria(
-                _GL5_FORMULA, _GL5_FACTORS, ols_cfg,
-                design_opts=_GL5_OPTS, criteria=["I", "D"],
+                _GL5_FORMULA,
+                _GL5_FACTORS,
+                ols_cfg,
+                design_opts=_GL5_OPTS,
+                criteria=["I", "D"],
             )
         assert "criterion" in result["summary"].columns
         assert "family" not in result["summary"].columns
@@ -3235,6 +3926,7 @@ class TestGLMMDE:
 # ---------------------------------------------------------------------------
 # SR-20 (c, d): Hotelling search semantics — target and fallback
 # ---------------------------------------------------------------------------
+
 
 class TestSR20HotellingSearchSemantics:
     """SR-20c/d regressions: (d) with rule='product' the joint-T² search was
@@ -3248,12 +3940,18 @@ class TestSR20HotellingSearchSemantics:
     def _responses(self):
         L = np.array([[0.0, 1.0, 0.0]])
         return [
-            ResponseSpec(name="y1", power_cfg=PowerContrastConfig(
-                L=L, delta=np.array([1.0]), sigma=1.0, alpha=0.05,
-                power=0.8, max_n=80)),
-            ResponseSpec(name="y2", power_cfg=PowerContrastConfig(
-                L=L, delta=np.array([0.8]), sigma=1.0, alpha=0.05,
-                power=0.8, max_n=80)),
+            ResponseSpec(
+                name="y1",
+                power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([1.0]), sigma=1.0, alpha=0.05, power=0.8, max_n=80
+                ),
+            ),
+            ResponseSpec(
+                name="y2",
+                power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([0.8]), sigma=1.0, alpha=0.05, power=0.8, max_n=80
+                ),
+            ),
         ]
 
     _FACTORS = {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)}
@@ -3261,14 +3959,18 @@ class TestSR20HotellingSearchSemantics:
 
     def test_product_rule_targets_strictest_power(self):
         import warnings as _w
+
         mc = MultiResponseOptions(
-            responses=self._responses(), power_combination="product",
+            responses=self._responses(),
+            power_combination="product",
             sigma_joint=np.array([[1.0, 0.3], [0.3, 1.0]]),
         )
         with _w.catch_warnings(record=True) as caught:
             _w.simplefilter("always")
             out = find_multiresponse_design(
-                "~ 1 + x1 + x2", self._FACTORS, mc,
+                "~ 1 + x1 + x2",
+                self._FACTORS,
+                mc,
                 design_opts=DesignOptions(**self._OPTS),
             )
         # Joint test held to 0.8, not prod(0.8, 0.8) = 0.64
@@ -3282,12 +3984,15 @@ class TestSR20HotellingSearchSemantics:
         joint-power request never silently answers with marginal-power
         semantics — an invalid sigma_joint fails fast instead."""
         mc = MultiResponseOptions(
-            responses=self._responses(), power_combination="min",
+            responses=self._responses(),
+            power_combination="min",
             sigma_joint=np.array([[1.0, 1.0], [1.0, 1.0]]),  # singular
         )
         with pytest.raises(ValueError, match="positive definite"):
             find_multiresponse_design(
-                "~ 1 + x1 + x2", self._FACTORS, mc,
+                "~ 1 + x1 + x2",
+                self._FACTORS,
+                mc,
                 design_opts=DesignOptions(**self._OPTS),
             )
 
@@ -3295,6 +4000,7 @@ class TestSR20HotellingSearchSemantics:
 # ---------------------------------------------------------------------------
 # SR-26: Hotelling df-infeasible n must be infeasible, not a semantics switch
 # ---------------------------------------------------------------------------
+
 
 class TestSR26HotellingFeasibilityFloor:
     """SR-26 regression (review of SR-20c): probing an n with joint df2 =
@@ -3307,23 +4013,29 @@ class TestSR26HotellingFeasibilityFloor:
 
     def test_strong_effects_keep_joint_objective(self):
         import warnings as _w
+
         L = np.array([[0.0, 1.0, 0.0]])
         resp = [
-            ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
-                L=L, delta=np.array([5.0]), sigma=1.0, alpha=0.05,
-                power=0.8, max_n=80))
+            ResponseSpec(
+                name=nm,
+                power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([5.0]), sigma=1.0, alpha=0.05, power=0.8, max_n=80
+                ),
+            )
             for nm in ("y1", "y2")
         ]
         mc = MultiResponseOptions(
-            responses=resp, power_combination="min",
+            responses=resp,
+            power_combination="min",
             sigma_joint=np.array([[1.0, 0.3], [0.3, 1.0]]),
         )
         with _w.catch_warnings(record=True) as caught:
             _w.simplefilter("always")
             out = find_multiresponse_design(
-                "~ 1 + x1 + x2", {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
-                mc, design_opts=DesignOptions(random_state=0, starts=1,
-                                              candidate_points=100),
+                "~ 1 + x1 + x2",
+                {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
+                mc,
+                design_opts=DesignOptions(random_state=0, starts=1, candidate_points=100),
             )
         assert "joint_power" in out["report"], "joint objective was abandoned"
         assert out["report"]["joint_power"] + 1e-3 >= 0.8
@@ -3336,6 +4048,7 @@ class TestSR26HotellingFeasibilityFloor:
 # SR-29/SR-30: no mid-search objective switch; MR numeric categoricals
 # ---------------------------------------------------------------------------
 
+
 class TestSR29NoMidSearchObjectiveSwitch:
     """SR-29 regression (review round 4): after the SR-26 df guard, any OTHER
     exception during a joint evaluation still tripped the sticky scalar
@@ -3346,14 +4059,22 @@ class TestSR29NoMidSearchObjectiveSwitch:
 
     def _mc(self, sigma_joint):
         L = np.array([[0.0, 1.0, 0.0]])
-        resp = [ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
-                    L=L, delta=np.array([1.0]), sigma=1.0, alpha=0.05,
-                    power=0.8, max_n=80)) for nm in ("y1", "y2")]
-        return MultiResponseOptions(responses=resp, power_combination="min",
-                                    sigma_joint=sigma_joint)
+        resp = [
+            ResponseSpec(
+                name=nm,
+                power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([1.0]), sigma=1.0, alpha=0.05, power=0.8, max_n=80
+                ),
+            )
+            for nm in ("y1", "y2")
+        ]
+        return MultiResponseOptions(
+            responses=resp, power_combination="min", sigma_joint=sigma_joint
+        )
 
     def test_injected_midsearch_fault_propagates(self, monkeypatch):
         import lattice_doe.api as api_mod
+
         orig = api_mod.hotelling_t2_power
         calls = {"n": 0}
 
@@ -3366,19 +4087,19 @@ class TestSR29NoMidSearchObjectiveSwitch:
         monkeypatch.setattr(api_mod, "hotelling_t2_power", flaky)
         with pytest.raises(RuntimeError, match="injected fault"):
             find_multiresponse_design(
-                "~ 1 + x1 + x2", {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
+                "~ 1 + x1 + x2",
+                {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
                 self._mc(np.array([[1.0, 0.3], [0.3, 1.0]])),
-                design_opts=DesignOptions(random_state=0, starts=1,
-                                          candidate_points=100),
+                design_opts=DesignOptions(random_state=0, starts=1, candidate_points=100),
             )
 
     def test_asymmetric_sigma_joint_preflight(self):
         with pytest.raises(ValueError, match="symmetric"):
             find_multiresponse_design(
-                "~ 1 + x1 + x2", {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
+                "~ 1 + x1 + x2",
+                {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
                 self._mc(np.array([[1.0, 0.5], [0.1, 1.0]])),
-                design_opts=DesignOptions(random_state=0, starts=1,
-                                          candidate_points=100),
+                design_opts=DesignOptions(random_state=0, starts=1, candidate_points=100),
             )
 
 
@@ -3390,15 +4111,23 @@ class TestSR30MultiResponseNumericCategoricals:
 
     def test_mr_numeric_categories_replicate(self):
         L = np.array([[0.0, 1.0, 0.0]])
-        resp = [ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
-                    L=L, delta=np.array([1.2]), sigma=1.0, alpha=0.05,
-                    power=0.8, max_n=60)) for nm in ("y1", "y2")]
+        resp = [
+            ResponseSpec(
+                name=nm,
+                power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([1.2]), sigma=1.0, alpha=0.05, power=0.8, max_n=60
+                ),
+            )
+            for nm in ("y1", "y2")
+        ]
         mc = MultiResponseOptions(responses=resp, power_combination="min")
         out = find_multiresponse_design(
-            "~ C(g)", {"g": [0, 1, 2]}, mc,
-            design_opts=DesignOptions(random_state=0, starts=1,
-                                      candidate_points=50,
-                                      preallocate_categorical=True),
+            "~ C(g)",
+            {"g": [0, 1, 2]},
+            mc,
+            design_opts=DesignOptions(
+                random_state=0, starts=1, candidate_points=50, preallocate_categorical=True
+            ),
         )
         assert out["report"]["n"] > 3, "search must exceed the 3 numeric-coded cells"
         assert out["report"]["achieved_power"] + 1e-3 >= 0.8
@@ -3408,6 +4137,7 @@ class TestSR30MultiResponseNumericCategoricals:
 # SR-32 (api pre-flight): indefinite sigma_joint rejected before the search
 # ---------------------------------------------------------------------------
 
+
 class TestSR32ApiPreflightIndefinite:
     def test_indefinite_sigma_joint_rejected(self):
         rng = np.random.default_rng(0)
@@ -3415,22 +4145,29 @@ class TestSR32ApiPreflightIndefinite:
         S = Q @ np.diag([-1.0, -1.0, 3.0, 3.0]) @ Q.T
         S = 0.5 * (S + S.T)
         L = np.array([[0.0, 1.0, 0.0]])
-        resp = [ResponseSpec(name=f"y{i}", power_cfg=PowerContrastConfig(
-                    L=L, delta=np.array([1.0]), sigma=1.0, alpha=0.05,
-                    power=0.8, max_n=80)) for i in range(4)]
-        mc = MultiResponseOptions(responses=resp, power_combination="min",
-                                  sigma_joint=S)
+        resp = [
+            ResponseSpec(
+                name=f"y{i}",
+                power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([1.0]), sigma=1.0, alpha=0.05, power=0.8, max_n=80
+                ),
+            )
+            for i in range(4)
+        ]
+        mc = MultiResponseOptions(responses=resp, power_combination="min", sigma_joint=S)
         with pytest.raises(ValueError, match="positive definite"):
             find_multiresponse_design(
-                "~ 1 + x1 + x2", {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
-                mc, design_opts=DesignOptions(random_state=0, starts=1,
-                                              candidate_points=100),
+                "~ 1 + x1 + x2",
+                {"x1": (-1.0, 1.0), "x2": (-1.0, 1.0)},
+                mc,
+                design_opts=DesignOptions(random_state=0, starts=1, candidate_points=100),
             )
 
 
 # ---------------------------------------------------------------------------
 # SR-33: MR analysis paths must support numeric-categorical replication
 # ---------------------------------------------------------------------------
+
 
 class TestSR33MultiResponseAnalysisReplication:
     """SR-33 regression (review round 5): power_curve_by_n_multiresponse
@@ -3439,24 +4176,37 @@ class TestSR33MultiResponseAnalysisReplication:
     multiresponse_sensitivity had the same gap."""
 
     def _mc(self):
-        from lattice_doe.config import (PowerContrastConfig, ResponseSpec,
-                                        MultiResponseOptions)
+        from lattice_doe.config import PowerContrastConfig, ResponseSpec, MultiResponseOptions
+
         L = np.array([[0.0, 1.0, 0.0]])
-        resp = [ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
-                    L=L, delta=np.array([1.2]), sigma=1.0, alpha=0.05,
-                    power=0.8, max_n=60)) for nm in ("y1", "y2")]
+        resp = [
+            ResponseSpec(
+                name=nm,
+                power_cfg=PowerContrastConfig(
+                    L=L, delta=np.array([1.2]), sigma=1.0, alpha=0.05, power=0.8, max_n=60
+                ),
+            )
+            for nm in ("y1", "y2")
+        ]
         return MultiResponseOptions(responses=resp, power_combination="min")
 
     def _opts(self):
         from lattice_doe.config import DesignOptions
-        return DesignOptions(random_state=0, starts=1, candidate_points=50,
-                             preallocate_categorical=True)
+
+        return DesignOptions(
+            random_state=0, starts=1, candidate_points=50, preallocate_categorical=True
+        )
 
     def test_curve_replicates_numeric_categories(self):
         from lattice_doe.analysis import power_curve_by_n_multiresponse
+
         res = power_curve_by_n_multiresponse(
-            "~ C(g)", {"g": [0, 1, 2]}, self._mc(),
-            n_range=(4, 8), n_points=3, design_opts=self._opts(),
+            "~ C(g)",
+            {"g": [0, 1, 2]},
+            self._mc(),
+            n_range=(4, 8),
+            n_points=3,
+            design_opts=self._opts(),
         )
         df = res["data"] if isinstance(res, dict) else res
         assert not df["combined_power"].isna().any(), "NaN rows remain"
@@ -3465,8 +4215,12 @@ class TestSR33MultiResponseAnalysisReplication:
 
     def test_sensitivity_replicates_numeric_categories(self):
         from lattice_doe.analysis import multiresponse_sensitivity
+
         res = multiresponse_sensitivity(
-            "~ C(g)", {"g": [0, 1, 2]}, self._mc(), fixed_n=8,
+            "~ C(g)",
+            {"g": [0, 1, 2]},
+            self._mc(),
+            fixed_n=8,
             design_opts=self._opts(),
         )
         df = res["data"] if isinstance(res, dict) else res
@@ -3479,6 +4233,7 @@ class TestSR33MultiResponseAnalysisReplication:
 # UX-7: machine-readable search outcome
 # ---------------------------------------------------------------------------
 
+
 class TestUX7TerminationStatus:
     """UX-7 regression: a search that exhausted its limits returned a
     normal-looking result distinguishable from success only via warning
@@ -3490,41 +4245,60 @@ class TestUX7TerminationStatus:
 
     def test_complete_search_fields(self):
         pc = PowerContrastConfig(
-            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([1.5]),
-            sigma=1.0, alpha=0.05, power=0.8, max_n=60,
+            L=np.array([[0.0, 1.0, 0.0]]),
+            delta=np.array([1.5]),
+            sigma=1.0,
+            alpha=0.05,
+            power=0.8,
+            max_n=60,
         )
-        rep = find_optimal_design("~ 1 + x1 + x2", self._FACTORS, pc,
-                                  DesignOptions(**self._OPTS))["report"]
+        rep = find_optimal_design("~ 1 + x1 + x2", self._FACTORS, pc, DesignOptions(**self._OPTS))[
+            "report"
+        ]
         assert rep["status"] == "complete"
         assert rep["target_met"] is True
         assert rep["termination_reason"] == "target_reached"
 
     def test_partial_search_fields(self):
         pc = PowerContrastConfig(
-            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.3]),
-            sigma=1.0, alpha=0.05, power=0.8, max_n=30,
+            L=np.array([[0.0, 1.0, 0.0]]),
+            delta=np.array([0.3]),
+            sigma=1.0,
+            alpha=0.05,
+            power=0.8,
+            max_n=30,
         )
-        rep = find_optimal_design("~ 1 + x1 + x2", self._FACTORS, pc,
-                                  DesignOptions(**self._OPTS))["report"]
+        rep = find_optimal_design("~ 1 + x1 + x2", self._FACTORS, pc, DesignOptions(**self._OPTS))[
+            "report"
+        ]
         assert rep["status"] == "partial"
         assert rep["target_met"] is False
-        assert rep["termination_reason"] in ("max_n", "max_iter",
-                                             "candidate_cap")
+        assert rep["termination_reason"] in ("max_n", "max_iter", "candidate_cap")
 
     def test_multiresponse_partial_fields(self):
-        resp = [ResponseSpec(name=nm, power_cfg=PowerContrastConfig(
-                    L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.3]),
-                    sigma=1.0, alpha=0.05, power=0.8, max_n=30))
-                for nm in ("y1", "y2")]
+        resp = [
+            ResponseSpec(
+                name=nm,
+                power_cfg=PowerContrastConfig(
+                    L=np.array([[0.0, 1.0, 0.0]]),
+                    delta=np.array([0.3]),
+                    sigma=1.0,
+                    alpha=0.05,
+                    power=0.8,
+                    max_n=30,
+                ),
+            )
+            for nm in ("y1", "y2")
+        ]
         out = find_multiresponse_design(
-            "~ 1 + x1 + x2", self._FACTORS,
+            "~ 1 + x1 + x2",
+            self._FACTORS,
             MultiResponseOptions(responses=resp, power_combination="min"),
             design_opts=DesignOptions(**self._OPTS),
         )
         assert out["report"]["status"] == "partial"
         assert out["report"]["target_met"] is False
-        assert out["report"]["termination_reason"] in ("max_n", "max_iter",
-                                             "candidate_cap")
+        assert out["report"]["termination_reason"] in ("max_n", "max_iter", "candidate_cap")
 
 
 class TestModelMatrixContract:
@@ -3546,7 +4320,10 @@ class TestModelMatrixContract:
         cfg = PowerContrastConfig(
             L=np.array([[0.0, 1.0, 0.0, 0.0, 0.0, -1.0]]),
             delta=np.array([0.5]),
-            alpha=0.05, power=0.8, sigma=1.0, max_n=40,
+            alpha=0.05,
+            power=0.8,
+            sigma=1.0,
+            max_n=40,
         )
         with W.catch_warnings(record=True) as caught:
             W.simplefilter("always")
@@ -3572,17 +4349,188 @@ class TestModelMatrixContract:
         import warnings as W
 
         cfg = PowerContrastConfig(
-            L=np.array([[0.0, 1.0, 0.0]]), delta=np.array([0.5]),
-            alpha=0.05, power=0.8, sigma=1.0, max_n=30,
+            L=np.array([[0.0, 1.0, 0.0]]),
+            delta=np.array([0.5]),
+            alpha=0.05,
+            power=0.8,
+            sigma=1.0,
+            max_n=30,
         )
         opts = DesignOptions(candidate_points=80, random_state=3, starts=1)
         with W.catch_warnings(record=True) as caught:
             W.simplefilter("always")
             res = find_optimal_design(
-                "~ 1 + x + C(g)", {"x": (0.0, 1.0), "g": ["a", "b"]},
-                cfg, opts,
+                "~ 1 + x + C(g)",
+                {"x": (0.0, 1.0), "g": ["a", "b"]},
+                cfg,
+                opts,
             )
         mm = res["model_matrix"]
         assert list(mm.columns) == ["Intercept", "C(g)[T.b]", "x"]
         assert mm.shape == (len(res["design_df"]), 3)
         assert not any("model_matrix" in str(w.message) for w in caught)
+
+
+# ---------------------------------------------------------------------------
+# TD-13 phase 2: power_curves canonical plot branches, surface validation,
+# and auto-range heuristics
+# ---------------------------------------------------------------------------
+
+
+class TestPowerCurvesCanonicalPlotting:
+    """The canonical dict-returning curve functions in power_curves.py carry
+    matplotlib plot branches that no test exercised (59% from the fast tier,
+    64% even under the slow suite — a genuine gap, not deselection)."""
+
+    @staticmethod
+    def _mpl():
+        pytest.importorskip("matplotlib")
+        from lattice_doe import power_curves as pc
+
+        if not pc._HAS_MATPLOTLIB:
+            pytest.skip("matplotlib not available to power_curves")
+        return pc
+
+    def test_by_n_plot_true_returns_figure(self):
+        pc = self._mpl()
+        res = pc.power_curve_by_n(
+            FORMULA,
+            FACTORS,
+            _contrast_cfg(),
+            n_range=(5, 12),
+            n_points=3,
+            design_opts=FAST_OPTS,
+            plot=True,
+        )
+        try:
+            assert res["figure"] is not None
+            assert not res["data"].empty
+        finally:
+            pc.plt.close(res["figure"])
+
+    def test_by_effect_default_range_plot_true(self):
+        pc = self._mpl()
+        res = pc.power_curve_by_effect(
+            FORMULA,
+            FACTORS,
+            n=12,
+            power_cfg=_contrast_cfg(),
+            effect_points=4,
+            design_opts=FAST_OPTS,
+            plot=True,
+        )
+        try:
+            assert res["figure"] is not None
+            df = res["data"]
+            assert len(df) == 4
+            # Default effect_range is (0.1, 2.5) scale multipliers.
+            assert df["effect_size"].iloc[0] == pytest.approx(0.1)
+            assert df["effect_size"].iloc[-1] == pytest.approx(2.5)
+        finally:
+            pc.plt.close(res["figure"])
+
+    def test_glm_auto_range_heuristic(self):
+        # The n_range=None branch sizes max_n from the GLM Fisher weight.
+        pc = self._mpl()
+        glm = PowerGLMContrastConfig(
+            alpha=0.05,
+            power=0.8,
+            L=[[0.0, 1.0, 0.0]],
+            delta=[3.0],
+            family="binomial",
+            baseline=0.3,
+        )
+        res = pc.power_curve_by_n(
+            FORMULA,
+            FACTORS,
+            glm,
+            n_points=3,
+            design_opts=FAST_OPTS,
+            plot=False,
+        )
+        assert not res["data"].empty
+        assert res["data"]["n"].is_monotonic_increasing
+
+
+class TestPowerSurface2DValidation:
+    def test_invalid_param1_rejected(self):
+        with pytest.raises(ValueError, match="param1 must be one of"):
+            power_surface_2d(
+                FORMULA,
+                FACTORS,
+                _contrast_cfg(),
+                param1="bogus",
+                param1_range=(0.5, 2.0),
+                param2="n",
+                param2_range=(6, 20),
+            )
+
+    def test_invalid_param2_rejected(self):
+        with pytest.raises(ValueError, match="param2 must be one of"):
+            power_surface_2d(
+                FORMULA,
+                FACTORS,
+                _contrast_cfg(),
+                param1="n",
+                param1_range=(6, 20),
+                param2="bogus",
+                param2_range=(0.5, 2.0),
+            )
+
+    def test_identical_params_rejected(self):
+        with pytest.raises(ValueError, match="must be different"):
+            power_surface_2d(
+                FORMULA,
+                FACTORS,
+                _contrast_cfg(),
+                param1="n",
+                param1_range=(6, 20),
+                param2="n",
+                param2_range=(6, 20),
+            )
+
+    def test_sigma_sweep_rejected_for_r2(self):
+        with pytest.raises(ValueError, match="only valid for PowerContrastConfig"):
+            power_surface_2d(
+                FORMULA,
+                FACTORS,
+                _r2_cfg(),
+                param1="sigma",
+                param1_range=(0.5, 2.0),
+                param2="alpha",
+                param2_range=(0.01, 0.10),
+            )
+
+    def test_analytical_sweep_requires_n(self):
+        with pytest.raises(ValueError, match="pass n="):
+            power_surface_2d(
+                FORMULA,
+                FACTORS,
+                _contrast_cfg(),
+                param1="effect",
+                param1_range=(0.5, 2.0),
+                param2="alpha",
+                param2_range=(0.01, 0.10),
+            )
+
+    def test_analytical_effect_alpha_surface(self):
+        # Neither axis is 'n': one design is built at the given n and the
+        # grid is filled analytically.
+        res = power_surface_2d(
+            FORMULA,
+            FACTORS,
+            _contrast_cfg(),
+            param1="effect",
+            param1_range=(0.5, 2.0),
+            param2="alpha",
+            param2_range=(0.01, 0.10),
+            grid_points=3,
+            design_opts=FAST_OPTS,
+            n=14,
+        )
+        grid = res["power_grid"]
+        assert grid.shape == (3, 3)
+        assert ((grid >= 0.0) & (grid <= 1.0)).all()
+        # Power rises with effect (rows) and with alpha (columns).
+        assert (np.diff(grid, axis=0) >= -1e-12).all()
+        assert (np.diff(grid, axis=1) >= -1e-12).all()

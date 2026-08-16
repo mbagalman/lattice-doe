@@ -518,6 +518,111 @@ class TestErrorHandling:
 
 @pytest.mark.anyio
 @pytest.mark.skipif(not _HAS_SERVER, reason="fastapi/httpx not installed")
+class TestCompareEndpoint:
+    """TD-13 phase 2: /compare_criteria had no tests at any tier — the
+    router measured 45% even under the slow suite. A real small run covers
+    the summary-row serialization loop with authentic data."""
+
+    async def test_compare_two_criteria_real_run(self, client):
+        r = await client.post(
+            "/compare_criteria",
+            json={
+                "formula": "~ 1 + x1 + x2",
+                "factors": {
+                    "x1": {"type": "continuous", "low": -1.0, "high": 1.0},
+                    "x2": {"type": "continuous", "low": -1.0, "high": 1.0},
+                },
+                "power_cfg": {
+                    "type": "contrast",
+                    "L": [[0.0, 1.0, 0.0]],
+                    "delta": [1.5],
+                    "sigma": 1.0,
+                    "max_n": 30,
+                },
+                "design_opts": {
+                    "auto_candidate": False,
+                    "candidate_points": 100,
+                    "starts": 1,
+                    "random_state": 0,
+                },
+                "criteria": ["I", "D"],
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert [row["criterion"] for row in body["summary"]] == ["I", "D"]
+        for row in body["summary"]:
+            assert row["n"] >= 4
+            assert 0.0 <= row["achieved_power"] <= 1.0
+            assert row["d_efficiency"] is None or 0.0 <= row["d_efficiency"] <= 1.0
+        assert set(body["results"]) == {"I", "D"}
+        for res in body["results"].values():
+            assert res["report"]["criterion"] in {"I", "D"}
+            assert len(res["design_df"]) == res["report"]["n"]
+
+
+@pytest.mark.anyio
+class TestSensitivityEndpoint:
+    """TD-13 phase 2: the endpoint's only prior test was the RV-era GLM 422."""
+
+    async def test_contrast_sensitivity_real_run(self, client):
+        design_r = await client.post(
+            "/design",
+            json={
+                "formula": "~ 1 + x1 + x2",
+                "factors": {
+                    "x1": {"type": "continuous", "low": -1.0, "high": 1.0},
+                    "x2": {"type": "continuous", "low": -1.0, "high": 1.0},
+                },
+                "power_cfg": {
+                    "type": "contrast",
+                    "L": [[0.0, 1.0, 0.0]],
+                    "delta": [1.5],
+                    "sigma": 1.0,
+                    "max_n": 30,
+                },
+                "design_opts": {
+                    "auto_candidate": False,
+                    "candidate_points": 100,
+                    "starts": 1,
+                    "random_state": 0,
+                },
+            },
+        )
+        assert design_r.status_code == 200
+        design_body = design_r.json()
+
+        r = await client.post(
+            "/sensitivity",
+            json={
+                "formula": "~ 1 + x1 + x2",
+                "factors": {
+                    "x1": {"type": "continuous", "low": -1.0, "high": 1.0},
+                    "x2": {"type": "continuous", "low": -1.0, "high": 1.0},
+                },
+                "power_cfg": {
+                    "type": "contrast",
+                    "L": [[0.0, 1.0, 0.0]],
+                    "delta": [1.5],
+                    "sigma": 1.0,
+                },
+                "design_df": design_body["design_df"],
+                "sigma_range": [0.5, 2.0],
+                "sigma_points": 5,
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["mode"] == "contrast"
+        assert len(body["rows"]) == 5
+        sigmas = [row["sigma"] for row in body["rows"]]
+        powers = [row["power"] for row in body["rows"]]
+        assert sigmas == sorted(sigmas)
+        # Power decreases monotonically as sigma grows.
+        assert all(a >= b for a, b in zip(powers, powers[1:]))
+
+
+@pytest.mark.anyio
 class TestDesignEndpointMocked:
     @patch("lattice_doe.api_server.routers.design.find_optimal_design")
     async def test_design_returns_200_with_mock(self, mock_run, client):
