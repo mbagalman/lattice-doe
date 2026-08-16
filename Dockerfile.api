@@ -23,10 +23,13 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=25s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Use factory mode so create_app() is called per worker (correct for multi-worker)
-CMD ["uvicorn", "lattice_doe.api_server.main:create_app", \
-     "--factory", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "2", \
-     "--log-level", "info"]
+# Default to ONE worker: the async /jobs API keeps its state in process
+# memory, so with N > 1 workers a GET /jobs/{id} routed to a different
+# worker than the POST returns 404. Raise UVICORN_WORKERS only if you do
+# not use /jobs (or you add sticky routing / a shared store).
+# Shell form so the UVICORN_WORKERS override actually takes effect (the
+# previous exec-form CMD hardcoded the count and ignored the env var).
+CMD uvicorn lattice_doe.api_server.main:create_app --factory \
+    --host 0.0.0.0 --port 8000 \
+    --workers "${UVICORN_WORKERS:-1}" \
+    --log-level info

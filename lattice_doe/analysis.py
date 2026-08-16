@@ -311,6 +311,12 @@ def power_sensitivity(
         ``nominal_power``  float — power at ``power_cfg.r2_target``
         ``r2_nominal``     float — the nominal r2_target from ``power_cfg``
         ``figure``         matplotlib Figure if *plot* is True, else None
+
+    Raises
+    ------
+    ValueError
+        If *power_cfg* is a PowerGLMContrastConfig: GLM configs have no
+        sigma to sweep — use ``power_curve_by_baseline`` instead.
     """
     # GLM configs have no sigma axis to sweep; without this guard the sweep
     # crashes deep in the loop with AttributeError on .sigma (RV-era review

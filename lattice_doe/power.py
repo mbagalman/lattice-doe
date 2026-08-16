@@ -238,6 +238,13 @@ def contrast_power(
         A NamedTuple containing:
         - power (float): 1 - β for the noncentral F. Clipped to [0, 1].
         - lam (float): Noncentrality parameter λ.
+
+    Raises
+    ------
+    ValueError
+        If L, delta or sigma contain non-finite values (NaN/inf) —
+        a NaN noncentrality would otherwise be silently clipped to a
+        zero effect (RV-15).
     """
     _require_scipy()
     _require_finite_contrast(L, delta, sigma=sigma)

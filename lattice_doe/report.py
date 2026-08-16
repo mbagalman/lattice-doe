@@ -83,7 +83,8 @@ def _fig_to_base64(fig) -> Optional[str]:
 def _build_config_ctx(formula: str, factors: dict, power_cfg: Any) -> dict:
     """Build the template context dict for the Config Summary section (B1).
 
-    Handles both PowerContrastConfig and PowerR2Config.
+    Handles PowerContrastConfig, PowerR2Config and PowerGLMContrastConfig
+    (RV-11: family / link / baseline / L shape / delta for GLM).
     """
     from .config import PowerContrastConfig, PowerGLMContrastConfig, PowerR2Config
 

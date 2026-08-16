@@ -327,11 +327,13 @@ def power_curve_by_effect(
         Factor specifications.
     n : int
         Fixed sample size.
-    power_cfg : PowerContrastConfig or PowerR2Config
+    power_cfg : PowerContrastConfig, PowerR2Config or PowerGLMContrastConfig
         Base configuration (effect size will be varied).
     effect_range : tuple of (min_effect, max_effect), optional
         Range of effect sizes. If None, automatically determined.
         For contrasts: multiplier on base delta (0.5 to 2.0).
+        For GLM contrasts: multiplier on base delta, on the
+        linear-predictor scale (RV-10).
         For R²: actual R² values (0.01 to 0.5).
     effect_points : int, default 30
         Number of effect sizes to evaluate.
@@ -569,7 +571,9 @@ def power_surface_2d(
     factors : dict
         Factor specifications.
     power_cfg : PowerContrastConfig or PowerR2Config
-        Base configuration.
+        Base configuration. GLM configurations are rejected with a
+        ValueError (RV-19): this function has no GLM sweep axes — use
+        power_curve_by_n / power_curve_by_effect / power_curve_by_baseline.
     param1, param2 : {'n', 'effect', 'sigma', 'alpha'}
         Parameters to vary.
     param1_range, param2_range : tuple

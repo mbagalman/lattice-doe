@@ -103,6 +103,17 @@ def _fedorov_exchange_single(
         try:
             M_inv = np.linalg.inv(M)
         except np.linalg.LinAlgError:
+            # Practically unreachable with the default jitter ridge, but
+            # if it fires the caller must know the exchange stopped on a
+            # degenerate design rather than converging (second-opinion
+            # review, 2026-08-16).
+            warnings.warn(
+                "Singular moment matrix encountered during the Fedorov "
+                "exchange; optimization stopped early at the current "
+                "design. Check for collinear model columns or increase "
+                "xtx_jitter.",
+                RuntimeWarning,
+            )
             break  # singular; stop improving
 
         # H[:, t] = M^-1 x_t  for every candidate t  →  shape (p, n_cand)
@@ -700,10 +711,12 @@ def _preallocated_design(
 ) -> Tuple[pd.DataFrame, np.ndarray, List[str]]:
     """Run pre-allocation then per-cell Fedorov exchange.
 
-    Identifies categorical columns (non-numeric dtype) in *cand*, calls
-    the Wynn allocation on the candidate set to determine integer run
-    counts per cell, then runs a serial ``_optimal_indices_from_X`` search
-    within each non-empty cell stratum.
+    Categorical columns come from the caller-supplied ``cat_cols``
+    (spec-derived, TD-9) when given; only direct callers that omit them
+    fall back to non-numeric-dtype inference, which misclassifies
+    numeric-coded categories. The Wynn allocation then determines
+    integer run counts per cell, and a serial ``_optimal_indices_from_X``
+    search runs within each non-empty cell stratum.
 
     Allocation counts are honored exactly (SR-6): when a cell's allocation
     exceeds its number of distinct candidate rows, the surplus runs are

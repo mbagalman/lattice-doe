@@ -18,10 +18,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Override the number of Uvicorn worker processes (default: 2).
-      # Each worker handles requests independently; more workers → higher
-      # throughput for concurrent requests, but more memory.
-      - UVICORN_WORKERS=2
+      # Uvicorn worker processes (default: 1). The async /jobs API keeps
+      # state in process memory, so more than one worker breaks job
+      # polling (a GET routed to a different worker than the POST
+      # returns 404). Only raise this if you do not use /jobs.
+      - UVICORN_WORKERS=1
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
