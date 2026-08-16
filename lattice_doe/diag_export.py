@@ -152,6 +152,7 @@ def export_diagnostics(
                 <!DOCTYPE html>
                 <html>
                 <head>
+                    <meta charset="utf-8">
                     <title>Design Diagnostics Report</title>
                     <style>
                         body {{ font-family: Arial, sans-serif; margin: 20px; }}
@@ -225,7 +226,11 @@ def export_diagnostics(
                 """
 
                 html_path = output_path.with_suffix(".diagnostics.html")
-                html_path.write_text(html_content)
+                # Explicit encoding: the report contains non-ASCII (κ, ≥, –),
+                # and write_text's platform default is cp1252 on Windows —
+                # UnicodeEncodeError on the DEFAULT format set (found by the
+                # module's first direct tests, TD-13).
+                html_path.write_text(html_content, encoding="utf-8")
                 outputs["html"] = html_path
 
             plt.close(fig)
