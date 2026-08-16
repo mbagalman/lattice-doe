@@ -1314,6 +1314,14 @@ print("warnings :", result["report"]["warnings"])
 
 ---
 
+## Contributing
+
+Bug reports, feature requests, and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, the
+CI-enforced quality gates, and what a good PR looks like here.
+
+---
+
 ## License
 
 MIT
