@@ -31,7 +31,7 @@ Notes:
 from __future__ import annotations
 
 import warnings
-from typing import Dict, List, Literal, NamedTuple, Optional
+from typing import Any, Dict, List, Literal, NamedTuple, Optional
 import numpy as np
 
 # Runtime import (not TYPE_CHECKING): typing.get_type_hints() on the public
@@ -185,6 +185,23 @@ def _r2_df_num(X: np.ndarray) -> int:
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
+def _require_finite_contrast(L: Any, delta: Any, **scalars: Any) -> None:
+    """Reject non-finite contrast inputs at the computation boundary.
+
+    The config classes validate at construction (RV-9), but the public
+    power functions accept raw arrays - a NaN delta otherwise flows into
+    a NaN noncentrality that ``max(0.0, lam)`` silently clips to zero
+    (RV-15: alpha-level power reported for a zero effect).
+    """
+    if not np.all(np.isfinite(np.asarray(L, dtype=float))):
+        raise ValueError("L contains non-finite values (NaN or inf).")
+    if not np.all(np.isfinite(np.asarray(delta, dtype=float))):
+        raise ValueError("delta contains non-finite values (NaN or inf).")
+    for name, value in scalars.items():
+        if not np.all(np.isfinite(np.asarray(value, dtype=float))):
+            raise ValueError(f"{name} contains non-finite values (NaN or inf).")
+
+
 def contrast_power(
     L: np.ndarray,
     delta: np.ndarray,
@@ -223,6 +240,7 @@ def contrast_power(
         - lam (float): Noncentrality parameter λ.
     """
     _require_scipy()
+    _require_finite_contrast(L, delta, sigma=sigma)
 
     # --- Parameter Validation ---
     if not sigma > 0:
@@ -596,6 +614,7 @@ def contrast_power_sp(
         stratum-spanning fallback), lam : the corresponding λ.
     """
     _require_scipy()
+    _require_finite_contrast(L, delta, sigma_sp=sigma_sp, eta=eta)
 
     if not sigma_sp > 0:
         raise ValueError(f"sigma_sp must be positive; got {sigma_sp}.")
@@ -1152,6 +1171,7 @@ def hotelling_t2_power(
         If df2 ≤ 0 (n too small for k responses).
     """
     _require_scipy()
+    _require_finite_contrast(L, Delta, sigma_joint=sigma_joint)
 
     L = np.asarray(L, dtype=float)
     Delta = np.asarray(Delta, dtype=float)

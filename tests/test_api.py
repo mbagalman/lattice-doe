@@ -4590,3 +4590,44 @@ class TestGLMMatplotlibPlotLabels:
             assert any("Wald" in t for t in titles), titles
         finally:
             pc.plt.close(res["figure"])
+
+
+class TestGLMInCurveAnnotations:
+    """RV-18 regression: the canonical curve functions implement GLM plotting
+    but their power_cfg unions excluded PowerGLMContrastConfig, so valid GLM
+    calls failed static type checking."""
+
+    def test_glm_in_power_cfg_unions(self):
+        import typing
+
+        from lattice_doe import power_curves as pc
+
+        # power_surface_2d is deliberately NOT in this list: it has no GLM
+        # sweep axes and rejects GLM configs explicitly (RV-19).
+        for fn in (pc.power_curve_by_n, pc.power_curve_by_effect):
+            hints = typing.get_type_hints(fn)
+            args = typing.get_args(hints["power_cfg"])
+            assert PowerGLMContrastConfig in args, fn.__name__
+        surface_args = typing.get_args(typing.get_type_hints(pc.power_surface_2d)["power_cfg"])
+        assert PowerGLMContrastConfig not in surface_args
+
+    def test_surface_rejects_glm_with_remedy(self):
+        glm = PowerGLMContrastConfig(
+            alpha=0.05,
+            power=0.8,
+            L=[[0.0, 1.0, 0.0]],
+            delta=[0.5],
+            family="binomial",
+            baseline=0.2,
+        )
+        with pytest.raises(ValueError, match="power_curve_by_baseline"):
+            power_surface_2d(
+                FORMULA,
+                FACTORS,
+                glm,
+                param1="effect",
+                param1_range=(0.5, 2.0),
+                param2="alpha",
+                param2_range=(0.01, 0.10),
+                n=12,
+            )

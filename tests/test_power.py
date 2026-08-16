@@ -1,18 +1,30 @@
 # tests/test_power.py
 """Unit tests for power.py — contrast_power and global_r2_power."""
+
 import numpy as np
 import pytest
 
-from lattice_doe.power import contrast_power, global_r2_power, eval_response_power, combine_powers, hotelling_t2_power, glm_contrast_power
-from lattice_doe.config import (
-    PowerContrastConfig, PowerR2Config, ResponseSpec, SplitPlotOptions,
-    PowerGLMContrastConfig, glm_fisher_weight,
+from lattice_doe.power import (
+    contrast_power,
+    global_r2_power,
+    eval_response_power,
+    combine_powers,
+    hotelling_t2_power,
+    glm_contrast_power,
 )
-
+from lattice_doe.config import (
+    PowerContrastConfig,
+    PowerR2Config,
+    ResponseSpec,
+    SplitPlotOptions,
+    PowerGLMContrastConfig,
+    glm_fisher_weight,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _full_rank_X(n: int, p: int, seed: int = 0) -> np.ndarray:
     """Return a full-rank (n x p) design matrix (intercept + random predictors)."""
@@ -25,6 +37,7 @@ def _full_rank_X(n: int, p: int, seed: int = 0) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # contrast_power
 # ---------------------------------------------------------------------------
+
 
 class TestContrastPower:
     def test_returns_named_tuple(self):
@@ -47,20 +60,14 @@ class TestContrastPower:
         """More observations → more power (all else fixed)."""
         L = np.array([[0, 1, 0]])
         delta = np.array([0.5])
-        powers = [
-            contrast_power(L, delta, _full_rank_X(n, 3)).power
-            for n in [10, 40, 150]
-        ]
+        powers = [contrast_power(L, delta, _full_rank_X(n, 3)).power for n in [10, 40, 150]]
         assert powers[0] < powers[1] < powers[2]
 
     def test_power_increases_with_delta(self):
         """Larger effect size → more power."""
         X = _full_rank_X(40, 3)
         L = np.array([[0, 1, 0]])
-        powers = [
-            contrast_power(L, np.array([d]), X).power
-            for d in [0.2, 0.6, 1.5]
-        ]
+        powers = [contrast_power(L, np.array([d]), X).power for d in [0.2, 0.6, 1.5]]
         assert powers[0] < powers[1] < powers[2]
 
     def test_power_decreases_with_sigma(self):
@@ -68,10 +75,7 @@ class TestContrastPower:
         X = _full_rank_X(40, 3)
         L = np.array([[0, 1, 0]])
         delta = np.array([1.0])
-        powers = [
-            contrast_power(L, delta, X, sigma=s).power
-            for s in [0.5, 1.0, 2.0]
-        ]
+        powers = [contrast_power(L, delta, X, sigma=s).power for s in [0.5, 1.0, 2.0]]
         assert powers[0] > powers[1] > powers[2]
 
     def test_1d_L_accepted(self):
@@ -116,6 +120,7 @@ class TestContrastPower:
 # global_r2_power
 # ---------------------------------------------------------------------------
 
+
 class TestGlobalR2Power:
     def test_returns_named_tuple(self):
         X = _full_rank_X(30, 3)
@@ -129,18 +134,12 @@ class TestGlobalR2Power:
         assert 0.0 <= result.power <= 1.0
 
     def test_power_increases_with_n(self):
-        powers = [
-            global_r2_power(0.1, _full_rank_X(n, 3), alpha=0.05).power
-            for n in [10, 50, 200]
-        ]
+        powers = [global_r2_power(0.1, _full_rank_X(n, 3), alpha=0.05).power for n in [10, 50, 200]]
         assert powers[0] < powers[1] < powers[2]
 
     def test_power_increases_with_r2(self):
         X = _full_rank_X(50, 3)
-        powers = [
-            global_r2_power(r2, X, alpha=0.05).power
-            for r2 in [0.05, 0.20, 0.50]
-        ]
+        powers = [global_r2_power(r2, X, alpha=0.05).power for r2 in [0.05, 0.20, 0.50]]
         assert powers[0] < powers[1] < powers[2]
 
     def test_n_minus_p_lambda_formula(self):
@@ -178,16 +177,17 @@ class TestGlobalR2Power:
         and confirming it matches global_r2_power's output.
         """
         from scipy.stats import ncf, f as scipy_f
+
         n, p = 30, 3
-        X = _full_rank_X(n, p)   # col 0 = all-ones intercept; rank = p
+        X = _full_rank_X(n, p)  # col 0 = all-ones intercept; rank = p
         r2, alpha = 0.2, 0.05
         f2 = r2 / (1.0 - r2)
 
         result = global_r2_power(r2, X, alpha=alpha, lambda_mode="n")
 
         # Expected: df1 = p-1 (slopes only), df2 = n-p, lam = f2*n
-        df1_expected = p - 1          # 2
-        df2_expected = n - p          # 27
+        df1_expected = p - 1  # 2
+        df2_expected = n - p  # 27
         lam_expected = f2 * n
         fcrit = scipy_f.isf(alpha, df1_expected, df2_expected)
         power_expected = float(1.0 - ncf.cdf(fcrit, df1_expected, df2_expected, lam_expected))
@@ -204,6 +204,7 @@ class TestGlobalR2Power:
 # ---------------------------------------------------------------------------
 # eval_response_power
 # ---------------------------------------------------------------------------
+
 
 def _make_X(n=30, p=3, seed=7):
     rng = np.random.default_rng(seed)
@@ -292,6 +293,7 @@ class TestEvalResponsePower:
         rs = _r2_rs()
         cfg = rs.power_cfg
         from lattice_doe.power import global_r2_power
+
         expected = global_r2_power(cfg.r2_target, X, cfg.alpha, lambda_mode=cfg.lambda_mode)
         result = eval_response_power(rs, X, ["Intercept", "A", "B"])
         assert abs(result["power"] - expected.power) < 1e-12
@@ -317,18 +319,23 @@ class TestEvalResponsePower:
         sp_opts = SplitPlotOptions(htc_factors=["A"], n_whole_plots=5)
         with pytest.raises(ValueError, match="Z"):
             eval_response_power(
-                _contrast_rs(), X, ["Intercept", "A", "B"],
-                split_plot_opts=sp_opts, Z=None,
+                _contrast_rs(),
+                X,
+                ["Intercept", "A", "B"],
+                split_plot_opts=sp_opts,
+                Z=None,
             )
 
     def test_exported_from_top_level(self):
         import lattice_doe
+
         assert hasattr(lattice_doe, "eval_response_power")
 
 
 # ---------------------------------------------------------------------------
 # combine_powers
 # ---------------------------------------------------------------------------
+
 
 class TestCombinePowers:
     def test_min_returns_minimum(self):
@@ -394,6 +401,7 @@ class TestCombinePowers:
 # TestHotellingT2Power  (MR-6)
 # ---------------------------------------------------------------------------
 
+
 def _ht2_X(n: int = 30, p: int = 3, seed: int = 42) -> np.ndarray:
     """Small full-rank design matrix for Hotelling T² tests."""
     rng = np.random.default_rng(seed)
@@ -433,7 +441,7 @@ class TestHotellingT2Power:
         cp = contrast_power(L, delta, X, sigma=sigma, alpha=0.05)
         # hotelling_t2_power with k=1, sigma_joint=[[sigma²]]
         Delta = delta.reshape(-1, 1)
-        ht2 = hotelling_t2_power(L, Delta, X, np.array([[sigma ** 2]]))
+        ht2 = hotelling_t2_power(L, Delta, X, np.array([[sigma**2]]))
         assert ht2.power == pytest.approx(cp.power, abs=1e-6)
 
     def test_k1_sigma_not_1_matches_contrast_power(self):
@@ -444,7 +452,7 @@ class TestHotellingT2Power:
         sigma = 1.5
         cp = contrast_power(L, delta, X, sigma=sigma, alpha=0.05)
         Delta = delta.reshape(-1, 1)
-        ht2 = hotelling_t2_power(L, Delta, X, np.array([[sigma ** 2]]))
+        ht2 = hotelling_t2_power(L, Delta, X, np.array([[sigma**2]]))
         assert ht2.power == pytest.approx(cp.power, abs=1e-6)
 
     def test_identity_sigma_k2_geq_individual_min(self):
@@ -468,7 +476,9 @@ class TestHotellingT2Power:
     def test_df1_equals_q_times_k(self):
         X = _ht2_X(n=50, p=3)
         L = np.array([[0, 1, 0], [0, 0, 1]])  # q=2
-        Delta = np.column_stack([np.array([1.0, 0.8]), np.array([1.0, 0.8]), np.array([1.0, 0.8])])  # k=3
+        Delta = np.column_stack(
+            [np.array([1.0, 0.8]), np.array([1.0, 0.8]), np.array([1.0, 0.8])]
+        )  # k=3
         result = hotelling_t2_power(L, Delta, X, np.eye(3))
         assert result.df1 == 2 * 3  # q * k
 
@@ -517,6 +527,7 @@ class TestHotellingT2Power:
 
     def test_exported_from_top_level(self):
         import lattice_doe
+
         assert hasattr(lattice_doe, "hotelling_t2_power")
 
 
@@ -528,35 +539,44 @@ class TestHotellingT2Power:
 class TestMR10CombinePowersProperties:
     """MR-10: parametrized properties of combine_powers."""
 
-    @pytest.mark.parametrize("powers,weights", [
-        ([0.8, 0.9], [1.0, 1.0]),
-        ([0.5, 0.7, 0.6], [1.0, 2.0, 1.0]),
-        ([0.3, 0.95], [3.0, 1.0]),
-        ([0.85, 0.85], None),
-        ([0.1, 0.99, 0.5], [1.0, 1.0, 1.0]),
-        ([0.8, 0.8, 0.8], [2.0, 1.0, 3.0]),
-    ])
+    @pytest.mark.parametrize(
+        "powers,weights",
+        [
+            ([0.8, 0.9], [1.0, 1.0]),
+            ([0.5, 0.7, 0.6], [1.0, 2.0, 1.0]),
+            ([0.3, 0.95], [3.0, 1.0]),
+            ([0.85, 0.85], None),
+            ([0.1, 0.99, 0.5], [1.0, 1.0, 1.0]),
+            ([0.8, 0.8, 0.8], [2.0, 1.0, 3.0]),
+        ],
+    )
     def test_weighted_mean_between_min_and_max(self, powers, weights):
         """min(powers) <= weighted_mean <= max(powers) for any input."""
         result = combine_powers(powers, weights, "weighted_mean")
         assert min(powers) <= result <= max(powers) + 1e-12
 
-    @pytest.mark.parametrize("powers,weights", [
-        ([0.8, 0.9], [1.0, 2.0]),
-        ([0.6, 0.4, 0.7], [2.0, 1.0, 3.0]),
-        ([0.5, 0.5], [10.0, 10.0]),
-    ])
+    @pytest.mark.parametrize(
+        "powers,weights",
+        [
+            ([0.8, 0.9], [1.0, 2.0]),
+            ([0.6, 0.4, 0.7], [2.0, 1.0, 3.0]),
+            ([0.5, 0.5], [10.0, 10.0]),
+        ],
+    )
     def test_product_leq_weighted_mean(self, powers, weights):
         """product rule <= weighted_mean for powers in (0,1)."""
         r_prod = combine_powers(powers, weights, "product")
         r_wm = combine_powers(powers, weights, "weighted_mean")
         assert r_prod <= r_wm + 1e-12
 
-    @pytest.mark.parametrize("powers", [
-        [0.8, 0.9],
-        [0.5, 0.7, 0.6],
-        [0.3, 0.95],
-    ])
+    @pytest.mark.parametrize(
+        "powers",
+        [
+            [0.8, 0.9],
+            [0.5, 0.7, 0.6],
+            [0.3, 0.95],
+        ],
+    )
     def test_min_leq_weighted_mean_leq_max(self, powers):
         """min <= weighted_mean <= max for equal weights."""
         r = combine_powers(powers, None, "weighted_mean")
@@ -663,6 +683,7 @@ class TestMR10HotellingT2Properties:
 # GLM contrast power (GL-2)
 # ---------------------------------------------------------------------------
 
+
 def _glm_X(n: int = 40, p: int = 3, seed: int = 0) -> np.ndarray:
     """Full-rank design matrix for GLM tests."""
     rng = np.random.default_rng(seed)
@@ -727,8 +748,9 @@ class TestGLMContrastPower:
         L_row = cfg.L
         powers = [
             glm_contrast_power(
-                PowerGLMContrastConfig(L=L_row, delta=np.array([0.4]), baseline=0.5,
-                                       family="binomial"),
+                PowerGLMContrastConfig(
+                    L=L_row, delta=np.array([0.4]), baseline=0.5, family="binomial"
+                ),
                 _glm_X(n=n),
             ).power
             for n in [10, 40, 120]
@@ -738,9 +760,12 @@ class TestGLMContrastPower:
     def test_power_increases_with_n_poisson(self):
         powers = [
             glm_contrast_power(
-                PowerGLMContrastConfig(L=np.array([[0.0, 1.0, 0.0]]),
-                                       delta=np.array([0.2]), baseline=1.0,
-                                       family="poisson"),
+                PowerGLMContrastConfig(
+                    L=np.array([[0.0, 1.0, 0.0]]),
+                    delta=np.array([0.2]),
+                    baseline=1.0,
+                    family="poisson",
+                ),
                 _glm_X(n=n),
             ).power
             for n in [10, 40, 120]
@@ -754,8 +779,7 @@ class TestGLMContrastPower:
         L = np.array([[0.0, 1.0, 0.0]])
         powers = [
             glm_contrast_power(
-                PowerGLMContrastConfig(L=L, delta=np.array([d]), baseline=0.5,
-                                       family="binomial"),
+                PowerGLMContrastConfig(L=L, delta=np.array([d]), baseline=0.5, family="binomial"),
                 X,
             ).power
             for d in [0.1, 0.5, 1.5]
@@ -767,8 +791,7 @@ class TestGLMContrastPower:
         L = np.array([[0.0, 1.0, 0.0]])
         powers = [
             glm_contrast_power(
-                PowerGLMContrastConfig(L=L, delta=np.array([d]), baseline=2.0,
-                                       family="poisson"),
+                PowerGLMContrastConfig(L=L, delta=np.array([d]), baseline=2.0, family="poisson"),
                 X,
             ).power
             for d in [0.1, 0.5, 2.0]
@@ -910,6 +933,7 @@ class TestGLMContrastPower:
 # SR-8: the X'X ridge must be scale-relative, not absolute
 # ---------------------------------------------------------------------------
 
+
 class TestSR8ScaleInvariantJitter:
     """SR-8 regression: an absolute ridge (jitter * I) dominated columns in
     small physical units and silently inflated the noncentrality parameter
@@ -927,6 +951,7 @@ class TestSR8ScaleInvariantJitter:
     @pytest.mark.parametrize("scale", [1e-3, 1e-5, 1e-8, 1e3, 1e6])
     def test_contrast_power_unit_invariant(self, scale):
         from lattice_doe.power import contrast_power
+
         X, L, delta = self._design()
         base = contrast_power(L, delta, X, sigma=1.0, alpha=0.05)
         Xs = X.copy()
@@ -939,27 +964,26 @@ class TestSR8ScaleInvariantJitter:
     def test_contrast_power_sp_unit_invariant(self):
         from lattice_doe.power import contrast_power_sp
         from lattice_doe.split_plot import build_whole_plot_indicator
+
         X, L, delta = self._design()
         Z = build_whole_plot_indicator(12, 4, 3)
         base = contrast_power_sp(L, delta, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05)
         Xs = X.copy()
         Xs[:, 1] *= 1e-5
-        res = contrast_power_sp(L, delta / 1e-5, Xs, Z, sigma_sp=1.0, eta=1.0,
-                                alpha=0.05)
+        res = contrast_power_sp(L, delta / 1e-5, Xs, Z, sigma_sp=1.0, eta=1.0, alpha=0.05)
         assert res.lam == pytest.approx(base.lam, rel=1e-6)
         assert res.power == pytest.approx(base.power, abs=1e-9)
 
     def test_glm_contrast_power_unit_invariant(self):
         from lattice_doe.power import glm_contrast_power
         from lattice_doe.config import PowerGLMContrastConfig
+
         X, L, delta = self._design()
-        cfg = PowerGLMContrastConfig(L=L, delta=delta, baseline=0.3,
-                                     family="binomial")
+        cfg = PowerGLMContrastConfig(L=L, delta=delta, baseline=0.3, family="binomial")
         base = glm_contrast_power(cfg, X)
         Xs = X.copy()
         Xs[:, 1] *= 1e-5
-        cfg_s = PowerGLMContrastConfig(L=L, delta=delta / 1e-5, baseline=0.3,
-                                       family="binomial")
+        cfg_s = PowerGLMContrastConfig(L=L, delta=delta / 1e-5, baseline=0.3, family="binomial")
         res = glm_contrast_power(cfg_s, Xs)
         assert res.power == pytest.approx(base.power, abs=1e-9)
 
@@ -967,6 +991,7 @@ class TestSR8ScaleInvariantJitter:
         """At ordinary scales the relative ridge is as negligible as the old
         absolute one: lambda matches the ridgeless computation closely."""
         from lattice_doe.power import contrast_power
+
         X, L, delta = self._design()
         res = contrast_power(L, delta, X, sigma=1.0, alpha=0.05)
         XtX_inv = np.linalg.inv(X.T @ X)
@@ -978,6 +1003,7 @@ class TestSR8ScaleInvariantJitter:
 # SR-10: implicit intercepts must be detected for the global R2 numerator df
 # ---------------------------------------------------------------------------
 
+
 class TestSR10ImplicitIntercept:
     """SR-10 regression: _r2_df_num scanned for a literal all-ones column, so
     cell-means coding (0 + C(group)) got df1 = k instead of k - 1 -- a 7.5 pp
@@ -988,13 +1014,12 @@ class TestSR10ImplicitIntercept:
         g = np.repeat(np.arange(k), n // k)
         X_cm = np.zeros((n, k))
         X_cm[np.arange(n), g] = 1.0
-        X_int = np.column_stack(
-            [np.ones(n)] + [(g == j).astype(float) for j in range(1, k)]
-        )
+        X_int = np.column_stack([np.ones(n)] + [(g == j).astype(float) for j in range(1, k)])
         return X_cm, X_int
 
     def test_cell_means_df_matches_intercept_coding(self):
         from lattice_doe.power import _r2_df_num
+
         X_cm, X_int = self._group_designs()
         assert _r2_df_num(X_cm) == _r2_df_num(X_int) == 2
 
@@ -1009,6 +1034,7 @@ class TestSR10ImplicitIntercept:
 
     def test_constant_non_unit_column_detected(self):
         from lattice_doe.power import _r2_df_num
+
         _, X_int = self._group_designs()
         X_c2 = X_int.copy()
         X_c2[:, 0] = 2.0  # constant column that is not all-ones
@@ -1017,14 +1043,14 @@ class TestSR10ImplicitIntercept:
     def test_true_no_intercept_model_unchanged(self):
         """A genuine through-the-origin model keeps df1 = rank(X)."""
         from lattice_doe.power import _r2_df_num
+
         rng = np.random.default_rng(3)
-        X = np.column_stack(
-            [rng.uniform(0.5, 1.5, 24), rng.uniform(-1.0, -0.2, 24)]
-        )
+        X = np.column_stack([rng.uniform(0.5, 1.5, 24), rng.uniform(-1.0, -0.2, 24)])
         assert _r2_df_num(X) == 2
 
     def test_explicit_intercept_unchanged(self):
         from lattice_doe.power import _r2_df_num
+
         _, X_int = self._group_designs()
         assert _r2_df_num(X_int) == 2
 
@@ -1032,6 +1058,7 @@ class TestSR10ImplicitIntercept:
 # ---------------------------------------------------------------------------
 # SR-9: infeasible hypotheses (rank-deficient L, inconsistent delta) must raise
 # ---------------------------------------------------------------------------
+
 
 class TestSR9DeltaConsistency:
     """SR-9 regression: with linearly dependent contrast rows, delta must
@@ -1065,28 +1092,30 @@ class TestSR9DeltaConsistency:
     def test_glm_contrast_power_inconsistent_delta_raises(self):
         from lattice_doe.power import glm_contrast_power
         from lattice_doe.config import PowerGLMContrastConfig
+
         X, _, L2 = self._fixture()
-        cfg = PowerGLMContrastConfig(L=L2, delta=np.array([0.9, -0.9]),
-                                     baseline=0.3, family="binomial")
+        cfg = PowerGLMContrastConfig(
+            L=L2, delta=np.array([0.9, -0.9]), baseline=0.3, family="binomial"
+        )
         with pytest.raises(ValueError, match="inconsistent with the linear"):
             glm_contrast_power(cfg, X)
 
     def test_contrast_power_sp_inconsistent_delta_raises(self):
         from lattice_doe.power import contrast_power_sp
         from lattice_doe.split_plot import build_whole_plot_indicator
+
         X, _, L2 = self._fixture()
         Z = build_whole_plot_indicator(16, 4, 4)
         with pytest.raises(ValueError, match="inconsistent with the linear"):
-            contrast_power_sp(L2, np.array([1.2, -1.2]), X, Z,
-                              sigma_sp=1.0, eta=1.0, alpha=0.05)
+            contrast_power_sp(L2, np.array([1.2, -1.2]), X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05)
 
     def test_hotelling_inconsistent_delta_raises(self):
         from lattice_doe.power import hotelling_t2_power
+
         X, _, L2 = self._fixture()
         Sig = np.array([[1.0, 0.3], [0.3, 2.0]])
         with pytest.raises(ValueError, match="inconsistent with the linear"):
-            hotelling_t2_power(L2, np.array([[1.0, 0.5], [-1.0, 0.5]]), X,
-                               Sig, alpha=0.05)
+            hotelling_t2_power(L2, np.array([[1.0, 0.5], [-1.0, 0.5]]), X, Sig, alpha=0.05)
 
     def test_full_rank_L_unaffected(self):
         X, _, _ = self._fixture()
@@ -1098,6 +1127,7 @@ class TestSR9DeltaConsistency:
 # ---------------------------------------------------------------------------
 # SR-20 (a, b): Hotelling T² df1 and approximation label
 # ---------------------------------------------------------------------------
+
 
 class TestSR20HotellingDf:
     """SR-20a regression: df1 used L's row count, so duplicated contrast rows
@@ -1115,16 +1145,17 @@ class TestSR20HotellingDf:
 
     def test_duplicated_rows_use_rank_based_df1(self):
         from lattice_doe.power import hotelling_t2_power
+
         X, l, Sig = self._fixture()
         L2 = np.vstack([l, l])
         single = hotelling_t2_power(l, np.array([[1.0, 0.5]]), X, Sig, 0.05)
-        dup = hotelling_t2_power(L2, np.array([[1.0, 0.5], [1.0, 0.5]]),
-                                 X, Sig, 0.05)
+        dup = hotelling_t2_power(L2, np.array([[1.0, 0.5], [1.0, 0.5]]), X, Sig, 0.05)
         assert dup.df1 == single.df1 == 2  # rank(L)*k = 1*2
         assert dup.power == pytest.approx(single.power, abs=1e-10)
 
     def test_k1_reduction_still_exact(self):
         from lattice_doe.power import hotelling_t2_power
+
         X, l, _ = self._fixture()
         ht = hotelling_t2_power(l, np.array([[1.2]]), X, np.array([[1.0]]), 0.05)
         cp = contrast_power(l, np.array([1.2]), X, sigma=1.0, alpha=0.05)
@@ -1134,21 +1165,22 @@ class TestSR20HotellingDf:
         """Pin the MC-calibrated df2 = n - rank(X) - k + 1 so an accidental
         swap to the (anti-conservative) HL one-moment form fails loudly."""
         from lattice_doe.power import hotelling_t2_power
+
         rng = np.random.default_rng(1)
         n = 16
-        X = np.column_stack([np.ones(n), rng.uniform(-1, 1, n),
-                             rng.uniform(-1, 1, n)])
+        X = np.column_stack([np.ones(n), rng.uniform(-1, 1, n), rng.uniform(-1, 1, n)])
         L = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
         Delta = np.array([[0.8, 0.5], [0.6, 0.7]])
         Sig = np.array([[1.0, 0.5], [0.5, 2.0]])
         res = hotelling_t2_power(L, Delta, X, Sig, 0.05)
-        assert res.df1 == 4          # rank(L)*k = 2*2
+        assert res.df1 == 4  # rank(L)*k = 2*2
         assert res.df2 == 16 - 3 - 2 + 1
 
 
 # ---------------------------------------------------------------------------
 # SR-22/23/24: P3 cleanups — df metadata, annotations, validation hygiene
 # ---------------------------------------------------------------------------
+
 
 class TestSR24CombinePowersValidation:
     """SR-24a regression: weighted_mean silently zip-truncated on a
@@ -1157,18 +1189,22 @@ class TestSR24CombinePowersValidation:
 
     def test_length_mismatch_raises(self):
         from lattice_doe.power import combine_powers
+
         with pytest.raises(ValueError, match="length"):
             combine_powers([0.9, 0.5, 0.2], [1.0, 1.0], "weighted_mean")
 
     def test_zero_sum_weights_raise(self):
         from lattice_doe.power import combine_powers
+
         with pytest.raises(ValueError, match="positive sum"):
             combine_powers([0.9, 0.5], [0.0, 0.0], "weighted_mean")
 
     def test_valid_weighted_mean_unchanged(self):
         from lattice_doe.power import combine_powers
-        assert combine_powers([0.9, 0.5], [1.0, 3.0], "weighted_mean") == \
-            pytest.approx((0.9 + 1.5) / 4.0)
+
+        assert combine_powers([0.9, 0.5], [1.0, 3.0], "weighted_mean") == pytest.approx(
+            (0.9 + 1.5) / 4.0
+        )
 
 
 class TestSR24ZeroDeltaComponents:
@@ -1178,26 +1214,28 @@ class TestSR24ZeroDeltaComponents:
 
     def test_zero_component_accepted_and_powers(self):
         from lattice_doe.config import PowerContrastConfig
+
         cfg = PowerContrastConfig(
             L=np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
             delta=np.array([1.0, 0.0]),
         )
         rng = np.random.default_rng(0)
-        X = np.column_stack([np.ones(20), rng.uniform(-1, 1, 20),
-                             rng.uniform(-1, 1, 20)])
+        X = np.column_stack([np.ones(20), rng.uniform(-1, 1, 20), rng.uniform(-1, 1, 20)])
         res = contrast_power(cfg.L, cfg.delta, X, sigma=1.0, alpha=0.05)
         assert res.power > 0.10  # genuinely nonzero joint power
 
     def test_all_zero_delta_still_rejected(self):
         from lattice_doe.config import PowerContrastConfig
+
         with pytest.raises(ValueError, match="entirely zero"):
-            PowerContrastConfig(L=np.array([[0.0, 1.0], [1.0, 0.0]]),
-                                delta=np.array([0.0, 0.0]))
+            PowerContrastConfig(L=np.array([[0.0, 1.0], [1.0, 0.0]]), delta=np.array([0.0, 0.0]))
 
     def test_glm_zero_component_accepted(self):
         from lattice_doe.config import PowerGLMContrastConfig
-        PowerGLMContrastConfig(L=np.array([[0.0, 1.0], [1.0, 0.0]]),
-                               delta=np.array([0.9, 0.0]), baseline=0.3)
+
+        PowerGLMContrastConfig(
+            L=np.array([[0.0, 1.0], [1.0, 0.0]]), delta=np.array([0.9, 0.0]), baseline=0.3
+        )
 
 
 class TestSR22SplitPlotReportedDf:
@@ -1208,20 +1246,24 @@ class TestSR22SplitPlotReportedDf:
     def test_eval_response_power_reports_stratum_df(self):
         from lattice_doe.power import eval_response_power
         from lattice_doe.split_plot import build_whole_plot_indicator
-        from lattice_doe.config import (PowerContrastConfig, ResponseSpec,
-                                        SplitPlotOptions)
+        from lattice_doe.config import PowerContrastConfig, ResponseSpec, SplitPlotOptions
+
         n_wp, s = 4, 3
         n = n_wp * s
         A = np.repeat([-1.0, -1.0, 1.0, 1.0], s)
         B = np.tile([-1.0, 0.0, 1.0], n_wp)
         X = np.column_stack([np.ones(n), A, B])
         Z = build_whole_plot_indicator(n, n_wp, s)
-        spec = ResponseSpec(name="y", power_cfg=PowerContrastConfig(
-            L=np.array([[0.0, 0.0, 1.0]]), delta=np.array([1.0]), sigma=1.0))
+        spec = ResponseSpec(
+            name="y",
+            power_cfg=PowerContrastConfig(
+                L=np.array([[0.0, 0.0, 1.0]]), delta=np.array([1.0]), sigma=1.0
+            ),
+        )
         sp = SplitPlotOptions(htc_factors=["A"], n_whole_plots=n_wp, eta=1.0)
-        out = eval_response_power(spec, X, ["Intercept", "A", "B"],
-                                  split_plot_opts=sp, Z=Z,
-                                  all_factor_names=["A", "B"])
+        out = eval_response_power(
+            spec, X, ["Intercept", "A", "B"], split_plot_opts=sp, Z=Z, all_factor_names=["A", "B"]
+        )
         # SP stratum df = n − n_wp − (rank X − rank X_wp) = 12 − 4 − 1 = 7,
         # not the pooled OLS df2 = n − rank(X) = 9.
         assert out["df2"] == 7
@@ -1230,6 +1272,7 @@ class TestSR22SplitPlotReportedDf:
 # ---------------------------------------------------------------------------
 # SR-27: whole-plot-only models must use the between-plot stratum
 # ---------------------------------------------------------------------------
+
 
 class TestSR27WholePlotOnlyR2:
     """SR-27 regression (review of SR-11): global_r2_power_sp always used the
@@ -1241,6 +1284,7 @@ class TestSR27WholePlotOnlyR2:
 
     def _wp_only_design(self, n_wp=4, m=10):
         from lattice_doe.split_plot import build_whole_plot_indicator
+
         A = np.repeat(np.array([-1.0, -0.33, 0.33, 1.0])[:n_wp], m)
         X = np.column_stack([np.ones(n_wp * m), A])
         Z = build_whole_plot_indicator(n_wp * m, n_wp, m)
@@ -1249,9 +1293,11 @@ class TestSR27WholePlotOnlyR2:
     def test_wp_only_model_uses_plot_mean_analysis(self):
         from lattice_doe.power import global_r2_power_sp
         from scipy.stats import f as f_dist, ncf as ncf_dist
+
         X, Z = self._wp_only_design()
-        res = global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05,
-                                 htc_factor_cols=[0, 1])
+        res = global_r2_power_sp(
+            0.3, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05, htc_factor_cols=[0, 1]
+        )
         # Hand-computed plot-mean formula (MC truth 0.1817 within noise)
         f2 = 0.3 / 0.7
         lam = f2 * 2.0 * 4 * 10 / 11
@@ -1261,14 +1307,16 @@ class TestSR27WholePlotOnlyR2:
 
     def test_wp_only_df_helper(self):
         from lattice_doe.split_plot import split_plot_r2_df_denom
+
         X, Z = self._wp_only_design()
-        assert split_plot_r2_df_denom(X, Z, [0, 1]) == 2   # n_wp - rank(X_wp)
+        assert split_plot_r2_df_denom(X, Z, [0, 1]) == 2  # n_wp - rank(X_wp)
         assert split_plot_r2_df_denom(X, Z, None) == 36 - 1  # fallback: SP path
 
     def test_mixed_model_keeps_sp_path_and_warning(self):
         import warnings as _w
         from lattice_doe.power import global_r2_power_sp
         from lattice_doe.split_plot import build_whole_plot_indicator
+
         n_wp, m = 4, 10
         A = np.repeat([-1.0, -0.33, 0.33, 1.0], m)
         B = np.tile(np.linspace(-1, 1, m), n_wp)
@@ -1276,22 +1324,24 @@ class TestSR27WholePlotOnlyR2:
         Z = build_whole_plot_indicator(n_wp * m, n_wp, m)
         with _w.catch_warnings(record=True) as caught:
             _w.simplefilter("always")
-            res = global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0,
-                                     alpha=0.05, htc_factor_cols=[0, 1])
+            res = global_r2_power_sp(
+                0.3, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05, htc_factor_cols=[0, 1]
+            )
         assert 0.0 < res.power < 1.0
         assert any("blended" in str(c.message) for c in caught)
 
     def test_wp_saturated_raises(self):
         from lattice_doe.power import global_r2_power_sp
+
         X, Z = self._wp_only_design(n_wp=2, m=10)
         with pytest.raises(ValueError, match="Whole-plot denominator df"):
-            global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05,
-                               htc_factor_cols=[0, 1])
+            global_r2_power_sp(0.3, X, Z, sigma_sp=1.0, eta=1.0, alpha=0.05, htc_factor_cols=[0, 1])
 
 
 # ---------------------------------------------------------------------------
 # SR-32: positive determinant does not establish positive definiteness
 # ---------------------------------------------------------------------------
+
 
 class TestSR32IndefiniteSigmaJoint:
     """SR-32 regression (review round 5): the PD check used the sign of the
@@ -1309,6 +1359,7 @@ class TestSR32IndefiniteSigmaJoint:
 
     def test_hotelling_rejects_indefinite_sigma(self):
         from lattice_doe.power import hotelling_t2_power
+
         rng = np.random.default_rng(0)
         X = np.column_stack([np.ones(20), rng.uniform(-1, 1, 20)])
         L = np.array([[0.0, 1.0]])
@@ -1319,11 +1370,55 @@ class TestSR32IndefiniteSigmaJoint:
 
     def test_pd_sigma_still_accepted(self):
         from lattice_doe.power import hotelling_t2_power
+
         rng = np.random.default_rng(0)
         Q, _ = np.linalg.qr(rng.standard_normal((4, 4)))
         S = Q @ np.diag([1.0, 1.0, 3.0, 3.0]) @ Q.T
         S = 0.5 * (S + S.T)
         X = np.column_stack([np.ones(20), rng.uniform(-1, 1, 20)])
-        res = hotelling_t2_power(np.array([[0.0, 1.0]]),
-                                 rng.uniform(0.5, 1.0, (1, 4)), X, S, 0.05)
+        res = hotelling_t2_power(np.array([[0.0, 1.0]]), rng.uniform(0.5, 1.0, (1, 4)), X, S, 0.05)
         assert 0.0 < res.power < 1.0
+
+
+class TestNonFiniteComputationBoundary:
+    """RV-15 (P1) regression: the config classes validate at construction
+    (RV-9), but the public power functions accept raw arrays — a NaN delta
+    flowed into a NaN noncentrality that max(0.0, lam) silently clipped to
+    zero, reporting alpha-level power for a zero effect (reproduced:
+    power=0.05, lam=0.0)."""
+
+    def _X(self, n=12):
+        return np.column_stack([np.ones(n), np.linspace(-1, 1, n)])
+
+    def test_contrast_power_rejects_nan_delta(self):
+        with pytest.raises(ValueError, match="delta contains non-finite"):
+            contrast_power(L=[[0, 1]], delta=[float("nan")], X=self._X(), sigma=1.0)
+
+    def test_contrast_power_rejects_nan_sigma(self):
+        with pytest.raises(ValueError, match="sigma contains non-finite"):
+            contrast_power(L=[[0, 1]], delta=[1.0], X=self._X(), sigma=float("nan"))
+
+    def test_contrast_power_sp_rejects_inf_L(self):
+        from lattice_doe.power import contrast_power_sp
+
+        Z = np.repeat(np.eye(3), 4, axis=0)
+        with pytest.raises(ValueError, match="L contains non-finite"):
+            contrast_power_sp(
+                L=[[0, float("inf")]],
+                delta=[1.0],
+                X=self._X(),
+                Z=Z,
+                sigma_sp=1.0,
+                eta=1.0,
+                alpha=0.05,
+            )
+
+    def test_hotelling_rejects_nan_delta(self):
+        with pytest.raises(ValueError, match="delta contains non-finite"):
+            hotelling_t2_power(
+                L=[[0, 1]],
+                Delta=[[float("nan")]],
+                X=self._X(),
+                sigma_joint=[[1.0]],
+                alpha=0.05,
+            )

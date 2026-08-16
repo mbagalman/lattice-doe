@@ -189,6 +189,9 @@ def _build_metrics_ctx(report: dict) -> dict:
         "noncentrality_lambda": lam_str,
         "df_num": report.get("df_num", "—"),
         "df_denom": report.get("df_denom", "—"),
+        # A Wald χ² test has no denominator df — the OLS residual df the
+        # report also carries would be misleading to render (RV-17).
+        "glm_chi2": report.get("test_type") == "wald_chi2",
         "criterion": report.get("criterion", "—"),
         "elapsed_sec": elapsed_str,
         "search_strategy": report.get("search_strategy", "—"),

@@ -52,7 +52,7 @@ jobs:
       # measures slightly higher (~216) because installed-and-typed soft
       # deps (matplotlib etc.) surface extra errors.
       RUFF_BASELINE: 0
-      MYPY_BASELINE: 206
+      MYPY_BASELINE: 204
     steps:
       - uses: actions/checkout@v4
 

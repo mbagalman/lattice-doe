@@ -391,6 +391,7 @@ class TestPlotlySensitivity:
         assert result["figure"] is None
 
 
+@pytest.mark.skipif(not _PLOTLY_AVAILABLE, reason="plotly not installed")
 class TestGLMPlotlyLabels:
     """RV-10 regression: every non-OLS-contrast config fell into the R2 arm
     — the by-n builder crashed on .r2_target for GLM configs, and by-effect

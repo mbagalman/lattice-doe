@@ -541,3 +541,35 @@ class TestDiscriminatedFactorSpecsInReport:
         assert "unknown" not in html
         assert "-2.5" in html and "7.5" in html
         assert "red" in html and "green" in html
+
+
+class TestGLMDfLabel:
+    """RV-17 regression: GLM results carry an OLS residual df_denom, and the
+    report rendered 'df (num / denom)' — but a Wald chi-square test has no
+    denominator df. GLM reports must show only the chi-square df."""
+
+    def test_glm_report_shows_chi2_df_only(self, tmp_path):
+        from lattice_doe import PowerGLMContrastConfig
+
+        cfg = PowerGLMContrastConfig(
+            alpha=0.05,
+            power=0.8,
+            L=[[0.0, 1.0, 0.0]],
+            delta=[0.5],
+            family="binomial",
+            baseline=0.2,
+        )
+        result = _minimal_result()
+        result["report"]["test_type"] = "wald_chi2"
+        out = tmp_path / "glmdf.html"
+        generate_report(
+            result=result,
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=cfg,
+            output_path=out,
+            include_power_curve=False,
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "df (num / denom)" not in html
+        assert "df" in html  # the chi-square df box renders

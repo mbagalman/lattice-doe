@@ -285,14 +285,34 @@ class PowerContrastConfig:
             raise ValueError(f"alpha must be in (0, 1), but got {self.alpha}")
         if not (0 < self.power < 1):
             raise ValueError(f"power must be in (0, 1), but got {self.power}")
-        if self.sigma <= 0:
-            raise ValueError(f"sigma must be > 0, but got {self.sigma}")
-        if self.tol_power <= 0:
-            raise ValueError(f"tol_power must be > 0, but got {self.tol_power}")
-        if self.max_iter <= 0:
-            raise ValueError(f"max_iter must be > 0, but got {self.max_iter}")
-        if self.max_n <= 0:
-            raise ValueError(f"max_n must be > 0, but got {self.max_n}")
+        # NaN-safe form: `sigma <= 0` is False for NaN, letting a NaN sigma
+        # through to a silent zero-effect result (RV-15).
+        if not (np.isfinite(self.sigma) and self.sigma > 0):
+            raise ValueError(f"sigma must be a finite value > 0, but got {self.sigma}")
+        # NaN-safe form (RV-20): `x <= 0` is False for NaN, and a NaN
+        # tol_power poisons every target comparison downstream.
+        if not (np.isfinite(self.tol_power) and self.tol_power > 0):
+            raise ValueError(f"tol_power must be a finite value > 0, but got {self.tol_power}")
+        # Integer type required (RV-22): the finite/positive check
+        # accepted fractional floats (e.g. 10.5) that later reach
+        # range()/sample-size arithmetic; bool is excluded because
+        # it is an int subclass.
+        if not (
+            isinstance(self.max_iter, (int, np.integer))
+            and not isinstance(self.max_iter, bool)
+            and self.max_iter > 0
+        ):
+            raise ValueError(f"max_iter must be a positive integer, but got {self.max_iter}")
+        # Integer type required (RV-22): the finite/positive check
+        # accepted fractional floats (e.g. 10.5) that later reach
+        # range()/sample-size arithmetic; bool is excluded because
+        # it is an int subclass.
+        if not (
+            isinstance(self.max_n, (int, np.integer))
+            and not isinstance(self.max_n, bool)
+            and self.max_n > 0
+        ):
+            raise ValueError(f"max_n must be a positive integer, but got {self.max_n}")
 
         # Non-finite values must be rejected BEFORE the zero checks: NaN
         # passes np.allclose(delta, 0) and the resulting NaN noncentrality
@@ -375,12 +395,30 @@ class PowerR2Config:
             raise ValueError(f"power must be in (0, 1), but got {self.power}")
         if self.lambda_mode not in ("n", "n_minus_p"):
             raise ValueError("lambda_mode must be 'n' or 'n_minus_p'")
-        if self.tol_power <= 0:
-            raise ValueError(f"tol_power must be > 0, but got {self.tol_power}")
-        if self.max_iter <= 0:
-            raise ValueError(f"max_iter must be > 0, but got {self.max_iter}")
-        if self.max_n <= 0:
-            raise ValueError(f"max_n must be > 0, but got {self.max_n}")
+        # NaN-safe form (RV-20): `x <= 0` is False for NaN, and a NaN
+        # tol_power poisons every target comparison downstream.
+        if not (np.isfinite(self.tol_power) and self.tol_power > 0):
+            raise ValueError(f"tol_power must be a finite value > 0, but got {self.tol_power}")
+        # Integer type required (RV-22): the finite/positive check
+        # accepted fractional floats (e.g. 10.5) that later reach
+        # range()/sample-size arithmetic; bool is excluded because
+        # it is an int subclass.
+        if not (
+            isinstance(self.max_iter, (int, np.integer))
+            and not isinstance(self.max_iter, bool)
+            and self.max_iter > 0
+        ):
+            raise ValueError(f"max_iter must be a positive integer, but got {self.max_iter}")
+        # Integer type required (RV-22): the finite/positive check
+        # accepted fractional floats (e.g. 10.5) that later reach
+        # range()/sample-size arithmetic; bool is excluded because
+        # it is an int subclass.
+        if not (
+            isinstance(self.max_n, (int, np.integer))
+            and not isinstance(self.max_n, bool)
+            and self.max_n > 0
+        ):
+            raise ValueError(f"max_n must be a positive integer, but got {self.max_n}")
 
     def __str__(self) -> str:
         return (
@@ -673,8 +711,16 @@ class DesignOptions:
             raise ValueError("growth_factor must be > 1.0")
         if self.starts <= 0:
             raise ValueError("starts must be > 0")
-        if self.max_iter <= 0:
-            raise ValueError("max_iter must be > 0")
+        # Integer type required (RV-22): the finite/positive check
+        # accepted fractional floats (e.g. 10.5) that later reach
+        # range()/sample-size arithmetic; bool is excluded because
+        # it is an int subclass.
+        if not (
+            isinstance(self.max_iter, (int, np.integer))
+            and not isinstance(self.max_iter, bool)
+            and self.max_iter > 0
+        ):
+            raise ValueError("max_iter must be a positive integer")
         if self.xtx_jitter <= 0:
             raise ValueError("xtx_jitter must be > 0 for numerical stability")
         if self.parallel_seed_stride <= 0:
@@ -889,20 +935,41 @@ class PowerGLMContrastConfig:
                     stacklevel=3,
                 )
         else:  # poisson
-            if self.baseline <= 0.0:
-                raise ValueError(f"baseline must be > 0 for Poisson family, got {self.baseline}")
+            # NaN-safe form: `baseline <= 0` is False for NaN (RV-15).
+            if not (np.isfinite(self.baseline) and self.baseline > 0.0):
+                raise ValueError(
+                    f"baseline must be a finite value > 0 for Poisson family, got {self.baseline}"
+                )
 
         # --- Numeric range validation ---
         if not (0.0 < self.alpha < 1.0):
             raise ValueError(f"alpha must be in (0, 1), got {self.alpha}")
         if not (0.0 < self.power < 1.0):
             raise ValueError(f"power must be in (0, 1), got {self.power}")
-        if self.tol_power <= 0:
-            raise ValueError(f"tol_power must be > 0, got {self.tol_power}")
-        if self.max_iter <= 0:
-            raise ValueError(f"max_iter must be > 0, got {self.max_iter}")
-        if self.max_n <= 0:
-            raise ValueError(f"max_n must be > 0, got {self.max_n}")
+        # NaN-safe form (RV-20): `x <= 0` is False for NaN, and a NaN
+        # tol_power poisons every target comparison downstream.
+        if not (np.isfinite(self.tol_power) and self.tol_power > 0):
+            raise ValueError(f"tol_power must be a finite value > 0, got {self.tol_power}")
+        # Integer type required (RV-22): the finite/positive check
+        # accepted fractional floats (e.g. 10.5) that later reach
+        # range()/sample-size arithmetic; bool is excluded because
+        # it is an int subclass.
+        if not (
+            isinstance(self.max_iter, (int, np.integer))
+            and not isinstance(self.max_iter, bool)
+            and self.max_iter > 0
+        ):
+            raise ValueError(f"max_iter must be a positive integer, got {self.max_iter}")
+        # Integer type required (RV-22): the finite/positive check
+        # accepted fractional floats (e.g. 10.5) that later reach
+        # range()/sample-size arithmetic; bool is excluded because
+        # it is an int subclass.
+        if not (
+            isinstance(self.max_n, (int, np.integer))
+            and not isinstance(self.max_n, bool)
+            and self.max_n > 0
+        ):
+            raise ValueError(f"max_n must be a positive integer, got {self.max_n}")
 
         # --- Contrast content validation ---
         # Non-finite values must be rejected BEFORE the zero checks: NaN

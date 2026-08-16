@@ -55,7 +55,7 @@ except ImportError:
 def power_curve_by_n(
     formula: str,
     factors: FactorSpec,
-    power_cfg: Union[PowerContrastConfig, PowerR2Config],
+    power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     n_range: Optional[Tuple[int, int]] = None,
     n_points: int = 20,
     design_opts: Optional[DesignOptions] = None,
@@ -74,7 +74,7 @@ def power_curve_by_n(
         Patsy-style model formula.
     factors : dict
         Factor specifications.
-    power_cfg : PowerContrastConfig or PowerR2Config
+    power_cfg : PowerContrastConfig, PowerR2Config or PowerGLMContrastConfig
         Power configuration (effect size, alpha, sigma stay fixed).
     n_range : tuple of (min_n, max_n), optional
         Range of n values to evaluate. If None, automatically determined
@@ -306,7 +306,7 @@ def power_curve_by_effect(
     formula: str,
     factors: FactorSpec,
     n: int,
-    power_cfg: Union[PowerContrastConfig, PowerR2Config],
+    power_cfg: Union[PowerContrastConfig, PowerR2Config, PowerGLMContrastConfig],
     effect_range: Optional[Tuple[float, float]] = None,
     effect_points: int = 30,
     design_opts: Optional[DesignOptions] = None,
@@ -619,6 +619,15 @@ def power_surface_2d(
         raise ValueError(f"param1 and param2 must be different (both are {param1!r})")
 
     is_contrast = isinstance(power_cfg, PowerContrastConfig)
+    # GLM configs have neither a sigma axis nor an r2_target: the sweep
+    # below would crash on .r2_target (RV-19). Reject with a remedy
+    # instead of advertising support the math does not implement.
+    if isinstance(power_cfg, PowerGLMContrastConfig):
+        raise ValueError(
+            "power_surface_2d supports contrast and R² power configurations "
+            "only. For GLM designs, sweep n or effect with power_curve_by_n / "
+            "power_curve_by_effect, or the baseline with power_curve_by_baseline."
+        )
     if "sigma" in (param1, param2) and not is_contrast:
         raise ValueError(
             "'sigma' sweep is only valid for PowerContrastConfig. "

@@ -336,8 +336,13 @@
       <div class="metric-value">{{ metrics.noncentrality_lambda }}</div>
     </div>
     <div class="metric-box">
+      {% if metrics.glm_chi2 %}
+      <div class="metric-label">&chi;&sup2; df</div>
+      <div class="metric-value">{{ metrics.df_num }}</div>
+      {% else %}
       <div class="metric-label">df (num / denom)</div>
       <div class="metric-value">{{ metrics.df_num }} / {{ metrics.df_denom }}</div>
+      {% endif %}
     </div>
     <div class="metric-box">
       <div class="metric-label">Criterion</div>

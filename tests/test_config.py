@@ -1128,3 +1128,110 @@ class TestNonFiniteContrastRejected:
                 family="binomial",
                 baseline=0.2,
             )
+
+
+class TestNonFiniteScalarFieldsRejected:
+    """RV-15 regression: `x <= 0`-style checks are False for NaN, so a NaN
+    sigma (contrast) and a NaN Poisson baseline sailed through validation
+    into the same silent zero-effect path RV-9 closed for L/delta."""
+
+    def test_nan_sigma_rejected(self):
+        with pytest.raises(ValueError, match="sigma must be a finite value"):
+            PowerContrastConfig(alpha=0.05, power=0.8, L=[[0, 1]], delta=[1.0], sigma=float("nan"))
+
+    def test_poisson_nan_baseline_rejected(self):
+        with pytest.raises(ValueError, match="baseline must be a finite value"):
+            PowerGLMContrastConfig(
+                alpha=0.05,
+                power=0.8,
+                L=[[0, 1]],
+                delta=[0.5],
+                family="poisson",
+                baseline=float("nan"),
+            )
+
+
+class TestNaNSafeSearchLimits:
+    """RV-20 regression: `tol_power <= 0` (and the max_iter/max_n forms) are
+    False for NaN, so a NaN tol_power passed all three config classes and
+    poisoned every downstream target comparison — a search could report
+    partial completion even after reaching its target."""
+
+    def test_tol_power_nan_rejected_all_configs(self):
+        nan = float("nan")
+        with pytest.raises(ValueError, match="tol_power must be a finite"):
+            PowerContrastConfig(
+                alpha=0.05, power=0.8, L=[[0, 1]], delta=[1.0], sigma=1.0, tol_power=nan
+            )
+        with pytest.raises(ValueError, match="tol_power must be a finite"):
+            PowerR2Config(alpha=0.05, power=0.8, r2_target=0.2, tol_power=nan)
+        with pytest.raises(ValueError, match="tol_power must be a finite"):
+            PowerGLMContrastConfig(
+                alpha=0.05,
+                power=0.8,
+                L=[[0, 1]],
+                delta=[0.5],
+                family="binomial",
+                baseline=0.2,
+                tol_power=nan,
+            )
+
+    def test_nan_search_limits_rejected(self):
+        nan = float("nan")
+        with pytest.raises(ValueError, match="max_n"):
+            PowerContrastConfig(
+                alpha=0.05, power=0.8, L=[[0, 1]], delta=[1.0], sigma=1.0, max_n=nan
+            )
+        with pytest.raises(ValueError, match="max_iter"):
+            PowerGLMContrastConfig(
+                alpha=0.05,
+                power=0.8,
+                L=[[0, 1]],
+                delta=[0.5],
+                family="binomial",
+                baseline=0.2,
+                max_iter=nan,
+            )
+        with pytest.raises(ValueError, match="max_iter"):
+            DesignOptions(max_iter=nan)
+
+
+class TestIntegerSearchLimits:
+    """RV-22 regression: the RV-20 finite/positive predicate still accepted
+    fractional floats (max_iter=1.5, max_n=10.5) for documented-integer
+    fields, which reach range()/sample-size arithmetic downstream; bool
+    passed too, being an int subclass. numpy integers stay accepted (they
+    arrive naturally from YAML/numpy pipelines)."""
+
+    @staticmethod
+    def _contrast(**kw):
+        return PowerContrastConfig(alpha=0.05, power=0.8, L=[[0, 1]], delta=[1.0], sigma=1.0, **kw)
+
+    @pytest.mark.parametrize("bad", [1.5, 10.5, True, False, float("nan")])
+    def test_fractional_and_bool_max_iter_rejected_everywhere(self, bad):
+        with pytest.raises(ValueError, match="max_iter must be a positive integer"):
+            self._contrast(max_iter=bad)
+        with pytest.raises(ValueError, match="max_iter must be a positive integer"):
+            PowerR2Config(alpha=0.05, power=0.8, r2_target=0.2, max_iter=bad)
+        with pytest.raises(ValueError, match="max_iter must be a positive integer"):
+            PowerGLMContrastConfig(
+                alpha=0.05,
+                power=0.8,
+                L=[[0, 1]],
+                delta=[0.5],
+                family="binomial",
+                baseline=0.2,
+                max_iter=bad,
+            )
+        with pytest.raises(ValueError, match="max_iter must be a positive integer"):
+            DesignOptions(max_iter=bad)
+
+    @pytest.mark.parametrize("bad", [10.5, True])
+    def test_fractional_and_bool_max_n_rejected(self, bad):
+        with pytest.raises(ValueError, match="max_n must be a positive integer"):
+            self._contrast(max_n=bad)
+
+    def test_plain_and_numpy_integers_accepted(self):
+        self._contrast(max_iter=500, max_n=100)
+        self._contrast(max_iter=np.int64(500), max_n=np.int64(100))
+        DesignOptions(max_iter=np.int64(200))
