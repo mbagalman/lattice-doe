@@ -1195,14 +1195,14 @@ class TestBlockedReplicationCeiling:
     FACTORS = {"g": [0, 1, 2]}
 
     @staticmethod
-    def _cfg(**kw):
+    def _cfg(max_n=50, **kw):
         return PowerContrastConfig(
             alpha=0.05,
             power=0.8,
             L=[[0, 1, 0], [0, 0, 1]],
             delta=[1.0, 1.0],
             sigma=1.0,
-            max_n=50,
+            max_n=max_n,
             **kw,
         )
 
@@ -1258,3 +1258,24 @@ class TestBlockedReplicationCeiling:
     def test_explicit_sizes_below_model_minimum_rejected(self):
         with pytest.raises(ValueError, match="too small to estimate"):
             self._explicit([1, 1])
+
+    def test_explicit_sizes_above_max_n_rejected_up_front(self):
+        # RV-6: pre-fix, sum(block_sizes) > max_n left the search loop
+        # unentered and raised the unrelated "power calculation failed
+        # repeatedly" RuntimeError.
+        with pytest.raises(ValueError, match="exceeds max_n"):
+            self._explicit([3, 3], max_n=5)
+
+    def test_underpowered_fixed_layout_warns_about_the_layout(self):
+        # RV-7: pre-fix, an underpowered fixed layout warned that max_n or
+        # max_iter was reached AND that the candidate pool capped the search
+        # (recommending candidate_points) — neither is the limiting factor.
+        with pytest.warns(RuntimeWarning, match="requested block sizes") as rec:
+            res = self._explicit([3, 3])
+        messages = [str(w.message) for w in rec]
+        assert not any("candidate set size" in m for m in messages)
+        assert not any("Max iterations" in m for m in messages)
+        # The report carries the same single, correctly-attributed warning.
+        report_warnings = res["report"]["warnings"]
+        assert any("requested block sizes" in m for m in report_warnings)
+        assert not any("candidate set size" in m for m in report_warnings)

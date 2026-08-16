@@ -27,19 +27,18 @@ jobs:
           cache: pip
 
       - name: Install package + extras + test deps
-        # This is the authoritative coverage run (RV-5), so the optional
-        # feature groups install too — otherwise their suites skip at import
-        # and the coverage they enforce is silently absent: [server] for the
-        # slow api_server integration tests, [report] (jinja2/pillow/kaleido)
-        # for test_report.py, [viz] (matplotlib/plotly) for the diagnostics
-        # plot and plot-backend suites, [extras] (xlsxwriter/openpyxl) for
-        # the workbook suites, [sheets]/[widgets] for their (mocked) suites.
-        # weasyprint stays out deliberately: it needs system libraries the
-        # runner lacks, and test_report's PDF test asserts the ImportError
-        # guard — which requires weasyprint to be absent.
+        # This is the authoritative coverage run (RV-5/RV-8), so every
+        # optional feature group installs — otherwise its suites skip at
+        # import and the coverage they enforce is silently absent. [all]
+        # covers cli/server/report/viz/extras/app/sheets/widgets in one
+        # self-maintaining group (RV-8 caught that the previous explicit
+        # list omitted [app], skipping the Streamlit AppTest suite).
+        # weasyprint is NOT in [all], deliberately: it needs system
+        # libraries the runner lacks, and test_report's PDF test asserts
+        # the ImportError guard — which requires weasyprint to be absent.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[cli,server,report,viz,extras,sheets,widgets]"
+          pip install -e ".[all]"
           pip install pytest pytest-cov pytest-anyio
 
       - name: Run FULL test suite (fast + slow)

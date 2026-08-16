@@ -994,6 +994,15 @@ def find_optimal_design(
                 f"blocked model (needs at least {lo} runs: p_full + 1, and one "
                 "run per block). Increase the block sizes."
             )
+        # Conflicting caps are a config error, not a search outcome: without
+        # this check the loop exits unentered and the unrelated "power
+        # calculation failed repeatedly" RuntimeError surfaces (RV-6).
+        if _fixed_total > power_cfg.max_n:
+            raise ValueError(
+                f"sum(block_sizes)={_fixed_total} exceeds max_n={power_cfg.max_n}: "
+                "a fixed block layout is evaluated exactly at its total run "
+                "count. Raise max_n or shrink the block sizes."
+            )
         lo = _fixed_total
         _capped_max_n = _fixed_total
     elif _prealloc_replicates:
@@ -1443,18 +1452,34 @@ def find_optimal_design(
     final_p = best["report"]["p"]
 
     if final_power + power_cfg.tol_power < target_power:
-        _msg = (
-            f"Design generation finished without converging to target power. "
-            f"Max iterations ({power_cfg.max_iter}) or max_n ({power_cfg.max_n}) reached. "
-            f"Final power: {final_power:.4f} (Target: {target_power:.4f}) "
-            f"at n={final_n}, p={final_p}."
-        )
-        warnings.warn(_msg, RuntimeWarning)
-        _run_warnings.append(_msg)
-        if _capped_max_n < power_cfg.max_n:
-            _cap_msg = _candidate_cap_warning(power_cfg.max_n, _capped_max_n, _n_cand)
-            warnings.warn(_cap_msg, RuntimeWarning)
-            _run_warnings.append(_cap_msg)
+        if _fixed_block_layout:
+            # A fixed layout is evaluated only at sum(block_sizes): neither
+            # max_n/max_iter nor the candidate pool is the limiting factor,
+            # so the generic messages below would misdiagnose it (RV-7 —
+            # the cap warning even recommended raising candidate_points).
+            _msg = (
+                f"Target power not achieved at the requested block sizes: "
+                f"achieved {final_power:.4f} (target {target_power:.4f}) at "
+                f"n=sum(block_sizes)={final_n}. A fixed block layout is "
+                "evaluated only at its total run count — increase the block "
+                "sizes, or pass block_sizes=None to let the sample-size "
+                "search choose n."
+            )
+            warnings.warn(_msg, RuntimeWarning)
+            _run_warnings.append(_msg)
+        else:
+            _msg = (
+                f"Design generation finished without converging to target power. "
+                f"Max iterations ({power_cfg.max_iter}) or max_n ({power_cfg.max_n}) reached. "
+                f"Final power: {final_power:.4f} (Target: {target_power:.4f}) "
+                f"at n={final_n}, p={final_p}."
+            )
+            warnings.warn(_msg, RuntimeWarning)
+            _run_warnings.append(_msg)
+            if _capped_max_n < power_cfg.max_n:
+                _cap_msg = _candidate_cap_warning(power_cfg.max_n, _capped_max_n, _n_cand)
+                warnings.warn(_cap_msg, RuntimeWarning)
+                _run_warnings.append(_cap_msg)
 
     if len(best["design_df"]) != final_n:
         raise RuntimeError(
