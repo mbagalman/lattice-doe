@@ -69,7 +69,7 @@ def df_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """Convert a DataFrame to a list of JSON-safe row dicts."""
     records = []
     for row in df.to_dict(orient="records"):
-        records.append({k: sanitize_value(v) for k, v in row.items()})
+        records.append({str(k): sanitize_value(v) for k, v in row.items()})
     return records
 
 

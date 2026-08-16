@@ -418,6 +418,27 @@ class TestAOptimalCriterion:
 # power_sensitivity — R² mode extension
 # ---------------------------------------------------------------------------
 
+class TestPowerSensitivityGLMRejected:
+    """TD-12 regression: a GLM power_cfg used to crash power_sensitivity
+    deep inside the sigma sweep with AttributeError on .sigma (surfacing as
+    an HTTP 500 through the REST /sensitivity endpoint). It must be rejected
+    up front with an actionable ValueError instead — mypy flagged the
+    signature mismatch the moment api_server/ entered its scope."""
+
+    def test_glm_config_raises_clear_valueerror(self):
+        glm_cfg = PowerGLMContrastConfig(
+            alpha=0.05, power=0.8, L=[[0, 1]], delta=[0.5],
+            family="binomial", baseline=0.2,
+        )
+        with pytest.raises(ValueError, match="GLM configs have no sigma"):
+            power_sensitivity(
+                formula="~ 1 + x",
+                factors={"x": (-1.0, 1.0)},
+                power_cfg=glm_cfg,
+                design_df=pd.DataFrame({"x": [-1.0, 0.0, 1.0, -0.5, 0.5]}),
+            )
+
+
 class TestPowerSensitivityR2:
     """Verify power_sensitivity works for PowerR2Config."""
 

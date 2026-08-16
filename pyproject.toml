@@ -177,9 +177,11 @@ python_version = "3.9"
 warn_unused_configs = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
-# The Streamlit app ships inside the package but is Streamlit-script code,
-# not library code: its pages are run (not imported), carry non-identifier
-# module names (1_Factors.py), and have never been in mypy scope. The REST
-# server moved inside the package too and was likewise never in scope;
-# bringing either in is tracked as future work, not done as a side effect.
-exclude = ["lattice_doe/app/", "lattice_doe/api_server/"]
+# The Streamlit app is PERMANENTLY excluded (TD-12 decision, 2026-08-15),
+# not deferred work: pages/ carries non-identifier module names
+# (1_Factors.py) that are run, never imported, and the rest of app/ is
+# Streamlit-runtime code whose behavior is exercised by the AppTest suite;
+# type-checking it would require streamlit in the pinned measurement
+# environment for little marginal safety. The REST server (api_server/)
+# IS in scope since TD-12 — it is ordinary typed library code.
+exclude = ["lattice_doe/app/"]

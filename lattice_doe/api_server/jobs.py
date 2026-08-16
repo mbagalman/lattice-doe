@@ -33,7 +33,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
-from lattice_doe.progress import ProgressReporter, SearchCancelled
+from lattice_doe.progress import ProgressEvent, ProgressReporter, SearchCancelled
 
 
 class JobsAtCapacity(RuntimeError):
@@ -136,7 +136,7 @@ class JobManager:
                 job.state = "running"
                 job.started_at = time.time()
 
-            def _sink(ev) -> None:
+            def _sink(ev: ProgressEvent) -> None:
                 with self._lock:
                     job.progress = ev.to_dict()
 

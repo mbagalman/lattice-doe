@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict
+from typing import Any, AsyncIterator, Dict
 
 import anyio
 
@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from lattice_doe import find_optimal_design
 from lattice_doe.api import find_multiresponse_design
 from lattice_doe.progress import ProgressReporter
-from lattice_doe.api_server.jobs import JobsAtCapacity
+from lattice_doe.api_server.jobs import JobsAtCapacity, Runner
 from lattice_doe.api_server.models.design import DesignRequest, MultiResponseDesignRequest
 from lattice_doe.api_server.serialization import (
     factors_to_spec,
@@ -42,7 +42,7 @@ from lattice_doe.api_server.serialization import (
 router = APIRouter()
 
 
-def _design_runner(request: DesignRequest):
+def _design_runner(request: DesignRequest) -> Runner:
     power_cfg = pydantic_power_cfg_to_dataclass(request.power_cfg)
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
 
@@ -59,7 +59,7 @@ def _design_runner(request: DesignRequest):
     return run
 
 
-def _multiresponse_runner(request: MultiResponseDesignRequest):
+def _multiresponse_runner(request: MultiResponseDesignRequest) -> Runner:
     multi_cfg = pydantic_multi_cfg_to_dataclass(request.multi_cfg)
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
 
@@ -76,7 +76,7 @@ def _multiresponse_runner(request: MultiResponseDesignRequest):
     return run
 
 
-def _submit(request: Request, kind: str, runner) -> JSONResponse:
+def _submit(request: Request, kind: str, runner: Runner) -> JSONResponse:
     manager = request.app.state.job_manager
     try:
         job_id = manager.submit(kind, runner)
@@ -177,7 +177,7 @@ async def stream_job_events(job_id: str, http: Request) -> Any:
     # new progress event (the search may spend many seconds inside one build).
     heartbeat_sec = 12.0
 
-    async def event_gen():
+    async def event_gen() -> AsyncIterator[str]:
         last_seq = None
         last_send = time.monotonic()
         terminal = {"done", "failed", "cancelled"}

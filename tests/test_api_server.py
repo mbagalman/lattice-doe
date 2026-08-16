@@ -401,6 +401,28 @@ class TestErrorHandling:
         })
         assert r.status_code == 422
 
+    async def test_422_glm_config_on_sensitivity(self, client):
+        # TD-12 regression: a GLM power_cfg posted to /sensitivity used to
+        # 500 with AttributeError('sigma') from inside the sweep; it must be
+        # a 422 with an actionable message (ValueError -> 422 in errors.py).
+        r = await client.post(
+            "/sensitivity",
+            json={
+                "formula": "~ 1 + x",
+                "factors": {"x": {"type": "continuous", "low": -1.0, "high": 1.0}},
+                "power_cfg": {
+                    "type": "glm_contrast",
+                    "L": [[0, 1]],
+                    "delta": [0.5],
+                    "family": "binomial",
+                    "baseline": 0.2,
+                },
+                "design_df": [{"x": -1.0}, {"x": 0.0}, {"x": 1.0}, {"x": 0.5}],
+            },
+        )
+        assert r.status_code == 422
+        assert "GLM configs have no sigma" in r.text
+
     async def test_422_bad_power_cfg_discriminator(self, client):
         r = await client.post("/design", json={
             "formula": "~ 1 + A",

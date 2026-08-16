@@ -36,7 +36,9 @@ def _sync_compare(request: CompareCriteriaRequest) -> Dict[str, Any]:
         factors=factors_to_spec(request.factors, request.formula),
         power_cfg=power_cfg,
         design_opts=design_opts,
-        criteria=request.criteria,
+        # The model constrains criteria to Literal["I","D","A"]; the core
+        # function takes plain strings (List is invariant, so convert).
+        criteria=([str(c) for c in request.criteria] if request.criteria is not None else None),
     )
     # result has keys: "summary" (DataFrame) and one key per criterion
     summary_df = result["summary"]

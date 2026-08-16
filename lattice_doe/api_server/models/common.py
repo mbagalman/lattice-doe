@@ -264,7 +264,7 @@ class DesignOptionsModel(StrictRequestModel):
 
     @field_validator("workers")
     @classmethod
-    def _workers_serial_only(cls, v):
+    def _workers_serial_only(cls, v: Optional[int]) -> Optional[int]:
         # Only null or 1 (serial) are valid; 0 and negatives would otherwise be
         # accepted and silently coerced to None during serialization (UX-4/P2).
         if v is not None and v != 1:

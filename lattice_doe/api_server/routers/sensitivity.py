@@ -10,7 +10,7 @@ from functools import partial
 from fastapi import APIRouter
 
 from lattice_doe import power_sensitivity, min_detectable_effect
-from lattice_doe.config import PowerContrastConfig
+from lattice_doe.config import PowerContrastConfig, PowerGLMContrastConfig
 from lattice_doe.api_server.models.sensitivity import (
     MdeRequest,
     MdeResponse,
@@ -32,6 +32,15 @@ router = APIRouter()
 
 def _sync_sensitivity(request: SensitivityRequest) -> dict:
     power_cfg = pydantic_power_cfg_to_dataclass(request.power_cfg)
+    # Reject GLM configs up front with a 422 (ValueError -> 422 in errors.py)
+    # instead of a 500 from deep inside the sigma sweep; this isinstance also
+    # narrows the union for the power_sensitivity call below.
+    if isinstance(power_cfg, PowerGLMContrastConfig):
+        raise ValueError(
+            "The sensitivity endpoint supports contrast and r2 power configs only; "
+            "GLM configs have no sigma to sweep. For GLM designs, sweep the baseline "
+            "with the Python API's power_curve_by_baseline (no REST equivalent yet)."
+        )
     design_opts = pydantic_design_opts_to_dataclass(request.design_opts)
     design_df = records_to_df(request.design_df)
     model_matrix = split_to_df(request.model_matrix) if request.model_matrix is not None else None

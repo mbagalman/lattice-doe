@@ -72,10 +72,14 @@ jobs:
         #   mypy entirely under the project's python_version = "3.9"
         #   ("errors prevented further checking" — the step below fails on
         #   that marker rather than trusting the 1-error abort count)
+        # fastapi/pydantic/httpx/anyio are pinned so mypy checks api_server/
+        # (in scope since TD-12) against the real typed libraries instead of
+        # Any-fallbacks; verified not to trip the python_version=3.9 stub
+        # abort the way numpy 2.5 did.
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[cli]"
-          pip install ruff==0.15.12 mypy==1.20.2 black==26.5.1 pandas-stubs==3.0.3.260530 numpy==2.4.2 pandas==2.3.3
+          pip install ruff==0.15.12 mypy==1.20.2 black==26.5.1 pandas-stubs==3.0.3.260530 numpy==2.4.2 pandas==2.3.3 fastapi==0.135.1 pydantic==2.12.5 httpx==0.28.1 anyio==4.12.1
 
       - name: black format gate
         # The package went fully black-clean in TD-11; keep it that way.

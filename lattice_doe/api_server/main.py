@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 
@@ -44,7 +45,7 @@ def create_app() -> FastAPI:
     """
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):  # type: ignore[type-arg]
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Pre-import heavy dependencies on startup so the first request
         # is not penalised by module-load latency.
         import numpy  # noqa: F401
