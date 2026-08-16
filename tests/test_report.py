@@ -7,6 +7,7 @@ TestGenerateReportHTML          -- HTML output correctness (requires jinja2 + pi
 TestGenerateReportAPIIntegration -- find_optimal_design export_report_to= param
 TestPDFExportImportError        -- PDF path raises ImportError when weasyprint absent
 """
+
 from __future__ import annotations
 
 from html.parser import HTMLParser
@@ -27,7 +28,6 @@ jinja2 = pytest.importorskip("jinja2", reason="jinja2 not installed")
 pytest.importorskip("PIL", reason="pillow not installed")
 
 from lattice_doe.report import generate_report  # noqa: E402  (after importorskip)
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -62,7 +62,9 @@ def _minimal_result(n: int = 12) -> dict:
             "B": rng.uniform(0.0, 10.0, n),
         }
     )
-    buckets_df = pd.DataFrame({"A": ["low", "high"], "B_mean": [2.5, 7.5], "count": [n // 2, n // 2]})
+    buckets_df = pd.DataFrame(
+        {"A": ["low", "high"], "B_mean": [2.5, 7.5], "count": [n // 2, n // 2]}
+    )
     report = {
         "n": n,
         "achieved_power": 0.83,
@@ -88,6 +90,7 @@ def _minimal_result(n: int = 12) -> dict:
 
 class _StrictHTMLParser(HTMLParser):
     """Raises AssertionError on malformed HTML fed to it."""
+
     def __init__(self):
         super().__init__(convert_charrefs=False)
         self.errors: list[str] = []
@@ -102,6 +105,7 @@ class _StrictHTMLParser(HTMLParser):
 # ---------------------------------------------------------------------------
 # TestGenerateReportHTML
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateReportHTML:
     """HTML report generation — correctness and content."""
@@ -146,7 +150,12 @@ class TestGenerateReportHTML:
             include_power_curve=False,
         )
         html = out.read_text(encoding="utf-8")
-        for section in ("Config Summary", "Power Metrics", "Selected Runs", "Unique Run Allocations"):
+        for section in (
+            "Config Summary",
+            "Power Metrics",
+            "Selected Runs",
+            "Unique Run Allocations",
+        ):
             assert section in html, f"Section not found in HTML: {section!r}"
 
     def test_html_is_self_contained(self, tmp_path):
@@ -217,14 +226,14 @@ class TestGenerateReportHTML:
             formula=FORMULA,
             factors=FACTORS,
             power_cfg=_contrast_cfg(),
-            output_path=tmp_path,           # directory, not a file
+            output_path=tmp_path,  # directory, not a file
             include_power_curve=False,
         )
         assert returned.name == "iopt_report.html"
         assert returned.exists()
 
     def test_no_suffix_path_gets_html_extension(self, tmp_path):
-        out = tmp_path / "my_report"          # no extension
+        out = tmp_path / "my_report"  # no extension
         returned = generate_report(
             result=_minimal_result(),
             formula=FORMULA,
@@ -241,6 +250,7 @@ class TestGenerateReportHTML:
 # TestGenerateReportAPIIntegration
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateReportAPIIntegration:
     """Test export_report_to= parameter on find_optimal_design()."""
 
@@ -251,7 +261,8 @@ class TestGenerateReportAPIIntegration:
         formula = "~ 1 + A + B"
         factors = {"A": ["low", "high"], "B": (0.0, 10.0)}
         L, delta = contrast_from_scenarios(
-            formula, factors,
+            formula,
+            factors,
             {"A": "low", "B": 0.0},
             {"A": "high", "B": 10.0},
             sesoi=1.0,
@@ -260,7 +271,10 @@ class TestGenerateReportAPIIntegration:
         opts = DesignOptions(candidate_points=100, starts=2, max_iter=30, random_state=0)
 
         result = find_optimal_design(
-            formula, factors, cfg, opts,
+            formula,
+            factors,
+            cfg,
+            opts,
             export_report_to=str(tmp_path),
         )
 
@@ -277,7 +291,8 @@ class TestGenerateReportAPIIntegration:
         formula = "~ 1 + A + B"
         factors = {"A": ["low", "high"], "B": (0.0, 10.0)}
         L, delta = contrast_from_scenarios(
-            formula, factors,
+            formula,
+            factors,
             {"A": "low", "B": 0.0},
             {"A": "high", "B": 10.0},
             sesoi=1.0,
@@ -287,7 +302,10 @@ class TestGenerateReportAPIIntegration:
 
         with patch("lattice_doe.report.generate_report", side_effect=RuntimeError("boom")):
             result = find_optimal_design(
-                formula, factors, cfg, opts,
+                formula,
+                factors,
+                cfg,
+                opts,
                 export_report_to=str(tmp_path / "report.html"),
             )
 
@@ -300,6 +318,7 @@ class TestGenerateReportAPIIntegration:
 # ---------------------------------------------------------------------------
 # TestPDFExportImportError
 # ---------------------------------------------------------------------------
+
 
 class TestPDFExportImportError:
     """PDF export raises ImportError with install hint when weasyprint is absent."""
@@ -317,3 +336,149 @@ class TestPDFExportImportError:
                     output_path=out,
                     include_power_curve=False,
                 )
+
+
+# ---------------------------------------------------------------------------
+# TD-13: private-helper coverage — figure conversion, diagnostics context,
+# and the power-curve figure fallback chain (57% -> targeted)
+# ---------------------------------------------------------------------------
+
+
+class TestFigToBase64:
+    def test_matplotlib_figure_roundtrips_to_png(self):
+        plt = pytest.importorskip("matplotlib.pyplot")
+        from lattice_doe.report import _fig_to_base64
+
+        fig, ax = plt.subplots(figsize=(2, 1))
+        ax.plot([0, 1], [0, 1])
+        try:
+            b64 = _fig_to_base64(fig)
+        finally:
+            plt.close(fig)
+        assert b64 is not None
+        import base64 as _b64
+
+        assert _b64.b64decode(b64)[:4] == b"\x89PNG"
+
+    def test_to_image_bytes_win_over_savefig(self):
+        from lattice_doe.report import _fig_to_base64
+
+        class FakePlotly:
+            def to_image(self, format, width, height):
+                return b"png-bytes"
+
+        import base64 as _b64
+
+        assert _b64.b64decode(_fig_to_base64(FakePlotly())) == b"png-bytes"
+
+    def test_unrecognised_object_returns_none(self):
+        from lattice_doe.report import _fig_to_base64
+
+        assert _fig_to_base64(object()) is None
+
+    def test_failing_to_image_falls_through_to_none(self):
+        from lattice_doe.report import _fig_to_base64
+
+        class Broken:
+            def to_image(self, **kw):
+                raise RuntimeError("no kaleido")
+
+        assert _fig_to_base64(Broken()) is None
+
+
+class TestBuildDiagnosticsCtx:
+    @staticmethod
+    def _ctx(diag):
+        from lattice_doe.report import _build_diagnostics_ctx
+
+        return _build_diagnostics_ctx({"diagnostics": diag} if diag is not None else {})
+
+    def test_absent_diagnostics_returns_none(self):
+        assert self._ctx(None) is None
+        assert self._ctx({}) is None
+
+    @pytest.mark.parametrize(
+        "cond,badge",
+        [(10.0, "pass"), (45.3, "warn"), (5000.0, "fail")],
+    )
+    def test_condition_number_badge_thresholds(self, cond, badge):
+        # Belsley scale (SR-21): <30 pass, 30-1000 warn, >1000 fail.
+        ctx = self._ctx({"condition_number": cond})
+        assert ctx["condition_badge"] == badge
+        assert ctx["condition_number"] == f"{cond:.2f}"
+
+    def test_missing_fields_render_as_none(self):
+        ctx = self._ctx({"d_efficiency": 0.9251})
+        assert ctx["condition_number"] is None and ctx["condition_badge"] is None
+        assert ctx["d_efficiency"] == "0.9251"
+
+
+class TestBuildPowerCurveFigure:
+    """The B5 fallback chain: real figure -> base64 PNG; any failure or a
+    non-DataFrame curve payload -> None (the TD-11 isinstance narrow, whose
+    first draft's NameError this try/except would have silently eaten)."""
+
+    def _args(self):
+        return dict(
+            result=_minimal_result(),
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_contrast_cfg(),
+        )
+
+    def test_sweep_failure_returns_none(self):
+        from lattice_doe.report import _build_power_curve_figure
+
+        with patch("lattice_doe.power_curves.power_curve_by_n", side_effect=RuntimeError("boom")):
+            assert _build_power_curve_figure(**self._args()) is None
+
+    def test_non_dataframe_curve_payload_returns_none(self):
+        # TD-11 regression: curve_result["data"] typed DataFrame|Figure|None;
+        # a non-DataFrame must be rejected by the narrow, not crash indexing.
+        from lattice_doe.report import _build_power_curve_figure
+
+        with patch(
+            "lattice_doe.power_curves.power_curve_by_n",
+            return_value={"data": None, "figure": None, "target_n": None},
+        ):
+            assert _build_power_curve_figure(**self._args()) is None
+
+    def test_real_sweep_produces_png(self):
+        pytest.importorskip("matplotlib")
+        import base64 as _b64
+
+        from lattice_doe.report import _build_power_curve_figure
+
+        b64 = _build_power_curve_figure(**self._args())
+        assert b64 is not None
+        assert _b64.b64decode(b64)[:4] == b"\x89PNG"
+
+
+class TestGenerateReportPowerCurveSection:
+    def test_note_rendered_when_figure_unavailable(self, tmp_path):
+        out = tmp_path / "report.html"
+        with patch("lattice_doe.power_curves.power_curve_by_n", side_effect=RuntimeError("boom")):
+            generate_report(
+                result=_minimal_result(),
+                formula=FORMULA,
+                factors=FACTORS,
+                power_cfg=_contrast_cfg(),
+                output_path=out,
+                include_power_curve=True,
+            )
+        html = out.read_text(encoding="utf-8")
+        assert "data:image/png;base64," not in html
+
+    def test_figure_embedded_when_available(self, tmp_path):
+        pytest.importorskip("matplotlib")
+        out = tmp_path / "report.html"
+        generate_report(
+            result=_minimal_result(),
+            formula=FORMULA,
+            factors=FACTORS,
+            power_cfg=_contrast_cfg(),
+            output_path=out,
+            include_power_curve=True,
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "data:image/png;base64," in html
