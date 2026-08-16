@@ -972,8 +972,15 @@ def find_optimal_design(
     _spec_cat_cols = spec_cat_cols(factors)
 
     _n_cand = len(cand)
+    # Blocked designs replicate too since the per-block searches thread the
+    # factor spec (TD-9): with auto-balanced blocks the reachable n is not
+    # bounded by the candidate pool. Explicit block_sizes stay capped — their
+    # sum pins the total n, so lifting the ceiling would let the search probe
+    # sizes the block layout cannot realize.
     _prealloc_replicates = (
-        design_opts.preallocate_categorical and not is_blocked and bool(_spec_cat_cols)
+        design_opts.preallocate_categorical
+        and bool(_spec_cat_cols)
+        and (not is_blocked or design_opts.block_sizes is None)
     )
     if _prealloc_replicates:
         # Pre-allocation treats per-cell allocation counts as replication

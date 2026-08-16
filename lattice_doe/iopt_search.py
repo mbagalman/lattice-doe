@@ -773,8 +773,14 @@ def _preallocated_design(
         design_df = cand.iloc[selected_idx].reset_index(drop=True)
         return design_df, selected_idx, p_names
 
-    # Represent each cell by its centroid (midpoint of any continuous columns)
-    cont_cols = [c for c in cand.columns if pd.api.types.is_numeric_dtype(cand[c])]
+    # Represent each cell by its centroid (midpoint of any continuous columns).
+    # Numeric-coded categorical columns are already in cat_cols and must be
+    # excluded here: dtype alone would sweep them in, and the mean-overwrite
+    # below would then erase the very cell distinctions the allocation is
+    # weighting (every cell looks identical -> near-uniform Wynn weights).
+    cont_cols = [
+        c for c in cand.columns if c not in cat_cols and pd.api.types.is_numeric_dtype(cand[c])
+    ]
     rep_rows = []
     for _, row in cell_df.iterrows():
         rep_row = dict(row)

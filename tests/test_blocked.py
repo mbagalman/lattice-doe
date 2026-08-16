@@ -982,3 +982,62 @@ class TestIA2BlockedPreallocation:
         )
         assert per_block.shape[1] == 3
         assert bool((per_block >= 2).all().all())
+
+
+# ---------------------------------------------------------------------------
+# Reviewer finding (2026-08-15): blocked replication was artificially capped
+# ---------------------------------------------------------------------------
+
+
+class TestBlockedReplicationCeiling:
+    """P2 regression: `_prealloc_replicates` excluded blocked mode outright,
+    so the n-search stayed capped at n_blocks x n_cand even though the
+    per-block searches can replicate categorical cells since TD-9 threaded
+    the factor spec through. Repro pre-fix: this configuration stopped at
+    n=6 with power 0.061, warning that the candidate pool prevented further
+    searching, while build_blocked_design succeeded directly at n=20."""
+
+    FACTORS = {"g": [0, 1, 2]}
+
+    @staticmethod
+    def _cfg(**kw):
+        return PowerContrastConfig(
+            alpha=0.05,
+            power=0.8,
+            L=[[0, 1, 0], [0, 0, 1]],
+            delta=[1.0, 1.0],
+            sigma=1.0,
+            max_n=50,
+            **kw,
+        )
+
+    def test_auto_balanced_blocks_replicate_past_the_pool(self):
+        opts = DesignOptions(
+            random_state=0,
+            starts=2,
+            n_blocks=2,
+            preallocate_categorical=True,
+            alloc_min_per_cell=1,
+        )
+        res = find_optimal_design("1 + C(g)", self.FACTORS, self._cfg(), opts)
+        rep = res["report"]
+        # Pre-fix ceiling was n_blocks * n_cand = 6; the target needs far more.
+        assert rep["n"] > 6
+        assert rep["achieved_power"] >= 0.8
+        # Replication must respect block structure: balanced, all cells present.
+        per_block = res["design_df"].groupby("Block")["g"].value_counts().unstack(fill_value=0)
+        assert per_block.shape == (2, 3)
+        assert int(per_block.sum(axis=1).max()) - int(per_block.sum(axis=1).min()) <= 1
+
+    def test_explicit_block_sizes_stay_capped(self):
+        # Fixed block sizes pin the total n, so the ceiling must remain.
+        opts = DesignOptions(
+            random_state=0,
+            starts=2,
+            n_blocks=2,
+            block_sizes=[3, 3],
+            preallocate_categorical=True,
+            alloc_min_per_cell=1,
+        )
+        res = find_optimal_design("1 + C(g)", self.FACTORS, self._cfg(), opts)
+        assert res["report"]["n"] == 6

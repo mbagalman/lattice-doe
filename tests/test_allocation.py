@@ -384,3 +384,49 @@ class TestTD9FactorsResolution:
         counts = cand.loc[idx, "g"].value_counts()
         assert sorted(counts.index) == ["a", "b", "c"]
         assert int(counts.min()) >= 2
+
+
+# ---------------------------------------------------------------------------
+# Reviewer finding (2026-08-15): numeric-coded categorical values were
+# overwritten by the continuous-centroid step in _preallocated_design
+# ---------------------------------------------------------------------------
+
+
+class TestNumericCodedAllocationWeights:
+    """P2 regression: `cont_cols` in _preallocated_design was dtype-derived,
+    so numeric-coded categorical columns were swept in and each cell's
+    category value was overwritten with the global column mean — every cell
+    looked identical to the Wynn allocation, flattening the weights to
+    near-uniform. The TD-9 tests only asserted minimum cell counts, which
+    uniform weights satisfy, so they could not see this. These pin the
+    allocation *weights* against the spec-driven reference."""
+
+    FACTORS7 = {"g": list(range(7))}
+
+    @staticmethod
+    def _builder_counts(formula, factors, n):
+        cand = pd.DataFrame({"g": list(range(7)) * 20})
+        _, idx, _ = build_i_opt_design_with_idx(
+            cand=cand,
+            formula=formula,
+            n=n,
+            random_state=0,
+            preallocate_categorical=True,
+            factors=factors,
+        )
+        return cand.loc[idx, "g"].value_counts().sort_index().tolist()
+
+    def test_linear_model_allocation_is_end_heavy_not_uniform(self):
+        # I-optimal allocation for `1 + g` concentrates on the extremes;
+        # the mean-overwrite bug returned [15, 15, 14, 14, 14, 14, 14].
+        counts = self._builder_counts("1 + g", self.FACTORS7, n=100)
+        assert counts == [47, 1, 1, 1, 1, 1, 48]
+
+    def test_builder_matches_spec_driven_allocation(self):
+        # The builder's internal allocation must agree exactly with the
+        # public i_optimal_allocation, which builds its representative
+        # rows from the factor spec and never had the bug.
+        for formula in ("1 + g", "1 + C(g)"):
+            alloc = i_optimal_allocation(formula, self.FACTORS7, n=100)
+            expected = [alloc.get((i,), 0) for i in range(7)]
+            assert self._builder_counts(formula, self.FACTORS7, n=100) == expected, formula
