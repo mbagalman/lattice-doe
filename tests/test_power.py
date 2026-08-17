@@ -1073,12 +1073,12 @@ class TestSR9DeltaConsistency:
         n = 16
         x = rng.uniform(-1, 1, n)
         X = np.column_stack([np.ones(n), x])
-        l = np.array([0.0, 1.0])
-        return X, l, np.vstack([l, l])
+        L_row = np.array([0.0, 1.0])
+        return X, L_row, np.vstack([L_row, L_row])
 
     def test_consistent_duplicate_matches_single_row(self):
-        X, l, L2 = self._fixture()
-        ref = contrast_power(l, np.array([1.2]), X, sigma=1.0, alpha=0.05)
+        X, L_row, L2 = self._fixture()
+        ref = contrast_power(L_row, np.array([1.2]), X, sigma=1.0, alpha=0.05)
         dup = contrast_power(L2, np.array([1.2, 1.2]), X, sigma=1.0, alpha=0.05)
         assert dup.lam == pytest.approx(ref.lam, abs=1e-8)
         assert dup.power == pytest.approx(ref.power, abs=1e-10)
@@ -1146,9 +1146,9 @@ class TestSR20HotellingDf:
     def test_duplicated_rows_use_rank_based_df1(self):
         from lattice_doe.power import hotelling_t2_power
 
-        X, l, Sig = self._fixture()
-        L2 = np.vstack([l, l])
-        single = hotelling_t2_power(l, np.array([[1.0, 0.5]]), X, Sig, 0.05)
+        X, L_row, Sig = self._fixture()
+        L2 = np.vstack([L_row, L_row])
+        single = hotelling_t2_power(L_row, np.array([[1.0, 0.5]]), X, Sig, 0.05)
         dup = hotelling_t2_power(L2, np.array([[1.0, 0.5], [1.0, 0.5]]), X, Sig, 0.05)
         assert dup.df1 == single.df1 == 2  # rank(L)*k = 1*2
         assert dup.power == pytest.approx(single.power, abs=1e-10)
@@ -1156,9 +1156,9 @@ class TestSR20HotellingDf:
     def test_k1_reduction_still_exact(self):
         from lattice_doe.power import hotelling_t2_power
 
-        X, l, _ = self._fixture()
-        ht = hotelling_t2_power(l, np.array([[1.2]]), X, np.array([[1.0]]), 0.05)
-        cp = contrast_power(l, np.array([1.2]), X, sigma=1.0, alpha=0.05)
+        X, L_row, _ = self._fixture()
+        ht = hotelling_t2_power(L_row, np.array([[1.2]]), X, np.array([[1.0]]), 0.05)
+        cp = contrast_power(L_row, np.array([1.2]), X, sigma=1.0, alpha=0.05)
         assert ht.power == pytest.approx(cp.power, abs=1e-12)
 
     def test_s2_df2_is_t2_form(self):

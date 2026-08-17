@@ -275,7 +275,9 @@ class TestCompileConstraintExpr:
 
     def test_design_opts_expr_and_func_expr_wins(self):
         """When both constraint_expr and constraint_func are provided, expr wins."""
-        always_false = lambda row: False
+        def always_false(row):
+            return False
+
         opts = DesignOptions(
             constraint_expr="A <= 100",
             constraint_func=always_false,

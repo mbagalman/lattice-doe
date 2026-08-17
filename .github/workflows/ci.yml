@@ -89,7 +89,7 @@ jobs:
         run: |
           # --quiet suppresses the "Found N errors" / fixable-hint summary
           # lines so wc -l counts findings only.
-          ruff check lattice_doe/ --output-format=concise --exit-zero --quiet > ruff.out
+          ruff check lattice_doe/ tests/ --output-format=concise --exit-zero --quiet > ruff.out
           count=$(wc -l < ruff.out)
           echo "ruff findings: $count (baseline: $RUFF_BASELINE)"
           if [ "$count" -gt "$RUFF_BASELINE" ]; then

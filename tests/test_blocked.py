@@ -229,7 +229,7 @@ class TestBuildBlockedDesign:
         """X_full should have n rows and p_treat + (n_blocks-1) columns."""
         formula = "1 + A + B"
         n_blocks = 3
-        aug_formula = f"1 + A + B + C(Block)"
+        aug_formula = "1 + A + B + C(Block)"
         n = 12
         design_df, X_full = build_blocked_design(
             cand=simple_cand,

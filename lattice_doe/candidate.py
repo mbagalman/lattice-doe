@@ -417,14 +417,19 @@ def build_candidate(
 
     # Apply constraint filtering if provided
     if constraint_func is not None:
+        n_before = len(cand)
         mask = cand.apply(constraint_func, axis=1)
         cand = cand.loc[mask].reset_index(drop=True)
+        n_removed = n_before - len(cand)
 
-        # Warn if constraints eliminate many points
-        if len(cand) < candidate_points * 0.5:
+        # Warn if constraints eliminate many points. Measured against the
+        # pre-filter set, not candidate_points: the natural grid (pure
+        # categorical, stratified mixed) can be far smaller than
+        # candidate_points, which would report phantom eliminations.
+        if n_removed > 0 and len(cand) < n_before * 0.5:
             warnings.warn(
-                f"Constraints eliminated {candidate_points - len(cand)} of {candidate_points} "
-                f"candidate points ({100 * (1 - len(cand)/candidate_points):.1f}% removed). "
+                f"Constraints eliminated {n_removed} of {n_before} "
+                f"candidate points ({100 * n_removed / n_before:.1f}% removed). "
                 "Consider relaxing constraints or increasing candidate_points."
             )
 

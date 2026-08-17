@@ -111,8 +111,9 @@ def compute_leverages(X: np.ndarray) -> np.ndarray:
         Leverage value for each design point.
     """
     XtX_inv = _pinv(_xtx(X))
-    H = X @ XtX_inv @ X.T
-    return np.diag(H)
+    # diag(X @ XtX_inv @ X.T) computed row-wise, without materializing the
+    # full n x n hat matrix.
+    return np.sum((X @ XtX_inv) * X, axis=1)
 
 
 def compute_design_metrics(

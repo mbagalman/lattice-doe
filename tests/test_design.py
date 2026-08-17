@@ -1,6 +1,8 @@
 # tests/test_design.py
 """Unit tests for design.py — candidate generation and model matrix construction."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -86,6 +88,45 @@ class TestBuildCandidate:
     def test_no_nans(self):
         cand = build_candidate(MIXED, candidate_points=30, seed=0)
         assert not cand.isnull().any().any()
+
+
+class TestConstraintWarningDenominator:
+    """Third-opinion review (2026-08-16): the constraint-elimination warning
+    compared the filtered size against candidate_points, but the natural grid
+    for pure-categorical (and stratified mixed) designs can be far smaller
+    than candidate_points before any filtering — a constraint that removed
+    nothing then warned that ~100% of candidate points were eliminated."""
+
+    def test_noop_constraint_on_small_grid_stays_silent(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            cand = build_candidate(
+                CATEGORICAL,
+                candidate_points=2000,
+                seed=0,
+                constraint_func=lambda row: True,
+            )
+        assert len(cand) == 6  # full 3 x 2 factorial, nothing removed
+        assert not [w for w in caught if "Constraints eliminated" in str(w.message)]
+
+    def test_small_grid_elimination_reports_true_counts(self):
+        with pytest.warns(UserWarning, match=r"eliminated 4 of 6 candidate"):
+            cand = build_candidate(
+                CATEGORICAL,
+                candidate_points=2000,
+                seed=0,
+                constraint_func=lambda row: row["X"] == "a",
+            )
+        assert len(cand) == 2
+
+    def test_continuous_elimination_still_warns(self):
+        with pytest.warns(UserWarning, match=r"of 200 candidate points"):
+            build_candidate(
+                CONTINUOUS,
+                candidate_points=200,
+                seed=0,
+                constraint_func=lambda row: row["A"] <= 2.5,
+            )
 
 
 class TestBuildIOptDesignGuards:
@@ -986,8 +1027,6 @@ class TestSingularExchangeWarns:
     rank-deficient candidate matrix (a zero column)."""
 
     def test_singular_break_emits_warning_and_returns_design(self):
-        import warnings as _warnings
-
         from lattice_doe.iopt_search import _fedorov_exchange_single
 
         X = np.column_stack([np.ones(30), np.linspace(-1, 1, 30), np.zeros(30)])

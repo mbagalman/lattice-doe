@@ -1756,7 +1756,10 @@ class TestSR5CrossStratumConstraints:
     def test_cross_stratum_constraint_unit_level(self):
         """Direct build_split_plot_design call: H + E <= 1 holds in the design."""
         factors = {"H": (0.0, 1.0), "E": (0.0, 1.0)}
-        cons = lambda row: row["H"] + row["E"] <= 1.0
+
+        def cons(row):
+            return row["H"] + row["E"] <= 1.0
+
         cand = build_split_plot_candidate(
             factors, htc_factors=["H"], n_whole_plots=4, subplots_per_wp=3,
             random_state=0, constraint_func=cons,

@@ -23,7 +23,8 @@ class TestMatrixWireFormatPreservesOrder:
         df = pd.DataFrame(
             [[1.0, 0.0, 0.5]], columns=["Intercept", "C(g)[T.b]", "x"]
         )
-        mangle = lambda obj: json.loads(json.dumps(obj, sort_keys=True))
+        def mangle(obj):
+            return json.loads(json.dumps(obj, sort_keys=True))
 
         rec_cols = list(records_to_df(mangle(df_to_records(df))).columns)
         assert rec_cols != list(df.columns)          # records: order lost

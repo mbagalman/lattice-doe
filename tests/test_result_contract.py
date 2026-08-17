@@ -278,7 +278,8 @@ class TestCompoundResponseMatrices:
             alpha=0.05, power=0.8, sigma=1.0, max_n=18,
         )
         q2 = 5 if "bs(" in y2_formula else 3
-        L2 = np.zeros((1, q2)); L2[0, 1] = 1.0
+        L2 = np.zeros((1, q2))
+        L2[0, 1] = 1.0
         cfg_2 = PowerContrastConfig(
             L=L2, delta=np.array([0.5]),
             alpha=0.05, power=0.8, sigma=1.0, max_n=18,

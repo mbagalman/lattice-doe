@@ -46,7 +46,7 @@ pytest.importorskip("pydantic", reason="server extra not installed")
 # Layer 1 — pure unit tests (no HTTP, no FastAPI needed)
 # ---------------------------------------------------------------------------
 
-from lattice_doe.api_server.serialization import (
+from lattice_doe.api_server.serialization import (  # noqa: E402
     sanitize_float,
     sanitize_value,
     df_to_records,
@@ -55,7 +55,7 @@ from lattice_doe.api_server.serialization import (
     pydantic_design_opts_to_dataclass,
     serialize_design_result,
 )
-from lattice_doe.config import DesignOptions, PowerContrastConfig, PowerR2Config
+from lattice_doe.config import DesignOptions, PowerContrastConfig, PowerR2Config  # noqa: E402
 
 
 class TestSanitizeFloat:
