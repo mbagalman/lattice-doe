@@ -49,9 +49,19 @@ All of these run in CI on every push/PR and must hold:
 | Gate | Command | Expectation |
 |---|---|---|
 | black | `black --check --line-length 100 lattice_doe/` | clean (the package is fully formatted) |
-| ruff | `ruff check lattice_doe/` | zero findings |
+| ruff | `ruff check lattice_doe/ tests/` | zero findings |
 | mypy | `mypy lattice_doe/` | no-grow baseline (see below) |
 | tests | `pytest -m "not slow"` | green on Python 3.9–3.12 |
+
+The ruff rule set is pinned in `[tool.ruff.lint] select` (pyproject.toml) rather
+than left to ruff's defaults, because those defaults move: ruff 0.16 widened
+them enough that an untouched tree measures 0 findings on the pinned 0.15.12
+and ~1,400 on 0.16.4. If you bump ruff, the gate should stay at 0 — if it
+doesn't, the new findings are a rule-set change, not your code. Two of the
+newly-default rules (UP007/UP045) are deliberately excluded: their autofix
+rewrites `Optional[X]` to `X | None`, which raises `TypeError` from
+`typing.get_type_hints()` on Python 3.9 (the declared floor) and is guarded by
+`tests/test_factor_specs.py::test_no_pep604_pipes_in_annotation_strings`.
 
 The mypy count is **measurement-environment-dependent** (installed typed
 libraries change it), so CI pins the exact tool and dependency versions in
