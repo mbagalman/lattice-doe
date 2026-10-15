@@ -13,7 +13,7 @@ pip install -e ".[all]"            # or pick extras: [cli], [server], [report], 
 pip install pytest pytest-cov pytest-anyio
 ```
 
-Python 3.9–3.12 are supported and tested in CI. The core package needs only
+Python 3.10–3.14 are supported and tested in CI. The core package needs only
 numpy/scipy/pandas/patsy; everything else is an optional extra guarded with
 `try/except ImportError`, and the test suite must pass **without** any extras
 installed (soft-dependency tests skip cleanly).
@@ -51,17 +51,16 @@ All of these run in CI on every push/PR and must hold:
 | black | `black --check --line-length 100 lattice_doe/` | clean (the package is fully formatted) |
 | ruff | `ruff check lattice_doe/ tests/` | zero findings |
 | mypy | `mypy lattice_doe/` | no-grow baseline (see below) |
-| tests | `pytest -m "not slow"` | green on Python 3.9–3.12 |
+| tests | `pytest -m "not slow"` | green on Python 3.10–3.14 |
 
 The ruff rule set is pinned in `[tool.ruff.lint] select` (pyproject.toml) rather
 than left to ruff's defaults, because those defaults move: ruff 0.16 widened
 them enough that an untouched tree measures 0 findings on the pinned 0.15.12
 and ~1,400 on 0.16.4. If you bump ruff, the gate should stay at 0 — if it
-doesn't, the new findings are a rule-set change, not your code. Two of the
-newly-default rules (UP007/UP045) are deliberately excluded: their autofix
-rewrites `Optional[X]` to `X | None`, which raises `TypeError` from
-`typing.get_type_hints()` on Python 3.9 (the declared floor) and is guarded by
-`tests/test_factor_specs.py::test_no_pep604_pipes_in_annotation_strings`.
+doesn't, the new findings are a rule-set change, not your code. Enabling any
+further rule family (UP, I, C4, SIM, …) is a deliberate opt-in: each is a
+few-hundred-site mechanical diff that also moves the baseline, so give it its
+own PR rather than folding it into unrelated work.
 
 The mypy count is **measurement-environment-dependent** (installed typed
 libraries change it), so CI pins the exact tool and dependency versions in
@@ -79,12 +78,15 @@ the `gates` job of `.github/workflows/ci.yml` and compares against
   `_private` for internals.
 - Inputs are typed `@dataclass` configs, not raw dicts.
 - Every stochastic function accepts `random_state` for reproducibility.
-- Python 3.9 is the floor: no PEP 604 pipe unions (`X | Y`) in annotations —
-  they break `typing.get_type_hints()` on 3.9 even under
-  `from __future__ import annotations`, and a guard test scans for them.
-  Names used in annotations must be importable at runtime (no
-  `TYPE_CHECKING`-only annotation imports on public callables); soft-dep
-  types get an `Any` fallback binding in the ImportError branch.
+- Public annotations must resolve at runtime: names used in annotations have
+  to be importable (no `TYPE_CHECKING`-only annotation imports on public
+  callables), and soft-dep types get an `Any` fallback binding in the
+  ImportError branch. `get_type_hints()` is swept over every `__all__` export
+  by a guard test, because autodoc, Pydantic and dataclass field resolution
+  all depend on it. (PEP 604 pipe unions `X | Y` were banned while 3.9 was
+  the floor — they broke `get_type_hints()` there. MT-3 raised the floor to
+  3.10, so they are fine now; the codebase simply hasn't been converted, and
+  ruff's UP007/UP045 stay unadopted to keep that diff out of unrelated PRs.)
 - Comments referencing ticket IDs (`SR-28`, `UX-57`, `TD-9`, …) are
   deliberate provenance pointing into `docs/planning/ENHANCEMENTS.md` —
   keep them; they have repeatedly been what made later bugs diagnosable.

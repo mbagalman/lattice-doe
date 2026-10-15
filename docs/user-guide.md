@@ -155,7 +155,7 @@ The package provides seven ways to generate a design. They all call the same und
 
 #### 2.1 Python version requirements
 
-The package requires **Python 3.9 or later**. It has been tested on Python 3.9, 3.10, 3.11, and 3.12. It runs on Linux, macOS, and Windows.
+The package requires **Python 3.10 or later**. It has been tested on Python 3.10, 3.11, 3.12, 3.13, and 3.14. It runs on Linux, macOS, and Windows.
 
 The four core runtime dependencies — `numpy`, `pandas`, `scipy`, and `patsy` — are installed automatically with the core package. All other dependencies are optional and installed only when you request a specific extras group (see section 2.3).
 
@@ -244,7 +244,7 @@ After installing, run a one-line smoke test to confirm the core package and its 
 python -c "import lattice_doe; print(lattice_doe.__version__)"
 ```
 
-This should print the current version string (e.g. `0.1.0`) without errors. If it fails, the most common causes are a missing dependency or a Python version below 3.9.
+This should print the current version string (e.g. `0.1.0`) without errors. If it fails, the most common causes are a missing dependency or a Python version below 3.10.
 
 To confirm the CLI is registered:
 

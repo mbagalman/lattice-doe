@@ -321,38 +321,16 @@ class TestDiscriminatedSpecsAnalysisBoundaries:
         # rather than silently checking nothing.
         assert checked >= 40, f"only {checked} exports swept"
 
-    def test_no_pep604_pipes_in_annotation_strings(self):
-        """P2 regression (IA-5): the package claims py39, but PEP 604 pipe
-        unions (``X | Y``) in annotation strings raise TypeError under
-        typing.get_type_hints() on Python 3.9 — first surfaced when the CI
-        matrix ran 3.9 for the first time (10 latent instances across 5
-        modules, incl. on_progress on both flagship API functions). The 3.9
-        CI leg only exercises exported callables; this scan covers every
-        function, class and method in the core package on any interpreter.
-        Delete this test when py39 support is dropped."""
-        import importlib
-        import inspect
-        import pkgutil
-
-        import lattice_doe
-
-        hits = []
-        for m in pkgutil.iter_modules(lattice_doe.__path__):
-            if m.name == "app" or m.name == "api_server":
-                continue  # Streamlit script code / server: not in scope
-            mod = importlib.import_module(f"lattice_doe.{m.name}")
-            for name, obj in vars(mod).items():
-                if getattr(obj, "__module__", None) != mod.__name__:
-                    continue
-                anns = dict(getattr(obj, "__annotations__", {}) or {})
-                if inspect.isclass(obj):
-                    for meth_name, meth in vars(obj).items():
-                        for k, v in (getattr(meth, "__annotations__", {}) or {}).items():
-                            anns[f"{meth_name}.{k}"] = v
-                for k, v in anns.items():
-                    if isinstance(v, str) and "|" in v:
-                        hits.append(f"{mod.__name__}.{name}::{k} = {v!r}")
-        assert hits == [], "\n".join(hits)
+    # test_no_pep604_pipes_in_annotation_strings was removed in MT-3, which
+    # raised the floor to Python 3.10. It guarded IA-5: PEP 604 pipe unions
+    # (``X | Y``) in annotation strings raised TypeError under
+    # get_type_hints() on 3.9, invisibly, because `from __future__ import
+    # annotations` defers evaluation until something introspects. 3.10+
+    # evaluates them natively, so the hazard is gone — and the sweep above
+    # (test_all_public_exports_hints_resolvable_at_runtime) still calls
+    # get_type_hints() on every export, which would catch any annotation
+    # that genuinely fails to resolve. Restore the scan if the floor ever
+    # drops back below 3.10.
 
     def test_ia1_exact_hint_targets(self):
         """The three IA-1 annotations must resolve to the real config/pandas

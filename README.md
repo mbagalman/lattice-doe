@@ -164,7 +164,7 @@ Looking for task-oriented examples? See [Recipes](docs/recipes.md).
 
 ## Installation
 
-Requires Python ≥ 3.9.
+Requires Python ≥ 3.10.
 
 If you just want the core optimizer, install that. If you want YAML, plots, reports, or the app, add the extras you actually need.
 
