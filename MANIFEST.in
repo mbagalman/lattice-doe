@@ -1,0 +1,11 @@
+# Controls the sdist only — the wheel's contents come from
+# [tool.setuptools.packages.find] / package-data in pyproject.toml.
+#
+# Already included by default, so they are deliberately absent here:
+# README.md (project.readme), LICENSE (project.license-files),
+# pyproject.toml, the lattice_doe package, and tests/.
+#
+# docs/ stays OUT on purpose: it is ~1 MB of user guide that would dominate
+# the sdist, and it is published on GitHub where people actually read it.
+include CHANGELOG.md
+include CONTRIBUTING.md
