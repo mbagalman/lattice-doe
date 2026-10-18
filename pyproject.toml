@@ -35,46 +35,60 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Mathematics",
 ]
 
-# Core dependencies — minimal install required for core API functionality
+# Core dependencies — minimal install required for core API functionality.
+#
+# UPPER-BOUND POLICY (MT-5, 2026-10-18): this is a library, so it carries no
+# speculative upper caps. A cap here propagates to every downstream consumer
+# and can make lattice-doe flatly uninstallable alongside another package —
+# `pandas<3` plus anything requiring `pandas>=3` is an unsolvable resolution,
+# which is strictly worse for the user than a runtime error they could pin
+# around themselves. Breakage is caught instead by the weekly slow-suite run,
+# which installs `.[all]` UNPINNED and is the canary; add a cap only once a
+# break is demonstrated, and cite the evidence in the comment.
+#
+# The previous `pandas<3` / `patsy<1` caps were removed on evidence, not
+# assumption: the full fast suite was run against pandas 3.0.6 + patsy 1.0.3
+# + numpy 2.5.4 + scipy 1.18.1 with every extra installed — 1735 passed, 0
+# failed, 0 skipped.
 dependencies = [
   "numpy>=1.23",
-  "pandas>=1.5,<3",
+  "pandas>=1.5",
   "scipy>=1.10",
-  "patsy>=0.5,<1"
+  "patsy>=0.5"
 ]
 
 [project.optional-dependencies]
 # Optional dependencies for CLI functionality
 cli = [
-  "pyyaml>=6.0,<7"
+  "pyyaml>=6.0"
 ]
 # Optional dependencies for visualization
 viz = [
-  "matplotlib>=3.5,<4",
-  "seaborn>=0.11,<1",
+  "matplotlib>=3.5",
+  "seaborn>=0.11",
   "plotly>=5.0",
 ]
 # Optional dependencies for progress bar and Excel output
 extras = [
-  "tqdm>=4.65,<5",
-  "xlsxwriter>=3.0,<4",
+  "tqdm>=4.65",
+  "xlsxwriter>=3.0",
   "openpyxl>=3.1"
 ]
 # Optional dependencies for the Streamlit web front-end
 app = [
   "streamlit>=1.30",
   "plotly>=5.0",
-  "pyyaml>=6.0,<7"
+  "pyyaml>=6.0"
 ]
 # Optional dependencies for HTML report generation
 report = [
-  "jinja2>=3.0,<4",
+  "jinja2>=3.0",
   "pillow>=9.0",
   "kaleido>=0.2"
 ]
 # Optional dependencies for PDF report generation (adds weasyprint)
 report-pdf = [
-  "jinja2>=3.0,<4",
+  "jinja2>=3.0",
   "pillow>=9.0",
   "kaleido>=0.2",
   "weasyprint>=60.0"
@@ -91,42 +105,26 @@ widgets = [
 ]
 # Optional dependencies for the FastAPI REST API server
 server = [
-  "fastapi>=0.111,<1",
+  "fastapi>=0.111",
   "uvicorn[standard]>=0.29",
   "httpx>=0.27",
   "pydantic>=2.6",
   "anyio>=4.0",
 ]
 # Convenience meta-group to install *everything* at once.
-# IMPORTANT: You cannot reference your own extras by name here; list their packages.
-all = [
-  # cli
-  "pyyaml>=6.0,<7",
-  # viz
-  "matplotlib>=3.5,<4",
-  "seaborn>=0.11,<1",
-  # extras
-  "tqdm>=4.65,<5",
-  "xlsxwriter>=3.0,<4",
-  "openpyxl>=3.1",
-  # app
-  "streamlit>=1.30",
-  "plotly>=5.0",
-  # report
-  "jinja2>=3.0,<4",
-  "pillow>=9.0",
-  "kaleido>=0.2",
-  # sheets
-  "gspread>=6.0",
-  "google-auth>=2.0",
-  # widgets
-  "ipywidgets>=8.0",
-  # server
-  "fastapi>=0.111,<1",
-  "uvicorn[standard]>=0.29",
-  "httpx>=0.27",
-  "pydantic>=2.6",
-]
+#
+# This self-references the other extras rather than restating their
+# packages. PEP 508 self-referential extras are supported by pip >= 21.2,
+# and the previous hand-maintained copy of every dependency had already
+# drifted twice: RV-8 caught it omitting [app] (silently skipping the whole
+# Streamlit AppTest suite from the authoritative coverage run), and by
+# 2026-10-17 it had also lost `anyio` from the server group. One line
+# cannot drift.
+#
+# report-pdf is deliberately EXCLUDED: it adds weasyprint, which needs
+# system libraries CI runners lack, and test_report's PDF test asserts the
+# ImportError guard — which requires weasyprint to be absent.
+all = ["lattice-doe[cli,viz,extras,app,report,sheets,widgets,server]"]
 
 [project.urls]
 Homepage = "https://github.com/mbagalman/lattice-doe"
